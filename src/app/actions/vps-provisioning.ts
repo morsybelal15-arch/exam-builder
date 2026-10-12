@@ -70,9 +70,17 @@ else
     git pull origin main
 fi
 
-echo "[2/4] Generating Prisma client..."
+cat << ENV_EOF > .env.local
+DATABASE_URL="postgresql://exam_builder:ExamBuilder2026!@127.0.0.1:5432/exam_builder_db?schema=public"
+GEMINI_API_KEY="${process.env.GEMINI_API_KEY || ''}"
+GEMINI_MODEL="gemini-3.5-flash-lite"
+PORT=${VPS_PORT}
+ENV_EOF
+
+echo "[2/4] Generating Prisma client & pushing schema..."
 npm install --production=false
 npx prisma generate
+npx prisma db push --skip-generate
 npm run build
 
 echo "[3/4] Starting PM2 process on port ${VPS_PORT}..."
