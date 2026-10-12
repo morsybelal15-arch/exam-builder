@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { verifyPassword, createSessionCookie, hashPassword } from "@/lib/auth";
+import { findTenantByPhone } from "@/lib/tenants-repository";
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,10 +61,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Query user / tenant from PostgreSQL for general tenants
-    const user = await prisma.tenant.findUnique({
-      where: { phone: cleanPhone },
-    });
+    // 2. Query user / tenant via repository (handles both PostgreSQL & fallback store)
+    const user = await findTenantByPhone(cleanPhone);
 
     if (!user) {
       return NextResponse.json(
