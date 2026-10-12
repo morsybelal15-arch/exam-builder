@@ -23,6 +23,10 @@
 # misc
 .DS_Store
 *.pem
+/data/
+*.db*
+__pycache__/
+*.pyc
 
 # debug
 npm-debug.log*

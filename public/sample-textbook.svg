@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1130" width="100%" height="100%">
+  <defs>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="boxGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#eff6ff" />
+      <stop offset="100%" stop-color="#f8fafc" />
+    </linearGradient>
+  </defs>
+
+  <!-- Page Background -->
+  <rect width="800" height="1130" fill="#ffffff" rx="8" />
+  <rect x="25" y="25" width="750" height="1080" fill="none" stroke="#e2e8f0" stroke-width="1.5" rx="6" />
+
+  <!-- Textbook Header Banner -->
+  <rect x="40" y="45" width="720" height="70" fill="url(#headerGrad)" rx="8" />
+  <text x="730" y="88" font-family="Cairo, Arial, sans-serif" font-size="22" font-weight="bold" fill="#ffffff" text-anchor="end">الوحدة الرابعة: العلوم البيئية وقضايا العصر</text>
+  <text x="730" y="105" font-family="Cairo, Arial, sans-serif" font-size="13" fill="#dbeafe" text-anchor="end">الصف الثالث الثانوي — المنهج الدراسي المعتمد</text>
+  <text x="65" y="88" font-family="Cairo, Arial, sans-serif" font-size="14" fill="#ffffff" text-anchor="start">الفصل الدراسي الثاني</text>
+
+  <!-- Sub-header -->
+  <rect x="40" y="135" width="720" height="45" fill="#f8fafc" rx="6" stroke="#e2e8f0" />
+  <text x="730" y="163" font-family="Cairo, Arial, sans-serif" font-size="16" font-weight="bold" fill="#1e293b" text-anchor="end">الدرس الثاني: التغير المناخي والاحتباس الحراري العالمي</text>
+  <text x="65" y="163" font-family="Cairo, Arial, sans-serif" font-size="13" font-weight="600" fill="#64748b" text-anchor="start">صفحة: ٨٤</text>
+
+  <!-- Section Paragraph 1 -->
+  <text x="730" y="215" font-family="Cairo, Arial, sans-serif" font-size="15" font-weight="bold" fill="#2563eb" text-anchor="end">أولاً: المفهوم والأسباب العلمية</text>
+  
+  <text x="730" y="245" font-family="Cairo, Arial, sans-serif" font-size="13.5" fill="#334155" text-anchor="end">يشير التغير المناخي إلى التحولات طويلة الأجل في درجات الحرارة وأنماط الطقس على كوكب الأرض.</text>
+  <text x="730" y="272" font-family="Cairo, Arial, sans-serif" font-size="13.5" fill="#334155" text-anchor="end">ورغم أن هذه التحولات قد تكون طبيعية نتيجة دورات النشاط الشمسي، إلا أن الأنشطة البشرية منذ القرن</text>
+  <text x="730" y="299" font-family="Cairo, Arial, sans-serif" font-size="13.5" fill="#334155" text-anchor="end">التاسع عشر كانت المحرك الأساسي لتسارع وتيرة التغير المناخي، ولا سيما بسبب حرق الوقود الأحفوري.</text>
+  <text x="730" y="326" font-family="Cairo, Arial, sans-serif" font-size="13.5" fill="#334155" text-anchor="end">ينتج عن حرق الفحم والنفط والغاز انبعاث غازات دفيئة تحبس حرارة الشمس وتزيد من حرارة الكوكب.</text>
+
+  <!-- Key Causes Box -->
+  <rect x="40" y="355" width="720" height="150" fill="url(#boxGrad)" rx="8" stroke="#cbd5e1" stroke-dasharray="4 4" />
+  <text x="720" y="385" font-family="Cairo, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1e3a8a" text-anchor="end">العوامل الرئيسية المؤدية لارتفاع حرارة الأرض:</text>
+  
+  <circle cx="715" cy="415" r="4" fill="#2563eb" />
+  <text x="700" y="420" font-family="Cairo, Arial, sans-serif" font-size="13" fill="#1e293b" text-anchor="end">١. انبعاثات غاز ثاني أكسيد الكربون (CO₂) من المنشآت الصناعية ومحطات توليد الكهرباء.</text>
+  
+  <circle cx="715" cy="445" r="4" fill="#2563eb" />
+  <text x="700" y="450" font-family="Cairo, Arial, sans-serif" font-size="13" fill="#1e293b" text-anchor="end">٢. إزالة الغابات الاستوائية والمساحات الخضراء التي تمتص الغازات الضارة وتطلق الأكسجين.</text>
+  
+  <circle cx="715" cy="475" r="4" fill="#2563eb" />
+  <text x="700" y="480" font-family="Cairo, Arial, sans-serif" font-size="13" fill="#1e293b" text-anchor="end">٣. الزراعة وتربية الماشية المكثفة التي تفرز كميات هائلة من غاز الميثان (CH₄).</text>
+
+  <!-- Illustration Diagram Representation -->
+  <rect x="60" y="525" width="680" height="170" fill="#f1f5f9" rx="8" stroke="#e2e8f0" />
+  <text x="690" y="555" font-family="Cairo, Arial, sans-serif" font-size="13" font-weight="bold" fill="#475569" text-anchor="end">شكل توضيحي (٤-٢): دورة حبس الأشعة الحرارية في الغلاف الجوي</text>
+  
+  <!-- Diagram Graphics -->
+  <circle cx="160" cy="620" r="35" fill="#f59e0b" opacity="0.9" />
+  <text x="160" y="625" font-family="Cairo, Arial, sans-serif" font-size="11" font-weight="bold" fill="#ffffff" text-anchor="middle">أشعة الشمس</text>
+  
+  <path d="M 195 620 L 320 620" stroke="#f59e0b" stroke-width="3" stroke-dasharray="6 3" />
+  <rect x="330" y="580" width="130" height="75" fill="#3b82f6" rx="6" />
+  <text x="395" y="615" font-family="Cairo, Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">الغلاف الجوي</text>
+  <text x="395" y="635" font-family="Cairo, Arial, sans-serif" font-size="10" fill="#dbeafe" text-anchor="middle">حبس الغازات الدفيئة</text>
+
+  <path d="M 465 620 L 580 620" stroke="#ef4444" stroke-width="3" stroke-dasharray="6 3" />
+  <rect x="590" y="580" width="120" height="75" fill="#10b981" rx="6" />
+  <text x="650" y="615" font-family="Cairo, Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">سطح الأرض</text>
+  <text x="650" y="635" font-family="Cairo, Arial, sans-serif" font-size="10" fill="#d1fae5" text-anchor="middle">امتصاص وارتفاع الحرارة</text>
+
+  <!-- Questions Section Highlight (This is what the user targets) -->
+  <rect x="40" y="720" width="720" height="320" fill="#ffffff" rx="8" stroke="#3b82f6" stroke-width="1.5" />
+  <rect x="40" y="720" width="720" height="40" fill="#dbeafe" rx="8" />
+  <text x="730" y="747" font-family="Cairo, Arial, sans-serif" font-size="15" font-weight="bold" fill="#1e40af" text-anchor="end">أسئلة الفهم والتقويم الختامي (نماذج الاختبارات المدرسية)</text>
+
+  <!-- Question 1: Exactly the target question -->
+  <rect x="55" y="775" width="690" height="60" fill="#f8fafc" rx="6" stroke="#93c5fd" />
+  <text x="725" y="810" font-family="Cairo, Arial, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="end">س١: اكتب بتفصيل عن أسباب التغير المناخي؟</text>
+  <text x="80" y="810" font-family="Cairo, Arial, sans-serif" font-size="12" font-weight="bold" fill="#2563eb" text-anchor="start">[ ٥ درجات ]</text>
+
+  <!-- Question 2 -->
+  <rect x="55" y="845" width="690" height="55" fill="#ffffff" rx="6" stroke="#e2e8f0" />
+  <text x="725" y="878" font-family="Cairo, Arial, sans-serif" font-size="14" font-weight="600" fill="#334155" text-anchor="end">س٢: وضح أثر ذوبان الأنهار الجليدية على مستوى سطح البحر والمناطق الساحلية.</text>
+  <text x="80" y="878" font-family="Cairo, Arial, sans-serif" font-size="12" font-weight="bold" fill="#64748b" text-anchor="start">[ ٣ درجات ]</text>
+
+  <!-- Question 3 -->
+  <rect x="55" y="910" width="690" height="55" fill="#ffffff" rx="6" stroke="#e2e8f0" />
+  <text x="725" y="943" font-family="Cairo, Arial, sans-serif" font-size="14" font-weight="600" fill="#334155" text-anchor="end">س٣: اقترح ثلاثة إجراءات يمكن للمجتمع تبنيها للحد من ظاهرة الاحتباس الحراري.</text>
+  <text x="80" y="943" font-family="Cairo, Arial, sans-serif" font-size="12" font-weight="bold" fill="#64748b" text-anchor="start">[ ٤ درجات ]</text>
+
+  <!-- Question 4 -->
+  <rect x="55" y="975" width="690" height="50" fill="#ffffff" rx="6" stroke="#e2e8f0" />
+  <text x="725" y="1005" font-family="Cairo, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#334155" text-anchor="end">س٤: قارن بين غاز ثاني أكسيد الكربون وغاز الميثان من حيث القدرة على حبس الحرارة وفترة البقاء في الجو.</text>
+  <text x="80" y="1005" font-family="Cairo, Arial, sans-serif" font-size="12" font-weight="bold" fill="#64748b" text-anchor="start">[ ٤ درجات ]</text>
+
+  <!-- Page Footer -->
+  <text x="730" y="1075" font-family="Cairo, Arial, sans-serif" font-size="11" fill="#94a3b8" text-anchor="end">كتاب الطالب — مادة العلوم والبيئة — الفصل الدراسي الثاني</text>
+  <text x="65" y="1075" font-family="Cairo, Arial, sans-serif" font-size="11" font-weight="bold" fill="#64748b" text-anchor="start">٨٤</text>
+</svg>
