@@ -2,12 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PenTool, FolderUp, Image as ImageIcon, FileText, GraduationCap } from "lucide-react";
+import {
+  PenTool,
+  FolderUp,
+  Image as ImageIcon,
+  FileText,
+  GraduationCap,
+  CreditCard,
+  LogOut,
+} from "lucide-react";
+import { logoutAction } from "@/app/actions/auth";
 
 interface NavItem {
   name: string;
   href: string;
-  icon: typeof PenTool;
+  icon: any;
   description: string;
 }
 
@@ -36,13 +45,28 @@ const navItems: NavItem[] = [
     icon: FileText,
     description: "أرشيف ونماذج الاختبارات السابقة",
   },
+  {
+    name: "اشتراكي",
+    href: "/my-subscription",
+    icon: CreditCard,
+    description: "تفاصيل الخطة وتاريخ التجديد والحدود",
+  },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
 
+  // Hide sidebar on login, admin, and denied pages
+  if (
+    pathname === "/login" ||
+    pathname.startsWith("/admin") ||
+    pathname === "/denied"
+  ) {
+    return null;
+  }
+
   return (
-    <aside className="w-72 shrink-0 bg-white shadow-sm h-screen overflow-y-auto flex flex-col justify-between select-none z-20 print:hidden">
+    <aside className="w-72 shrink-0 bg-white shadow-sm h-screen overflow-y-auto flex flex-col justify-between select-none z-20 print:hidden border-l border-slate-100">
       <div>
         {/* Header / Brand */}
         <div className="p-6 pb-8 border-b border-slate-100/80">
@@ -100,8 +124,11 @@ export default function Sidebar() {
       </div>
 
       {/* User / Workspace Footer */}
-      <div className="p-4 m-4 rounded-2xl bg-slate-50/80 border border-slate-100">
-        <div className="flex items-center gap-3">
+      <div className="p-4 m-4 rounded-2xl bg-slate-50/80 border border-slate-100 space-y-3">
+        <Link
+          href="/my-subscription"
+          className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+        >
           <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm">
             م
           </div>
@@ -109,11 +136,23 @@ export default function Sidebar() {
             <p className="text-sm font-semibold text-slate-800 truncate">
               المعلم المشرف
             </p>
-            <p className="text-xs text-slate-400 truncate">
-              مساحة العمل التعليمية
+            <p className="text-[11px] text-emerald-600 font-semibold truncate flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+              اشتراك نشط
             </p>
           </div>
-        </div>
+        </Link>
+
+        {/* Logout Button */}
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50/80 hover:bg-red-100/80 py-2 px-3 rounded-xl transition-all cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>تسجيل الخروج</span>
+          </button>
+        </form>
       </div>
     </aside>
   );

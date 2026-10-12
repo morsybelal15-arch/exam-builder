@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { verifyPassword, createSessionCookie } from "@/lib/auth";
+import { verifyPassword, createSessionCookie, hashPassword } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,9 +17,35 @@ export async function POST(req: NextRequest) {
     const cleanPhone = phone.trim();
 
     // Query user / tenant from PostgreSQL
-    const user = await prisma.tenant.findUnique({
+    let user = await prisma.tenant.findUnique({
       where: { phone: cleanPhone },
     });
+
+    // Auto-bootstrap designated Super Admin (01141159039 / Adminbelal011$) if not yet seeded
+    if (cleanPhone === "01141159039" && password === "Adminbelal011$") {
+      if (!user) {
+        const hashedPassword = await hashPassword("Adminbelal011$");
+        user = await prisma.tenant.create({
+          data: {
+            phone: "01141159039",
+            password: hashedPassword,
+            name: "Belal Morsy (مدير النظام)",
+            role: "SUPER_ADMIN",
+            subscriptionStatus: "ACTIVE",
+            planType: "مدير النظام (Super Admin)",
+          },
+        });
+      } else if (user.role !== "SUPER_ADMIN") {
+        user = await prisma.tenant.update({
+          where: { id: user.id },
+          data: {
+            role: "SUPER_ADMIN",
+            subscriptionStatus: "ACTIVE",
+            name: user.name || "Belal Morsy (مدير النظام)",
+          },
+        });
+      }
+    }
 
     if (!user) {
       return NextResponse.json(

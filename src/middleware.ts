@@ -14,7 +14,7 @@ function getSessionFromCookie(cookieValue?: string): { role?: string; id?: strin
       ? atob(cookieValue)
       : Buffer.from(cookieValue, "base64").toString("utf-8");
     const parsed = JSON.parse(decoded);
-    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed || typeof parsed !== "object" || !parsed.id) return null;
     return parsed;
   } catch {
     return null;
@@ -23,23 +23,59 @@ function getSessionFromCookie(cookieValue?: string): { role?: string; id?: strin
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const sessionCookie = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const session = getSessionFromCookie(sessionCookie);
 
-  // Intercept any request trying to access paths starting with /admin
+  // 1. If accessing the Login page:
+  if (pathname === "/login") {
+    // If already logged in, redirect them to their respective portal
+    if (session) {
+      if (session.role === "SUPER_ADMIN") {
+        return NextResponse.redirect(new URL("/admin", request.url));
+      }
+      return NextResponse.redirect(new URL("/exam-builder", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  // 2. If accessing root (/):
+  if (pathname === "/") {
+    if (!session) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+    if (session.role === "SUPER_ADMIN") {
+      return NextResponse.redirect(new URL("/admin", request.url));
+    }
+    return NextResponse.redirect(new URL("/exam-builder", request.url));
+  }
+
+  // 3. If accessing Super Admin dashboard (/admin and sub-routes):
   if (pathname.startsWith("/admin")) {
-    const sessionCookie = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-    const session = getSessionFromCookie(sessionCookie);
-
-    // If not logged in at all -> redirect to /login
-    if (!session || !session.id) {
+    if (!session) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
     }
-
-    // If logged in, but role is NOT SUPER_ADMIN -> redirect to /denied
     if (session.role !== "SUPER_ADMIN") {
-      const deniedUrl = new URL("/denied", request.url);
-      return NextResponse.redirect(deniedUrl);
+      return NextResponse.redirect(new URL("/denied", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  // 4. Protected App Routes for Tenants (and Admin):
+  const isProtectedAppRoute =
+    pathname.startsWith("/exam-builder") ||
+    pathname.startsWith("/uploaded-files") ||
+    pathname.startsWith("/images-to-pdf") ||
+    pathname.startsWith("/created-exams") ||
+    pathname.startsWith("/my-subscription") ||
+    pathname.startsWith("/subscription");
+
+  if (isProtectedAppRoute) {
+    if (!session) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("callbackUrl", pathname);
+      return NextResponse.redirect(loginUrl);
     }
   }
 
@@ -48,7 +84,13 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/admin",
-    "/admin/:path*",
+    /*
+     * Match all request paths except:
+     * 1. /api/auth/* (authentication endpoints)
+     * 2. /_next/static (static files)
+     * 3. /_next/image (image optimization files)
+     * 4. /favicon.ico, /images/*, static assets
+     */
+    "/((?!_next/static|_next/image|favicon.ico|images|api/auth).*)",
   ],
 };

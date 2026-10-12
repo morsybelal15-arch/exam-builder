@@ -24,11 +24,13 @@ model Tenant {
   name               String?
   role               Role               @default(TENANT)
   subscriptionStatus SubscriptionStatus @default(ACTIVE)
-  storageLimitBytes  BigInt             @default(1073741824) // 1GB hard storage limit
-  usedStorageBytes   BigInt             @default(0)
-  activationKey      String?            @unique
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  storageLimitBytes    BigInt             @default(1073741824) // 1GB hard storage limit
+  usedStorageBytes     BigInt             @default(0)
+  planType             String             @default("الخطة الاحترافية (Teacher Pro)")
+  subscriptionDueDate  DateTime?
+  activationKey        String?            @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   exams              Exam[]
   uploadedFiles      UploadedFile[]

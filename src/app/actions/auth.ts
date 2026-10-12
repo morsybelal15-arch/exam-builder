@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { verifyPassword, createSessionCookie, clearSessionCookie } from "@/lib/auth";
+import { verifyPassword, createSessionCookie, clearSessionCookie, hashPassword } from "@/lib/auth";
 
 export interface LoginActionResult {
   error?: string;
@@ -24,9 +24,35 @@ export async function loginAction(
 
   try {
     // Find user / tenant in database
-    const user = await prisma.tenant.findUnique({
+    let user = await prisma.tenant.findUnique({
       where: { phone: cleanPhone },
     });
+
+    // Auto-bootstrap designated Super Admin (01141159039 / Adminbelal011$) if not yet seeded
+    if (cleanPhone === "01141159039" && password === "Adminbelal011$") {
+      if (!user) {
+        const hashedPassword = await hashPassword("Adminbelal011$");
+        user = await prisma.tenant.create({
+          data: {
+            phone: "01141159039",
+            password: hashedPassword,
+            name: "Belal Morsy (مدير النظام)",
+            role: "SUPER_ADMIN",
+            subscriptionStatus: "ACTIVE",
+            planType: "مدير النظام (Super Admin)",
+          },
+        });
+      } else if (user.role !== "SUPER_ADMIN") {
+        user = await prisma.tenant.update({
+          where: { id: user.id },
+          data: {
+            role: "SUPER_ADMIN",
+            subscriptionStatus: "ACTIVE",
+            name: user.name || "Belal Morsy (مدير النظام)",
+          },
+        });
+      }
+    }
 
     if (!user) {
       return { error: "بيانات تسجيل الدخول غير صحيحة" };
