@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     // 2. Query user / tenant via repository (handles both PostgreSQL & fallback store)
     const user = await findTenantByPhone(cleanPhone);
 
-    if (!user) {
+    if (!user || !user.password) {
       return NextResponse.json(
         { error: "بيانات تسجيل الدخول غير صحيحة" },
         { status: 401 }
