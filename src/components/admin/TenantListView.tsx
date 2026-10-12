@@ -6,7 +6,7 @@ import {
   extendSubscriptionAction,
   toggleTenantStatusAction,
 } from "@/app/actions/admin-tenants";
-import { autoDeployTenantVpsAction } from "@/app/actions/vps-provisioning";
+import { autoDeployTenantVpsAction, syncAllTenantsToVpsAction } from "@/app/actions/vps-provisioning";
 import {
   Search,
   Users,
@@ -103,6 +103,36 @@ export default function TenantListView({
   const [deployingTenantId, setDeployingTenantId] = useState<string | null>(null);
   const [deployFeedback, setDeployFeedback] = useState<{ [id: string]: { success: boolean; message: string } }>({});
   const [isPending, startTransition] = useTransition();
+  const [syncNotice, setSyncNotice] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+
+  const reportSync = (res: any, okMsg: string) => {
+    if (!res) return;
+    if (res.success === false) {
+      setSyncNotice({ success: false, message: res.error || res.message || "فشلت العملية" });
+      return;
+    }
+    if (res.vpsSync && res.vpsSync.success === false) {
+      setSyncNotice({
+        success: false,
+        message: `تم الحفظ محلياً لكن فشلت المزامنة مع VPS: ${res.vpsSync.message || ""}. اضغط "مزامنة الكل مع VPS".`,
+      });
+      return;
+    }
+    setSyncNotice({ success: true, message: okMsg });
+  };
+
+  const handleSyncAll = async () => {
+    setIsSyncingAll(true);
+    try {
+      const res: any = await syncAllTenantsToVpsAction();
+      setSyncNotice({ success: !!res.success, message: res.message || (res.success ? "تمت المزامنة" : "فشلت المزامنة") });
+    } catch (err: any) {
+      setSyncNotice({ success: false, message: err.message || "فشلت المزامنة" });
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
 
   // Filtered tenants list
   const filteredTenants = initialTenants.filter((tenant) => {
@@ -159,18 +189,53 @@ export default function TenantListView({
 
   const handleToggleStatus = (tenantId: string) => {
     startTransition(async () => {
-      await toggleTenantStatusAction(tenantId);
+      const res = await toggleTenantStatusAction(tenantId);
+      reportSync(res, "تم تغيير حالة الاشتراك وتطبيقه على VPS فوراً ✓");
     });
   };
 
   const handleQuickExtend = (tenantId: string) => {
     startTransition(async () => {
-      await extendSubscriptionAction(tenantId, 30);
+      const res = await extendSubscriptionAction(tenantId, 30);
+      reportSync(res, "تم تمديد الاشتراك 30 يوماً وتطبيقه على VPS ✓");
     });
   };
 
   return (
     <div className="space-y-4">
+      {/* VPS Sync Bar */}
+      <div className="bg-white rounded-2xl p-3 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          <Server className="w-4 h-4 text-blue-600" />
+          <span>كل تعديل على الاشتراكات يُطبَّق تلقائياً على تطبيقات العملاء في VPS</span>
+        </div>
+        <button
+          id="sync-all-vps-btn"
+          onClick={handleSyncAll}
+          disabled={isSyncingAll}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold transition-all cursor-pointer"
+        >
+          {isSyncingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          <span>{isSyncingAll ? "جاري المزامنة..." : "مزامنة الكل مع VPS"}</span>
+        </button>
+      </div>
+      {syncNotice && (
+        <div
+          className={`rounded-xl px-4 py-2.5 text-xs font-bold flex items-center justify-between gap-2 border ${
+            syncNotice.success
+              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              : "bg-rose-50 text-rose-700 border-rose-200"
+          }`}
+        >
+          <span className="flex items-center gap-1.5">
+            {syncNotice.success ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+            {syncNotice.message}
+          </span>
+          <button onClick={() => setSyncNotice(null)} className="cursor-pointer opacity-60 hover:opacity-100">
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {/* Search and Filters Bar */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
         {/* Search Input */}

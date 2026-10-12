@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 export interface SessionUser {
   id: string;
@@ -38,9 +38,21 @@ export async function createSessionCookie(user: SessionUser) {
   // Base64 encode session payload for simple safe cookie storage
   const encoded = Buffer.from(sessionData).toString("base64");
 
+  // Only mark the cookie as Secure when the request actually arrived over HTTPS.
+  // Tenant domains may be served over plain HTTP (behind Nginx), and browsers
+  // silently DROP Secure cookies on HTTP — which causes an endless login loop.
+  let isHttps = false;
+  try {
+    const h = await headers();
+    const proto = h.get("x-forwarded-proto") || "";
+    isHttps = proto.split(",")[0].trim() === "https";
+  } catch {
+    isHttps = false;
+  }
+
   cookieStore.set(AUTH_COOKIE_NAME, encoded, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isHttps,
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 days

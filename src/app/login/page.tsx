@@ -1,16 +1,19 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Phone, Lock, LogIn, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const blocked = new URLSearchParams(window.location.search).get("blocked");
+    if (blocked) setErrorMessage(blocked);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,10 +24,11 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, password }),
+        credentials: "same-origin",
+        body: JSON.stringify({ phone: phone.trim(), password }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
         setErrorMessage(data.error || "فشل تسجيل الدخول. يرجى التحقق من البيانات.");
@@ -32,14 +36,29 @@ export default function LoginPage() {
         return;
       }
 
-      // Detection and routing is dictated entirely by server response:
-      // data.redirectUrl is '/admin' for SUPER_ADMIN, and '/exam-builder' for TENANT
-      if (data.redirectUrl) {
-        router.push(data.redirectUrl);
-      } else {
-        router.push("/exam-builder");
+      // Honor ?callbackUrl= only for same-site relative paths and only when it matches the role
+      let target: string = data.redirectUrl || "/exam-builder";
+      const params = new URLSearchParams(window.location.search);
+      const callbackUrl = params.get("callbackUrl");
+      if (
+        callbackUrl &&
+        callbackUrl.startsWith("/") &&
+        !callbackUrl.startsWith("//") &&
+        !callbackUrl.startsWith("/login") &&
+        (data.role === "SUPER_ADMIN" || !callbackUrl.startsWith("/admin"))
+      ) {
+        target = callbackUrl;
       }
-    } catch (err: any) {
+
+      // Full page navigation guarantees the new session cookie is sent to the middleware
+      window.location.assign(target);
+
+      // Safety net: if navigation doesn't happen (e.g. cookie blocked), release the button
+      setTimeout(() => {
+        setIsLoading(false);
+        setErrorMessage("تم التحقق بنجاح لكن تعذر حفظ جلسة الدخول. تأكد من تفعيل ملفات تعريف الارتباط (Cookies) في المتصفح.");
+      }, 8000);
+    } catch {
       setErrorMessage("حدث خطأ في الاتصال بالخادم. يرجى المحاولة لاحقاً.");
       setIsLoading(false);
     }

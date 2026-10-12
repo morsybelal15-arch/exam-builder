@@ -1,14 +1,19 @@
 "use server";
 
-import { exec } from "child_process";
-import { promisify } from "util";
-import path from "path";
 import fs from "fs";
+import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/auth";
 import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 import { updateTenantRecord } from "@/lib/tenants-repository";
-
-const execAsync = promisify(exec);
+import {
+  runOnVps,
+  syncTenantsToVps,
+  provisionTenantDomain,
+  checkTenantDomainOnVps,
+  SSH_KEY_PATH,
+  VPS_APP_DIR,
+  VPS_APP_PORT,
+} from "@/lib/vps-sync";
 
 export interface VpsDeployResult {
   success: boolean;
@@ -19,12 +24,8 @@ export interface VpsDeployResult {
   logs?: string[];
 }
 
-const SSH_KEY_PATH = path.join(process.cwd(), ".vps_ssh", "vps_key");
-const VPS_PORT = 3015; // Dedicated port for Exam Builder (3000 is used by cerrah-website)
+const REPO_URL = "https://github.com/morsybelal15-arch/exam-builder.git";
 
-/**
- * Asserts SUPER_ADMIN session
- */
 async function assertSuperAdmin() {
   const session = await getSessionUser();
   if (!session || session.role !== "SUPER_ADMIN") {
@@ -33,8 +34,9 @@ async function assertSuperAdmin() {
 }
 
 /**
- * Automatically provisions and deploys Exam Builder on the VPS on port 3015
- * and sets up the Nginx reverse proxy for tenant domains.
+ * One-click full deployment of Exam Builder to the VPS:
+ * pull code → install → build → (re)start PM2 on port 3015 → wildcard Nginx →
+ * push tenant accounts → health check.
  */
 export async function deployExamBuilderToVpsAction(): Promise<VpsDeployResult> {
   await assertSuperAdmin();
@@ -47,58 +49,24 @@ export async function deployExamBuilderToVpsAction(): Promise<VpsDeployResult> {
     };
   }
 
-  const logs: string[] = [];
+  const logs: string[] = [`الاتصال بخادم Hostinger VPS (${HOSTINGER_VPS_CONFIG.ip})...`];
+  const geminiKey = process.env.GEMINI_API_KEY || "";
+  const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
-  try {
-    logs.push("بدء الاتصال بخادم Hostinger VPS (" + HOSTINGER_VPS_CONFIG.ip + ")...");
+  // Tenant accounts live in data/tenants.json (synced from this admin panel),
+  // so DATABASE_URL is intentionally NOT set on the VPS.
+  const envFile = `GEMINI_API_KEY="${geminiKey}"\nGEMINI_MODEL="${geminiModel}"\nPORT=${VPS_APP_PORT}\n`;
+  const envB64 = Buffer.from(envFile, "utf-8").toString("base64");
 
-    // Script to run on the VPS:
-    // 1. Pull / Clone repo to /var/www/exam-builder
-    // 2. npm install & build
-    // 3. Start PM2 on port 3015
-    // 4. Configure Nginx virtual host proxying to 127.0.0.1:3015
-    const remoteScript = `
-set -e
-mkdir -p /var/www/exam-builder
-cd /var/www/exam-builder
-
-if [ ! -d ".git" ]; then
-    echo "[1/4] Cloning repository..."
-    git clone https://github.com/morsybelal15-arch/exam-builder.git .
-else
-    echo "[1/4] Pulling latest updates..."
-    git pull origin main
-fi
-
-cat << ENV_EOF > .env.local
-DATABASE_URL="postgresql://exam_builder:ExamBuilder2026!@127.0.0.1:5432/exam_builder_db?schema=public"
-GEMINI_API_KEY="${process.env.GEMINI_API_KEY || ''}"
-GEMINI_MODEL="gemini-3.5-flash-lite"
-PORT=${VPS_PORT}
-ENV_EOF
-
-echo "[2/4] Generating Prisma client & pushing schema..."
-npm install --production=false
-npx prisma generate
-npx prisma db push --skip-generate
-npm run build
-
-echo "[3/4] Starting PM2 process on port ${VPS_PORT}..."
-pm2 delete exam-builder 2>/dev/null || true
-PORT=${VPS_PORT} pm2 start npm --name "exam-builder" -- start
-pm2 save
-
-echo "[4/4] Updating Nginx reverse proxy configuration..."
-cat << 'NGINX_EOF' > /etc/nginx/sites-available/exam-builder
-server {
+  const nginxWildcard = `server {
     listen 80;
     listen [::]:80;
-    server_name *.oqabagency.com *.alasima-erp.com hossam.oqabagency.com;
+    server_name *.oqabagency.com *.alasima-erp.com;
 
     client_max_body_size 50M;
 
     location / {
-        proxy_pass http://127.0.0.1:${VPS_PORT};
+        proxy_pass http://127.0.0.1:${VPS_APP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -109,30 +77,80 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-NGINX_EOF
+`;
+  const nginxB64 = Buffer.from(nginxWildcard, "utf-8").toString("base64");
 
-ln -sf /etc/nginx/sites-available/exam-builder /etc/nginx/sites-enabled/
+  const remoteScript = `
+set -e
+mkdir -p ${VPS_APP_DIR}
+cd ${VPS_APP_DIR}
+
+if [ ! -d ".git" ]; then
+  echo "[1/5] Cloning repository..."
+  git clone ${REPO_URL} .
+else
+  echo "[1/5] Pulling latest updates..."
+  git fetch origin main
+  git reset --hard origin/main
+fi
+
+echo "[2/5] Writing environment..."
+rm -f .env
+echo '${envB64}' | base64 -d > .env.local
+mkdir -p data
+
+echo "[3/5] Installing & building..."
+npm install --no-audit --no-fund
+npx prisma generate
+npm run build
+
+echo "[4/5] (Re)starting PM2 on port ${VPS_APP_PORT}..."
+pm2 delete exam-builder >/dev/null 2>&1 || true
+PORT=${VPS_APP_PORT} pm2 start npm --name exam-builder -- start
+pm2 save
+
+echo "[5/5] Configuring Nginx wildcard proxy..."
+echo '${nginxB64}' | base64 -d > /etc/nginx/sites-available/exam-builder
+ln -sf /etc/nginx/sites-available/exam-builder /etc/nginx/sites-enabled/exam-builder
 nginx -t
 systemctl reload nginx
-echo "DEPLOY_COMPLETE_SUCCESS"
+echo DEPLOY_COMPLETE_SUCCESS
 `;
 
-    const b64 = Buffer.from(remoteScript).toString("base64");
-    const sshCmd = `ssh -i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@${HOSTINGER_VPS_CONFIG.ip} "echo '${b64}' | base64 -d | bash"`;
+  try {
+    const { stdout } = await runOnVps(remoteScript, 15 * 60 * 1000);
+    logs.push(...stdout.split("\n").filter((l) => l.startsWith("[") || l.includes("DEPLOY")));
 
-    const { stdout, stderr } = await execAsync(sshCmd, { timeout: 120000 });
-    logs.push(stdout || stderr);
+    if (!stdout.includes("DEPLOY_COMPLETE_SUCCESS")) {
+      return { success: false, message: "لم يكتمل النشر على خادم VPS.", logs };
+    }
+
+    // Push tenant accounts so logins work right after deployment
+    const sync = await syncTenantsToVps();
+    logs.push(sync.message);
+
+    // Give Next.js a few seconds to boot before checking health
+    await new Promise((r) => setTimeout(r, 6000));
+    const health = await runOnVps(
+      `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${VPS_APP_PORT}/login || echo 000`,
+      20_000
+    );
+    const code = health.stdout.trim();
+    logs.push(`فحص صحة التطبيق على المنفذ ${VPS_APP_PORT}: HTTP ${code}`);
 
     return {
-      success: true,
-      message: "تم تثبيت وتشغيل المنصة على خادم VPS وتفعيل Nginx بنجاح!",
+      success: code === "200",
+      message:
+        code === "200"
+          ? "تم نشر المنصة على خادم VPS ومزامنة حسابات المستأجرين بنجاح!"
+          : `اكتمل النشر لكن التطبيق لم يستجب بعد (HTTP ${code}). أعد الفحص بعد قليل.`,
       logs,
     };
   } catch (err: any) {
     logs.push("خطأ: " + err.message);
     return {
       success: false,
-      message: "فشل تنفيذ أمر التثبيت التلقائي على خادم VPS.",
+      message: "فشل تنفيذ النشر التلقائي على خادم VPS.",
       error: err.message,
       logs,
     };
@@ -140,10 +158,8 @@ echo "DEPLOY_COMPLETE_SUCCESS"
 }
 
 /**
- * Automates domain setup for a specific tenant:
- * 1. Configures Nginx virtual host for this specific domain pointing to port 3015.
- * 2. Reloads Nginx.
- * 3. Tests reachability.
+ * One-click tenant activation: saves the domain, routes it in Nginx, pushes the tenant
+ * accounts to the VPS and verifies the app answers on that domain.
  */
 export async function autoDeployTenantVpsAction(
   tenantId: string,
@@ -157,47 +173,30 @@ export async function autoDeployTenantVpsAction(
   }
 
   const logs: string[] = [];
-
   try {
-    logs.push(`إعداد Nginx للنطاق: ${cleanDomain}...`);
-
-    const nginxBlock = `server {
-    listen 80;
-    listen [::]:80;
-    server_name ${cleanDomain};
-
-    client_max_body_size 50M;
-
-    location / {
-        proxy_pass http://127.0.0.1:${VPS_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-`;
-
-    const b64 = Buffer.from(nginxBlock).toString("base64");
-    const remoteCmd = `echo '${b64}' | base64 -d > /etc/nginx/sites-available/${cleanDomain} && ln -sf /etc/nginx/sites-available/${cleanDomain} /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx && echo 'SUCCESS'`;
-
-    const sshCmd = `ssh -i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@${HOSTINGER_VPS_CONFIG.ip} "${remoteCmd}"`;
-
-    if (fs.existsSync(SSH_KEY_PATH)) {
-      const { stdout } = await execAsync(sshCmd, { timeout: 30000 });
-      logs.push(stdout);
-    }
-
-    // Update tenant record with domain
     await updateTenantRecord(tenantId, { domain: cleanDomain });
 
+    const domainRes = await provisionTenantDomain(cleanDomain);
+    logs.push(domainRes.message);
+    if (!domainRes.synced) {
+      return { success: false, message: domainRes.message, logs };
+    }
+
+    const sync = await syncTenantsToVps();
+    logs.push(sync.message);
+    if (!sync.synced) {
+      return { success: false, message: sync.message, logs };
+    }
+
+    const health = await checkTenantDomainOnVps(cleanDomain);
+    logs.push(health.message);
+
+    revalidatePath("/admin");
     return {
-      success: true,
-      message: `تم تفعيل وإطلاق الدومين (${cleanDomain}) على خادم VPS بنجاح!`,
+      success: health.online,
+      message: health.online
+        ? `تم تفعيل (${cleanDomain}) ومزامنة بيانات الدخول — المنصة تعمل الآن`
+        : `تم إعداد النطاق لكن ${health.message}. استخدم زر "نشر المنصة على VPS" أولاً.`,
       domainUrl: `http://${cleanDomain}`,
       logs,
     };
@@ -212,35 +211,23 @@ export async function autoDeployTenantVpsAction(
 }
 
 /**
- * Checks if a domain is live and returns HTTP status
+ * Manually re-push all tenant accounts / subscriptions to the VPS.
+ */
+export async function syncAllTenantsToVpsAction(): Promise<VpsDeployResult> {
+  await assertSuperAdmin();
+  const res = await syncTenantsToVps();
+  return { success: res.synced, message: res.message };
+}
+
+/**
+ * Checks that the tenant domain is served by Exam Builder (checked from inside the VPS).
  */
 export async function checkDomainStatusAction(domain: string): Promise<{
   isOnline: boolean;
   statusCode?: number;
   message: string;
 }> {
-  try {
-    const clean = domain.trim().toLowerCase();
-    const url = clean.startsWith("http") ? clean : `http://${clean}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const res = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-      redirect: "follow",
-    });
-    clearTimeout(timeoutId);
-
-    return {
-      isOnline: res.status < 400,
-      statusCode: res.status,
-      message: res.status < 400 ? "النطاق نشط ويعمل بنجاح" : `رمز الاستجابة: ${res.status}`,
-    };
-  } catch (err: any) {
-    return {
-      isOnline: false,
-      message: "تعذر الاتصال بالنطاق حالياً: " + (err.message || "Timeout"),
-    };
-  }
+  await assertSuperAdmin();
+  const res = await checkTenantDomainOnVps(domain);
+  return { isOnline: res.online, message: res.message };
 }

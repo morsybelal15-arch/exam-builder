@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { verifyPassword, createSessionCookie, hashPassword } from "@/lib/auth";
-import { findTenantByPhone } from "@/lib/tenants-repository";
+import { findTenantByPhone, getTenantAccessBlock } from "@/lib/tenants-repository";
 
 export async function POST(req: NextRequest) {
   try {
@@ -80,12 +80,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check subscription status for tenants
-    if (user.role === "TENANT" && user.subscriptionStatus === "STOPPED") {
-      return NextResponse.json(
-        { error: "حسابك متوقف حالياً. يرجى التواصل مع الإدارة لتجديد الاشتراك." },
-        { status: 403 }
-      );
+    // Check subscription status for tenants (stopped / expired / past due date)
+    const blockReason = getTenantAccessBlock(user);
+    if (blockReason) {
+      return NextResponse.json({ error: blockReason }, { status: 403 });
     }
 
     // Establish authenticated session cookie

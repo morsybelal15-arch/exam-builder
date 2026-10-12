@@ -175,6 +175,56 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
   return match || null;
 }
 
+export async function findTenantById(id: string): Promise<StoredTenant | null> {
+  try {
+    const isReachable = await isDatabaseReachable();
+    if (isReachable) {
+      const dbTenant = await prisma.tenant.findUnique({ where: { id } });
+      if (dbTenant) {
+        return {
+          ...dbTenant,
+          storageLimitBytes: Number(dbTenant.storageLimitBytes),
+          usedStorageBytes: Number(dbTenant.usedStorageBytes),
+          subscriptionDueDate: dbTenant.subscriptionDueDate ? dbTenant.subscriptionDueDate.toISOString() : null,
+          createdAt: dbTenant.createdAt.toISOString(),
+          updatedAt: dbTenant.updatedAt.toISOString(),
+        };
+      }
+    }
+  } catch {
+    // fall through to local store
+  }
+  return ensureStoreFile().find((t) => t.id === id) || null;
+}
+
+/**
+ * Single source of truth for whether a tenant may use the app.
+ * Returns an Arabic reason string when access is blocked, or null when allowed.
+ */
+export function getTenantAccessBlock(
+  tenant: Pick<StoredTenant, "role" | "subscriptionStatus" | "subscriptionDueDate"> | null
+): string | null {
+  if (!tenant) return "الحساب غير موجود. يرجى التواصل مع الإدارة.";
+  if (tenant.role === "SUPER_ADMIN") return null;
+  if (tenant.subscriptionStatus === "STOPPED") {
+    return "حسابك متوقف حالياً. يرجى التواصل مع الإدارة لتجديد الاشتراك.";
+  }
+  if (tenant.subscriptionStatus === "EXPIRED") {
+    return "انتهى اشتراكك. يرجى التواصل مع الإدارة للتجديد.";
+  }
+  if (tenant.subscriptionDueDate && new Date(tenant.subscriptionDueDate).getTime() < Date.now()) {
+    return "انتهت مدة اشتراكك. يرجى التواصل مع الإدارة للتجديد.";
+  }
+  return null;
+}
+
+/**
+ * Returns the raw tenant store (including password hashes) for syncing to the VPS.
+ */
+export function exportRawTenantStore(): StoredTenant[] {
+  return ensureStoreFile();
+}
+
 export async function createTenantRecord(data: {
   name: string;
   phone: string;

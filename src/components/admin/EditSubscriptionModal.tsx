@@ -148,9 +148,12 @@ export default function EditSubscriptionModal({
       if (res.error) {
         setMsg({ text: res.error, isError: true });
       } else {
+        const syncFailed = (res as any).vpsSync && (res as any).vpsSync.success === false;
         setMsg({
-          text: res.newStatus === "ACTIVE" ? "تم تفعيل الحساب بنجاح" : "تم إيقاف الحساب مؤقتاً",
-          isError: false,
+          text:
+            (res.newStatus === "ACTIVE" ? "تم تفعيل الحساب بنجاح" : "تم إيقاف الحساب مؤقتاً") +
+            (syncFailed ? " (تحذير: فشلت المزامنة مع VPS — أعد المحاولة)" : " وتم تطبيقه على VPS ✓"),
+          isError: !!syncFailed,
         });
         if (onUpdated) onUpdated();
       }

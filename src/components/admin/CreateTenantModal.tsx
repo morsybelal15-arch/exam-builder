@@ -110,7 +110,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 📱 رقم الهاتف: ${createdResult.tenant.phone}
 🔑 كلمة المرور: ${password}
 🔢 كود التحقق / التفعيل: ${createdResult.tenant.verificationCode}
-🌐 الرابط: ${createdResult.tenant.domain ? `https://${createdResult.tenant.domain}` : "رابط المنصة الرئيسي"}
+🌐 رابط الدخول: ${createdResult.tenant.domain ? `http://${createdResult.tenant.domain}/login` : "رابط المنصة الرئيسي"}
 📅 تاريخ التجديد: ${new Date(createdResult.tenant.dueDate).toLocaleDateString("ar-EG")}
 
 نتمنى لك تجربة ممتعة ومثمرة!`;
@@ -179,13 +179,29 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                 <div className="space-y-6 animate-in fade-in">
                   <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3">
                     <Check className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
+                    <div className="space-y-2 flex-1">
                       <h4 className="text-sm font-bold text-emerald-900">
                         {createdResult.message}
                       </h4>
-                      <p className="text-xs text-emerald-700 mt-1">
-                        تم تسجيل المعلم بنجاح. يمكنك الآن نسخ بيانات التفعيل وإرسالها إليه مباشرة.
-                      </p>
+                      {/* Automatic provisioning steps */}
+                      <ul className="space-y-1 text-xs">
+                        <li className="flex items-center gap-1.5 text-emerald-700">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>تم إنشاء الحساب وحفظ بيانات الاشتراك</span>
+                        </li>
+                        {createdResult.vpsSync && (
+                          <li className={`flex items-center gap-1.5 ${createdResult.vpsSync.synced ? "text-emerald-700" : "text-red-600"}`}>
+                            {createdResult.vpsSync.synced ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                            <span>{createdResult.vpsSync.message}</span>
+                          </li>
+                        )}
+                        {createdResult.domainSetup && (
+                          <li className={`flex items-center gap-1.5 ${createdResult.domainSetup.synced ? "text-emerald-700" : "text-red-600"}`}>
+                            {createdResult.domainSetup.synced ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                            <span>{createdResult.domainSetup.message}</span>
+                          </li>
+                        )}
+                      </ul>
                     </div>
                   </div>
 
@@ -245,13 +261,13 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 
                         {/* Direct Visit Button */}
                         <a
-                          href={`http://${createdResult.tenant.domain}`}
+                          href={`http://${createdResult.tenant.domain}/login`}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-all"
                         >
                           <Globe className="w-3.5 h-3.5" />
-                          <span>فتح الدومين الآن</span>
+                          <span>فتح صفحة الدخول للمعلم</span>
                         </a>
                       </div>
 
@@ -300,7 +316,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                           ) : (
                             <>
                               <Sparkles className="w-4 h-4 text-amber-300" />
-                              <span>تفعيل النطاق وإطلاق المنصة على VPS تلقائياً</span>
+                              <span>إعادة التفعيل والفحص على VPS</span>
                             </>
                           )}
                         </button>

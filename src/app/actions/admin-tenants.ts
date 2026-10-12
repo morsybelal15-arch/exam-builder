@@ -10,6 +10,7 @@ import {
   deleteTenantRecord,
   getTenantsList,
 } from "@/lib/tenants-repository";
+import { syncTenantsToVps, provisionTenantDomain } from "@/lib/vps-sync";
 
 /**
  * Asserts the current user has SUPER_ADMIN role
@@ -83,11 +84,17 @@ export async function createTenantAction(data: CreateTenantInput) {
       notes: data.notes?.trim() || null,
     });
 
+    // Push the new account to the live VPS app, then make sure the domain is routed to it
+    const vpsSync = await syncTenantsToVps();
+    const domainSetup = cleanDomain ? await provisionTenantDomain(cleanDomain) : null;
+
     revalidatePath("/admin");
 
     return {
       success: true,
-      message: "تم إنشاء حساب المستأجر بنجاح وتجهيز بيئة العمل على السيرفر",
+      message: vpsSync.synced
+        ? "تم إنشاء حساب المستأجر ومزامنته مع خادم VPS بنجاح"
+        : "تم إنشاء حساب المستأجر محلياً (تحقق من المزامنة مع السيرفر)",
       tenant: {
         id: tenant.id,
         name: tenant.name,
@@ -96,6 +103,8 @@ export async function createTenantAction(data: CreateTenantInput) {
         verificationCode: vCode,
         dueDate: dueDate.toISOString(),
       },
+      vpsSync,
+      domainSetup,
       vpsConfig: cleanDomain ? generateDockerConfig(cleanDomain, tenant.id) : null,
       vpsIp: HOSTINGER_VPS_CONFIG.ip,
     };
@@ -155,12 +164,18 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
     }
 
     const updated = await updateTenantRecord(data.tenantId, updatePayload);
+    const vpsSync = await syncTenantsToVps();
+    const domainSetup = updatePayload.domain ? await provisionTenantDomain(updatePayload.domain) : null;
 
     revalidatePath("/admin");
     return {
       success: true,
-      message: "تم تحديث بيانات وخطة المستأجر بنجاح",
+      message: vpsSync.synced
+        ? "تم تحديث بيانات وخطة المستأجر ومزامنتها مع السيرفر"
+        : "تم تحديث البيانات محلياً (تعذرت المزامنة مع السيرفر)",
       tenant: updated,
+      vpsSync,
+      domainSetup,
     };
   } catch (err: any) {
     console.error("Error updating tenant subscription:", err);
@@ -185,11 +200,14 @@ export async function extendSubscriptionAction(tenantId: string, daysToAdd: numb
       subscriptionStatus: "ACTIVE", // Automatically reactivate if extended
     });
 
+    const vpsSync = await syncTenantsToVps();
+
     revalidatePath("/admin");
     return {
       success: true,
       message: `تم تمديد الاشتراك بنجاح بمقدار ${daysToAdd} يوم`,
       newDueDate: newDueDate.toISOString(),
+      vpsSync,
     };
   } catch (err: any) {
     return { error: err.message || "فشل تمديد الاشتراك" };
@@ -211,8 +229,10 @@ export async function toggleTenantStatusAction(tenantId: string) {
       subscriptionStatus: newStatus,
     });
 
+    const vpsSync = await syncTenantsToVps();
+
     revalidatePath("/admin");
-    return { success: true, newStatus };
+    return { success: true, newStatus, vpsSync };
   } catch (err: any) {
     return { error: err.message || "فشل تغيير حالة الحساب" };
   }
@@ -223,8 +243,9 @@ export async function deleteTenantAction(tenantId: string) {
 
   try {
     await deleteTenantRecord(tenantId);
+    const vpsSync = await syncTenantsToVps();
     revalidatePath("/admin");
-    return { success: true, message: "تم حذف حساب المستأجر وكافة بياناته بنجاح" };
+    return { success: true, message: "تم حذف حساب المستأجر وكافة بياناته بنجاح", vpsSync };
   } catch (err: any) {
     return { error: err.message || "فشل حذف حساب المستأجر" };
   }
