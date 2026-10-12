@@ -148,7 +148,7 @@ export default function EditSubscriptionModal({
       if (res.error) {
         setMsg({ text: res.error, isError: true });
       } else {
-        const syncFailed = (res as any).vpsSync && (res as any).vpsSync.success === false;
+        const syncFailed = (res as any).vpsSync && (res as any).vpsSync.synced === false;
         setMsg({
           text:
             (res.newStatus === "ACTIVE" ? "تم تفعيل الحساب بنجاح" : "تم إيقاف الحساب مؤقتاً") +

@@ -112,7 +112,7 @@ export default function TenantListView({
       setSyncNotice({ success: false, message: res.error || res.message || "فشلت العملية" });
       return;
     }
-    if (res.vpsSync && res.vpsSync.success === false) {
+    if (res.vpsSync && res.vpsSync.synced === false) {
       setSyncNotice({
         success: false,
         message: `تم الحفظ محلياً لكن فشلت المزامنة مع VPS: ${res.vpsSync.message || ""}. اضغط "مزامنة الكل مع VPS".`,
