@@ -27,7 +27,12 @@ model Tenant {
   storageLimitBytes    BigInt             @default(1073741824) // 1GB hard storage limit
   usedStorageBytes     BigInt             @default(0)
   planType             String             @default("الخطة الاحترافية (Teacher Pro)")
+  domain               String?            @unique
   subscriptionDueDate  DateTime?
+  examsLimit           Int                @default(150)
+  filesLimit           Int                @default(200)
+  verificationCode     String?
+  notes                String?
   activationKey        String?            @unique
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
