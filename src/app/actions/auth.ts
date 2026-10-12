@@ -43,7 +43,6 @@ export async function loginAction(
             name: adminName,
             role: "SUPER_ADMIN",
             subscriptionStatus: "ACTIVE",
-            planType: "مدير النظام (Super Admin)",
           },
         });
         if (dbAdmin?.id) adminId = dbAdmin.id;

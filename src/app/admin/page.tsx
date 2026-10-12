@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { logoutAction } from "@/app/actions/auth";
 import TenantStatusToggle from "@/components/admin/TenantStatusToggle";
@@ -56,47 +56,51 @@ export default async function AdminDashboardPage() {
   let dbError: string | null = null;
 
   try {
-    const [tenantsCount, activeCount, tenantsList, storageAggregate] = await Promise.all([
-      prisma.tenant.count({
-        where: { role: "TENANT" },
-      }),
-      prisma.tenant.count({
-        where: { role: "TENANT", subscriptionStatus: "ACTIVE" },
-      }),
-      prisma.tenant.findMany({
-        where: { role: "TENANT" },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-          role: true,
-          subscriptionStatus: true,
-          storageLimitBytes: true,
-          usedStorageBytes: true,
-          createdAt: true,
-          _count: {
-            select: {
-              exams: true,
-              uploadedFiles: true,
+    const isReachable = await isDatabaseReachable();
+    if (!isReachable) {
+      dbError = "قاعدة بيانات PostgreSQL غير متصلة حالياً (تأكد من تشغيل خادم قاعدة البيانات أو نشر حاوية Docker).";
+    } else {
+      const [tenantsCount, activeCount, tenantsList, storageAggregate] = await Promise.all([
+        prisma.tenant.count({
+          where: { role: "TENANT" },
+        }),
+        prisma.tenant.count({
+          where: { role: "TENANT", subscriptionStatus: "ACTIVE" },
+        }),
+        prisma.tenant.findMany({
+          where: { role: "TENANT" },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            role: true,
+            subscriptionStatus: true,
+            storageLimitBytes: true,
+            usedStorageBytes: true,
+            createdAt: true,
+            _count: {
+              select: {
+                exams: true,
+                uploadedFiles: true,
+              },
             },
           },
-        },
-      }),
-      prisma.tenant.aggregate({
-        _sum: {
-          usedStorageBytes: true,
-        },
-      }),
-    ]);
+        }),
+        prisma.tenant.aggregate({
+          _sum: {
+            usedStorageBytes: true,
+          },
+        }),
+      ]);
 
-    totalTenants = tenantsCount;
-    activeSubscriptions = activeCount;
-    tenants = tenantsList;
-    totalStorageUsedBytes = storageAggregate._sum.usedStorageBytes ?? BigInt(0);
+      totalTenants = tenantsCount;
+      activeSubscriptions = activeCount;
+      tenants = tenantsList;
+      totalStorageUsedBytes = storageAggregate._sum.usedStorageBytes ?? BigInt(0);
+    }
   } catch (error: any) {
-    console.error("Admin dashboard query error:", error);
-    dbError = error.message;
+    dbError = "تعذر جلب بيانات المستأجرين من قاعدة البيانات في الوقت الحالي.";
   }
 
   return (

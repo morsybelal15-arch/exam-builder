@@ -1,6 +1,6 @@
 import React from "react";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import {
   CreditCard,
@@ -39,23 +39,26 @@ export default async function MySubscriptionPage() {
   let filesCount = 0;
 
   try {
-    const [tenantData, examsTotal, filesTotal] = await Promise.all([
-      prisma.tenant.findUnique({
-        where: { id: session.id },
-      }),
-      prisma.exam.count({
-        where: { tenantId: session.id },
-      }),
-      prisma.uploadedFile.count({
-        where: { tenantId: session.id },
-      }),
-    ]);
+    const isReachable = await isDatabaseReachable();
+    if (isReachable) {
+      const [tenantData, examsTotal, filesTotal] = await Promise.all([
+        prisma.tenant.findUnique({
+          where: { id: session.id },
+        }),
+        prisma.exam.count({
+          where: { tenantId: session.id },
+        }),
+        prisma.uploadedFile.count({
+          where: { tenantId: session.id },
+        }),
+      ]);
 
-    tenant = tenantData;
-    examsCount = examsTotal;
-    filesCount = filesTotal;
+      tenant = tenantData;
+      examsCount = examsTotal;
+      filesCount = filesTotal;
+    }
   } catch (error) {
-    console.error("Subscription page fetch error:", error);
+    // Graceful offline fallback
   }
 
   // Fallback defaults if new user or offline DB

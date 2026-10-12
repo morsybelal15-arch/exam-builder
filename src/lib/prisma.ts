@@ -7,11 +7,19 @@ const globalForPrisma = globalThis as unknown as {
   pool: Pool | undefined;
 };
 
+export const isDatabaseConfigured = Boolean(process.env.DATABASE_URL);
+
 const connectionString =
   process.env.DATABASE_URL ||
   "postgresql://postgres:postgres@localhost:5432/exam_builder?schema=public";
 
-const pool = globalForPrisma.pool ?? new Pool({ connectionString });
+const pool =
+  globalForPrisma.pool ??
+  new Pool({
+    connectionString,
+    connectionTimeoutMillis: 1500,
+  });
+
 if (process.env.NODE_ENV !== "production") globalForPrisma.pool = pool;
 
 const adapter = new PrismaPg(pool);
@@ -20,9 +28,25 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     adapter,
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+    // Prevent Prisma from logging raw error events to console in dev mode,
+    // which triggers Next.js Turbopack's Console Error modal overlay
+    log: [],
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+/**
+ * Checks if the PostgreSQL server is reachable without throwing console errors
+ */
+export async function isDatabaseReachable(): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return false;
+  try {
+    const client = await pool.connect();
+    client.release();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export default prisma;

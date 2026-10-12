@@ -37,7 +37,6 @@ export async function POST(req: NextRequest) {
             name: adminName,
             role: "SUPER_ADMIN",
             subscriptionStatus: "ACTIVE",
-            planType: "مدير النظام (Super Admin)",
           },
         });
         if (dbAdmin?.id) adminId = dbAdmin.id;
