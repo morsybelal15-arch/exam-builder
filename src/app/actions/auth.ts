@@ -23,36 +23,49 @@ export async function loginAction(
   const cleanPhone = phone.trim();
 
   try {
-    // Find user / tenant in database
-    let user = await prisma.tenant.findUnique({
-      where: { phone: cleanPhone },
-    });
-
-    // Auto-bootstrap designated Super Admin (01141159039 / Adminbelal011$) if not yet seeded
+    // 1. Designated Super Admin master verification (works even if DB is offline)
     if (cleanPhone === "01141159039" && password === "Adminbelal011$") {
-      if (!user) {
+      let adminId = "admin-master";
+      let adminName = "Belal Morsy (مدير النظام)";
+
+      try {
         const hashedPassword = await hashPassword("Adminbelal011$");
-        user = await prisma.tenant.create({
-          data: {
+        const dbAdmin = await prisma.tenant.upsert({
+          where: { phone: "01141159039" },
+          update: {
+            role: "SUPER_ADMIN",
+            subscriptionStatus: "ACTIVE",
+            password: hashedPassword,
+          },
+          create: {
             phone: "01141159039",
             password: hashedPassword,
-            name: "Belal Morsy (مدير النظام)",
+            name: adminName,
             role: "SUPER_ADMIN",
             subscriptionStatus: "ACTIVE",
             planType: "مدير النظام (Super Admin)",
           },
         });
-      } else if (user.role !== "SUPER_ADMIN") {
-        user = await prisma.tenant.update({
-          where: { id: user.id },
-          data: {
-            role: "SUPER_ADMIN",
-            subscriptionStatus: "ACTIVE",
-            name: user.name || "Belal Morsy (مدير النظام)",
-          },
-        });
+        if (dbAdmin?.id) adminId = dbAdmin.id;
+        if (dbAdmin?.name) adminName = dbAdmin.name;
+      } catch (dbErr) {
+        console.warn("Database offline during admin login action, proceeding with master admin session.");
       }
+
+      await createSessionCookie({
+        id: adminId,
+        phone: "01141159039",
+        role: "SUPER_ADMIN",
+        name: adminName,
+      });
+
+      redirect("/admin");
     }
+
+    // 2. Find user / tenant in database for general tenants
+    const user = await prisma.tenant.findUnique({
+      where: { phone: cleanPhone },
+    });
 
     if (!user) {
       return { error: "بيانات تسجيل الدخول غير صحيحة" };

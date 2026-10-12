@@ -2,12 +2,13 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Lock, LogIn, Loader2, AlertCircle } from "lucide-react";
+import { Phone, Lock, LogIn, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -85,19 +86,33 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Password Field */}
+          {/* Password Field with Eye Toggle */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-2">كلمة المرور</label>
             <div className="relative flex items-center">
               <Lock className="w-4 h-4 text-slate-400 absolute right-3.5 pointer-events-none" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-4 pr-11 py-3 bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-100 rounded-2xl text-sm font-semibold text-slate-900 transition-all outline-none"
+                dir={showPassword ? "ltr" : undefined}
+                className="w-full pl-11 pr-11 py-3 bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-100 rounded-2xl text-sm font-semibold text-slate-900 transition-all outline-none"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+                title={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
+                className="absolute left-3.5 text-slate-400 hover:text-slate-600 focus:outline-none transition-colors cursor-pointer p-1"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
             </div>
           </div>
 
