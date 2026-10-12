@@ -24,6 +24,7 @@
 .DS_Store
 *.pem
 .vps_ssh/
+scripts/*.js
 /data/
 *.db*
 __pycache__/
