@@ -1,0 +1,85 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  TENANT
+  SUPER_ADMIN
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  STOPPED
+  EXPIRED
+}
+
+model Tenant {
+  id                 String             @id @default(cuid())
+  phone              String             @unique
+  password           String
+  name               String?
+  role               Role               @default(TENANT)
+  subscriptionStatus SubscriptionStatus @default(ACTIVE)
+  storageLimitBytes  BigInt             @default(1073741824) // 1GB hard storage limit
+  usedStorageBytes   BigInt             @default(0)
+  activationKey      String?            @unique
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  exams              Exam[]
+  uploadedFiles      UploadedFile[]
+
+  @@map("tenants")
+}
+
+model Exam {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title          String
+  paperTitle     String?
+  examCode       String?
+  subject        String   @default("عام")
+  grade          String   @default("مستوى عام")
+  duration       String?  @default("ساعتان")
+  questions      Json
+  questionsCount Int      @default(0)
+  totalPoints    Int      @default(20)
+  dateCreated    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("exams")
+}
+
+model UploadedFile {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  type      String
+  size      String
+  sizeBytes BigInt   @default(0)
+  date      String
+  filepath  String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("uploaded_files")
+}
+
+model ActivationKey {
+  id             String    @id @default(cuid())
+  key            String    @unique
+  isUsed         Boolean   @default(false)
+  usedByTenantId String?
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@map("activation_keys")
+}
