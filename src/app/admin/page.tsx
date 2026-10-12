@@ -1,12 +1,15 @@
 import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { logoutAction } from "@/app/actions/auth";
 import CreateTenantModal from "@/components/admin/CreateTenantModal";
 import TenantListView from "@/components/admin/TenantListView";
+import AutoUpdateButton from "@/components/admin/AutoUpdateButton";
 import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
+import { getTenantsList, getTenantCounts } from "@/lib/tenants-repository";
+import { getLatestCommitInfo } from "@/app/actions/auto-update";
+import { isDatabaseReachable } from "@/lib/prisma";
 import {
   Users,
   CheckCircle2,
@@ -14,11 +17,9 @@ import {
   ShieldCheck,
   LogOut,
   ArrowLeft,
-  AlertCircle,
   Server,
   Activity,
-  Cpu,
-  Globe,
+  Check,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -39,80 +40,18 @@ export default async function AdminDashboardPage() {
     redirect("/denied");
   }
 
-  // 2. Secure Data Fetching via React Server Component
-  let totalTenants = 0;
-  let activeSubscriptions = 0;
-  let stoppedSubscriptions = 0;
-  let totalStorageUsedBytes = BigInt(0);
-  let serializedTenants: any[] = [];
-  let dbError: string | null = null;
+  // 2. High-Availability Data Fetching (works seamlessly with PostgreSQL or persistent store)
+  const [tenantsList, counts, latestCommit, isDbOnline] = await Promise.all([
+    getTenantsList(),
+    getTenantCounts(),
+    getLatestCommitInfo(),
+    isDatabaseReachable(),
+  ]);
 
-  try {
-    const isReachable = await isDatabaseReachable();
-    if (!isReachable) {
-      dbError = "قاعدة بيانات PostgreSQL غير متصلة حالياً. تأكد من تشغيل خادم قاعدة البيانات أو فحص إعدادات الاتصال.";
-    } else {
-      const [tenantsCount, activeCount, stoppedCount, tenantsList, storageAggregate] = await Promise.all([
-        prisma.tenant.count({
-          where: { role: "TENANT" },
-        }),
-        prisma.tenant.count({
-          where: { role: "TENANT", subscriptionStatus: "ACTIVE" },
-        }),
-        prisma.tenant.count({
-          where: { role: "TENANT", subscriptionStatus: "STOPPED" },
-        }),
-        prisma.tenant.findMany({
-          where: { role: "TENANT" },
-          orderBy: { createdAt: "desc" },
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            role: true,
-            domain: true,
-            planType: true,
-            subscriptionStatus: true,
-            subscriptionDueDate: true,
-            storageLimitBytes: true,
-            usedStorageBytes: true,
-            examsLimit: true,
-            filesLimit: true,
-            verificationCode: true,
-            notes: true,
-            createdAt: true,
-            _count: {
-              select: {
-                exams: true,
-                uploadedFiles: true,
-              },
-            },
-          },
-        }),
-        prisma.tenant.aggregate({
-          _sum: {
-            usedStorageBytes: true,
-          },
-        }),
-      ]);
-
-      totalTenants = tenantsCount;
-      activeSubscriptions = activeCount;
-      stoppedSubscriptions = stoppedCount;
-      totalStorageUsedBytes = storageAggregate._sum.usedStorageBytes ?? BigInt(0);
-
-      // Serialize BigInt and Date values so they can safely pass to Client Components
-      serializedTenants = tenantsList.map((t) => ({
-        ...t,
-        storageLimitBytes: Number(t.storageLimitBytes),
-        usedStorageBytes: Number(t.usedStorageBytes),
-        subscriptionDueDate: t.subscriptionDueDate ? t.subscriptionDueDate.toISOString() : null,
-        createdAt: t.createdAt.toISOString(),
-      }));
-    }
-  } catch (error: any) {
-    dbError = "تعذر جلب بيانات المستأجرين من قاعدة البيانات في الوقت الحالي.";
-  }
+  const totalTenants = counts.total;
+  const activeSubscriptions = counts.active;
+  const stoppedSubscriptions = counts.stopped;
+  const totalStorageUsedBytes = counts.usedStorageBytes;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800" dir="rtl">
@@ -131,21 +70,35 @@ export default async function AdminDashboardPage() {
                 <span className="text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full">
                   SUPER_ADMIN
                 </span>
+                {isDbOnline ? (
+                  <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>قاعدة بيانات نشطة</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    <span>تخزين سحابي مستمر</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 font-medium">
-                إدارة المستأجرين، السيرفر VPS، والاشتراكات
+                إدارة المعلمين، خادم VPS، والاشتراكات
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Auto Update from Repo Button */}
+            <AutoUpdateButton initialCommit={latestCommit} />
+
             {/* Create Tenant Modal Trigger */}
             <CreateTenantModal />
 
             {/* Back to Exam Builder */}
             <Link
               href="/exam-builder"
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/70 px-4 py-2.5 rounded-xl transition-all"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/70 px-3.5 py-2.5 rounded-xl transition-all"
             >
               <span>منشئ الاختبارات</span>
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -167,17 +120,6 @@ export default async function AdminDashboardPage() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Database Notice if offline */}
-        {dbError && (
-          <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl text-xs sm:text-sm flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">تنبيه اتصال قاعدة البيانات:</p>
-              <p className="text-xs text-amber-700 mt-0.5">{dbError}</p>
-            </div>
-          </div>
-        )}
-
         {/* Section 1: Hostinger VPS Live Status Banner */}
         <section className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 border border-slate-800 shadow-md">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -211,11 +153,11 @@ export default async function AdminDashboardPage() {
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl px-4 py-2.5 text-center">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">الدومينات المربوطة</p>
                 <p className="text-lg font-black text-blue-400 font-mono">
-                  {serializedTenants.filter((t) => !!t.domain).length}
+                  {tenantsList.filter((t) => !!t.domain).length}
                 </p>
               </div>
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl px-4 py-2.5 text-center">
-                <p className="text-[10px] font-bold text-slate-400 uppercase">حاويات Docker</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase">المستأجرين النشطين</p>
                 <p className="text-lg font-black text-emerald-400 font-mono">
                   {activeSubscriptions}
                 </p>
@@ -315,7 +257,7 @@ export default async function AdminDashboardPage() {
             </div>
           </div>
 
-          <TenantListView initialTenants={serializedTenants} />
+          <TenantListView initialTenants={tenantsList as any} />
         </section>
       </main>
     </div>

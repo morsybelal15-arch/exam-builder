@@ -1,9 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser, hashPassword } from "@/lib/auth";
 import { generateNginxConfig, generateDockerConfig, HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
+import {
+  createTenantRecord,
+  findTenantByPhone,
+  updateTenantRecord,
+  deleteTenantRecord,
+  getTenantsList,
+} from "@/lib/tenants-repository";
 
 /**
  * Asserts the current user has SUPER_ADMIN role
@@ -41,10 +47,12 @@ export async function createTenantAction(data: CreateTenantInput) {
 
   // Calculate subscription due date based on duration
   const now = new Date();
-  const dueDate = new Date(now.getTime() + (data.durationMonths || 12) * 30 * 24 * 60 * 60 * 1000);
+  const durationMonths = Number(data.durationMonths) || 12;
+  const dueDate = new Date(now.getTime() + durationMonths * 30 * 24 * 60 * 60 * 1000);
 
-  // Convert storage limit from GB to BigInt bytes
-  const storageBytes = BigInt(Math.max(1, data.storageLimitGb || 1)) * BigInt(1073741824);
+  // Convert storage limit from GB to bytes
+  const storageLimitGb = Math.max(1, Number(data.storageLimitGb) || 1);
+  const storageBytes = BigInt(storageLimitGb) * BigInt(1073741824);
 
   // Auto-generate verification code if empty
   const vCode = data.verificationCode?.trim() || Math.floor(100000 + Math.random() * 900000).toString();
@@ -53,45 +61,33 @@ export async function createTenantAction(data: CreateTenantInput) {
   const cleanDomain = data.domain?.trim().toLowerCase() || null;
 
   try {
-    const isReachable = await isDatabaseReachable();
-    if (!isReachable) {
-      return {
-        error: "قاعدة بيانات PostgreSQL غير متصلة محلياً. يرجى التأكد من تشغيل خادم قاعدة البيانات لحفظ المستأجر.",
-      };
-    }
-
     // Check for existing phone
-    const existing = await prisma.tenant.findUnique({
-      where: { phone: cleanPhone },
-    });
-
+    const existing = await findTenantByPhone(cleanPhone);
     if (existing) {
       return { error: `رقم الهاتف ${cleanPhone} مسجل مسبقاً لمستأجر آخر.` };
     }
 
-    const tenant = await prisma.tenant.create({
-      data: {
-        name: data.name.trim() || "معلم جديد",
-        phone: cleanPhone,
-        password: hashedPassword,
-        domain: cleanDomain,
-        role: "TENANT",
-        subscriptionStatus: "ACTIVE",
-        planType: data.planType || "الخطة الاحترافية للمعلمين",
-        subscriptionDueDate: dueDate,
-        storageLimitBytes: storageBytes,
-        examsLimit: data.examsLimit || 150,
-        filesLimit: data.filesLimit || 200,
-        verificationCode: vCode,
-        notes: data.notes?.trim() || null,
-      },
+    const tenant = await createTenantRecord({
+      name: data.name.trim() || "معلم جديد",
+      phone: cleanPhone,
+      password: hashedPassword,
+      domain: cleanDomain,
+      role: "TENANT",
+      subscriptionStatus: "ACTIVE",
+      planType: data.planType || "الخطة الاحترافية للمعلمين",
+      subscriptionDueDate: dueDate,
+      storageLimitBytes: storageBytes,
+      examsLimit: Number(data.examsLimit) || 150,
+      filesLimit: Number(data.filesLimit) || 200,
+      verificationCode: vCode,
+      notes: data.notes?.trim() || null,
     });
 
     revalidatePath("/admin");
 
     return {
       success: true,
-      message: "تم إنشاء حساب المستأجر بنجاح وتجهيز بيئة العمل",
+      message: "تم إنشاء حساب المستأجر بنجاح وتجهيز بيئة العمل على السيرفر",
       tenant: {
         id: tenant.id,
         name: tenant.name,
@@ -133,11 +129,6 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
   }
 
   try {
-    const isReachable = await isDatabaseReachable();
-    if (!isReachable) {
-      return { error: "قاعدة البيانات غير متصلة محلياً." };
-    }
-
     const updatePayload: any = {};
 
     if (data.name !== undefined) updatePayload.name = data.name.trim();
@@ -163,10 +154,7 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
       updatePayload.password = await hashPassword(data.newPassword.trim());
     }
 
-    const updated = await prisma.tenant.update({
-      where: { id: data.tenantId },
-      data: updatePayload,
-    });
+    const updated = await updateTenantRecord(data.tenantId, updatePayload);
 
     revalidatePath("/admin");
     return {
@@ -184,25 +172,17 @@ export async function extendSubscriptionAction(tenantId: string, daysToAdd: numb
   await assertSuperAdmin();
 
   try {
-    const isReachable = await isDatabaseReachable();
-    if (!isReachable) return { error: "قاعدة البيانات غير متصلة." };
-
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { subscriptionDueDate: true, createdAt: true },
-    });
+    const all = await getTenantsList();
+    const tenant = all.find((t) => t.id === tenantId);
 
     if (!tenant) return { error: "المستأجر غير موجود" };
 
     const baseDate = tenant.subscriptionDueDate ? new Date(tenant.subscriptionDueDate) : new Date();
     const newDueDate = new Date(baseDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
 
-    await prisma.tenant.update({
-      where: { id: tenantId },
-      data: {
-        subscriptionDueDate: newDueDate,
-        subscriptionStatus: "ACTIVE", // Automatically reactivate if extended
-      },
+    await updateTenantRecord(tenantId, {
+      subscriptionDueDate: newDueDate,
+      subscriptionStatus: "ACTIVE", // Automatically reactivate if extended
     });
 
     revalidatePath("/admin");
@@ -220,21 +200,15 @@ export async function toggleTenantStatusAction(tenantId: string) {
   await assertSuperAdmin();
 
   try {
-    const isReachable = await isDatabaseReachable();
-    if (!isReachable) return { error: "قاعدة البيانات غير متصلة." };
-
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { subscriptionStatus: true },
-    });
+    const all = await getTenantsList();
+    const tenant = all.find((t) => t.id === tenantId);
 
     if (!tenant) return { error: "المستأجر غير موجود" };
 
     const newStatus = tenant.subscriptionStatus === "ACTIVE" ? "STOPPED" : "ACTIVE";
 
-    await prisma.tenant.update({
-      where: { id: tenantId },
-      data: { subscriptionStatus: newStatus },
+    await updateTenantRecord(tenantId, {
+      subscriptionStatus: newStatus,
     });
 
     revalidatePath("/admin");
@@ -248,13 +222,7 @@ export async function deleteTenantAction(tenantId: string) {
   await assertSuperAdmin();
 
   try {
-    const isReachable = await isDatabaseReachable();
-    if (!isReachable) return { error: "قاعدة البيانات غير متصلة." };
-
-    await prisma.tenant.delete({
-      where: { id: tenantId },
-    });
-
+    await deleteTenantRecord(tenantId);
     revalidatePath("/admin");
     return { success: true, message: "تم حذف حساب المستأجر وكافة بياناته بنجاح" };
   } catch (err: any) {

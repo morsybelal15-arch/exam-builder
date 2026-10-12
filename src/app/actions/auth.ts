@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword, createSessionCookie, clearSessionCookie, hashPassword } from "@/lib/auth";
+import { findTenantByPhone } from "@/lib/tenants-repository";
 
 export interface LoginActionResult {
   error?: string;
@@ -61,12 +62,10 @@ export async function loginAction(
       redirect("/admin");
     }
 
-    // 2. Find user / tenant in database for general tenants
-    const user = await prisma.tenant.findUnique({
-      where: { phone: cleanPhone },
-    });
+    // 2. Find user / tenant in database or local fallback store
+    const user = await findTenantByPhone(cleanPhone);
 
-    if (!user) {
+    if (!user || !user.password) {
       return { error: "بيانات تسجيل الدخول غير صحيحة" };
     }
 
