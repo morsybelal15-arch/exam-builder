@@ -6,6 +6,7 @@ import {
   extendSubscriptionAction,
   toggleTenantStatusAction,
 } from "@/app/actions/admin-tenants";
+import { autoDeployTenantVpsAction } from "@/app/actions/vps-provisioning";
 import {
   Search,
   Users,
@@ -32,6 +33,9 @@ import {
   RefreshCw,
   Plus,
   ShieldCheck,
+  Loader2,
+  Sparkles,
+  Rocket,
 } from "lucide-react";
 import { HOSTINGER_VPS_CONFIG, generateNginxConfig } from "@/lib/vps-service";
 
@@ -96,6 +100,8 @@ export default function TenantListView({
   const [vpsQuickModalTenant, setVpsQuickModalTenant] = useState<TenantData | null>(null);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [copiedVpsId, setCopiedVpsId] = useState<string | null>(null);
+  const [deployingTenantId, setDeployingTenantId] = useState<string | null>(null);
+  const [deployFeedback, setDeployFeedback] = useState<{ [id: string]: { success: boolean; message: string } }>({});
   const [isPending, startTransition] = useTransition();
 
   // Filtered tenants list
@@ -128,6 +134,27 @@ export default function TenantListView({
     navigator.clipboard.writeText(configStr);
     setCopiedVpsId(tenant.id);
     setTimeout(() => setCopiedVpsId(null), 2500);
+  };
+
+  const handleAutoDeploy = (tenant: TenantData) => {
+    if (!tenant.domain) return;
+    setDeployingTenantId(tenant.id);
+    startTransition(async () => {
+      try {
+        const res = await autoDeployTenantVpsAction(tenant.id, tenant.domain!);
+        setDeployFeedback((prev) => ({
+          ...prev,
+          [tenant.id]: { success: res.success, message: res.message },
+        }));
+      } catch (err: any) {
+        setDeployFeedback((prev) => ({
+          ...prev,
+          [tenant.id]: { success: false, message: err.message || "فشل التفعيل" },
+        }));
+      } finally {
+        setDeployingTenantId(null);
+      }
+    });
   };
 
   const handleToggleStatus = (tenantId: string) => {
@@ -325,22 +352,34 @@ export default function TenantListView({
                       {/* 3. Domain & VPS */}
                       <td className="py-4 px-5">
                         {tenant.domain ? (
-                          <div className="space-y-1">
+                          <div className="space-y-1.5">
                             <a
-                              href={`https://${tenant.domain}`}
+                              href={`http://${tenant.domain}`}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
                               dir="ltr"
+                              title="فتح موقع المستأجر على الخادم"
                             >
                               <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              <span className="truncate max-w-[140px]">{tenant.domain}</span>
-                              <ExternalLink className="w-3 h-3 shrink-0" />
+                              <span className="truncate max-w-[150px]">{tenant.domain}</span>
+                              <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" />
                             </a>
-                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-mono" dir="ltr">
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono" dir="ltr">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                               <span>{HOSTINGER_VPS_CONFIG.ip}</span>
                             </div>
+                            {deployFeedback[tenant.id] && (
+                              <p
+                                className={`text-[10px] font-bold ${
+                                  deployFeedback[tenant.id].success
+                                    ? "text-emerald-600"
+                                    : "text-red-500"
+                                }`}
+                              >
+                                {deployFeedback[tenant.id].message}
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <div className="text-[11px] text-slate-400 flex items-center gap-1">
@@ -466,7 +505,38 @@ export default function TenantListView({
                             <span>+30ي</span>
                           </button>
 
-                          {/* VPS Setup Commands Copy */}
+                          {/* 1-Click Automated VPS Deploy Button */}
+                          {tenant.domain && (
+                            <button
+                              onClick={() => handleAutoDeploy(tenant)}
+                              disabled={deployingTenantId === tenant.id || isPending}
+                              title="تفعيل الدومين وإعداد Nginx تلقائياً على خادم VPS بزر واحد وبدون أي أوامر يدوية"
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                                deployFeedback[tenant.id]?.success
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
+                                  : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20"
+                              } disabled:opacity-50`}
+                            >
+                              {deployingTenantId === tenant.id ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>تفعيل...</span>
+                                </>
+                              ) : deployFeedback[tenant.id]?.success ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>مفعل VPS</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                  <span>تفعيل VPS</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {/* VPS Setup Commands Copy (Fallback) */}
                           {tenant.domain && (
                             <button
                               onClick={() => handleCopyVpsNginx(tenant)}

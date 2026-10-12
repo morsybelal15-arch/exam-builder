@@ -6,6 +6,7 @@ import { logoutAction } from "@/app/actions/auth";
 import CreateTenantModal from "@/components/admin/CreateTenantModal";
 import TenantListView from "@/components/admin/TenantListView";
 import AutoUpdateButton from "@/components/admin/AutoUpdateButton";
+import VpsDeployButton from "@/components/admin/VpsDeployButton";
 import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 import { getTenantsList, getTenantCounts } from "@/lib/tenants-repository";
 import { getLatestCommitInfo } from "@/app/actions/auto-update";
@@ -149,7 +150,8 @@ export default async function AdminDashboardPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <VpsDeployButton />
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl px-4 py-2.5 text-center">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">الدومينات المربوطة</p>
                 <p className="text-lg font-black text-blue-400 font-mono">

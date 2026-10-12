@@ -2,6 +2,7 @@
 
 import React, { useState, useTransition } from "react";
 import { createTenantAction } from "@/app/actions/admin-tenants";
+import { autoDeployTenantVpsAction } from "@/app/actions/vps-provisioning";
 import {
   UserPlus,
   X,
@@ -21,7 +22,9 @@ import {
   Sparkles,
   ShieldCheck,
   Terminal,
+  AlertTriangle,
 } from "lucide-react";
+import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 
 interface CreateTenantModalProps {
   onCreated?: () => void;
@@ -50,6 +53,9 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
   const [createdResult, setCreatedResult] = useState<any | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedVps, setCopiedVps] = useState(false);
+  const [isDeployingVps, startDeployVps] = useTransition();
+  const [deploySuccessMsg, setDeploySuccessMsg] = useState<string | null>(null);
+  const [deployErrorMsg, setDeployErrorMsg] = useState<string | null>(null);
 
   const handleOpen = () => {
     setErrorMsg(null);
@@ -219,26 +225,95 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                     </div>
                   </div>
 
-                  {/* VPS Nginx Config if domain was set */}
-                  {createdResult.vpsConfig && (
-                    <div className="bg-slate-900 text-slate-200 rounded-2xl p-5 space-y-3 font-mono text-xs">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2 font-sans">
-                        <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                          <Terminal className="w-4 h-4 text-emerald-400" />
-                          <span>إعدادات السيرفر Hostinger VPS ({createdResult.vpsIp})</span>
-                        </span>
-                        <button
-                          onClick={copyVpsConfig}
-                          className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-950/60 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                  {/* Automated VPS Deployment Section */}
+                  {createdResult.tenant.domain && (
+                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl p-5 space-y-4 border border-slate-800">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                            <Server className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-white block">
+                              تفعيل الدومين على خادم Hostinger VPS ({HOSTINGER_VPS_CONFIG.ip})
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-mono" dir="ltr">
+                              {createdResult.tenant.domain}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Direct Visit Button */}
+                        <a
+                          href={`http://${createdResult.tenant.domain}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-all"
                         >
-                          {copiedVps ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedVps ? "تم نسخ الأمر!" : "نسخ أوامر Nginx"}</span>
-                        </button>
+                          <Globe className="w-3.5 h-3.5" />
+                          <span>فتح الدومين الآن</span>
+                        </a>
                       </div>
 
-                      <pre className="overflow-x-auto text-[11px] text-slate-300 leading-relaxed max-h-40 bg-slate-950 p-3 rounded-xl">
-                        {createdResult.vpsConfig}
-                      </pre>
+                      {/* Deploy Success/Error messages */}
+                      {deploySuccessMsg && (
+                        <div className="p-3 bg-emerald-950/70 border border-emerald-600/40 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>{deploySuccessMsg}</span>
+                        </div>
+                      )}
+
+                      {deployErrorMsg && (
+                        <div className="p-3 bg-red-950/70 border border-red-600/40 text-red-300 rounded-xl text-xs flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                          <span>{deployErrorMsg}</span>
+                        </div>
+                      )}
+
+                      {/* 1-Click Auto Deploy Button */}
+                      <div className="flex flex-col sm:flex-row items-center gap-3">
+                        <button
+                          type="button"
+                          disabled={isDeployingVps}
+                          onClick={() => {
+                            setDeploySuccessMsg(null);
+                            setDeployErrorMsg(null);
+                            startDeployVps(async () => {
+                              const res = await autoDeployTenantVpsAction(
+                                createdResult.tenant.id,
+                                createdResult.tenant.domain
+                              );
+                              if (res.success) {
+                                setDeploySuccessMsg(res.message);
+                              } else {
+                                setDeployErrorMsg(res.error || res.message);
+                              }
+                            });
+                          }}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold py-2.5 px-5 rounded-xl text-xs shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+                        >
+                          {isDeployingVps ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>جاري إطلاق وإعداد Nginx على VPS...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4 text-amber-300" />
+                              <span>تفعيل النطاق وإطلاق المنصة على VPS تلقائياً</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={copyVpsConfig}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          {copiedVps ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedVps ? "تم نسخ الأمر" : "نسخ أمر Nginx اليدوي"}</span>
+                        </button>
+                      </div>
                     </div>
                   )}
 
