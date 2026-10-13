@@ -3,7 +3,9 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import { revalidatePath } from "next/cache";
-import { getSessionUser } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
+import { isLocalExec } from "@/lib/vps-sync";
+import { deployExamBuilderToVpsAction } from "@/app/actions/vps-provisioning";
 
 const execAsync = promisify(exec);
 
@@ -44,31 +46,43 @@ export async function getLatestCommitInfo(): Promise<GitCommitInfo | null> {
 }
 
 export async function updateAppFromRepoAction(): Promise<AutoUpdateResult> {
-  const session = await getSessionUser();
-  if (!session || session.role !== "SUPER_ADMIN") {
+  try {
+    await requireSuperAdmin();
+  } catch (err: any) {
     return {
       success: false,
       message: "غير مصرح لك بتنفيذ هذه العملية.",
-      error: "يتطلب صلاحية مدير النظام (SUPER_ADMIN)",
+      error: err?.message || "يتطلب صلاحية مدير النظام (SUPER_ADMIN)",
     };
   }
 
-  const vpsCommand = 'ssh root@72.60.44.106 "cd /var/www/exam-builder && git pull origin main && docker compose restart app"';
+  // Admin running on the VPS: an update = full redeploy of both apps (pull + build + reload).
+  if (isLocalExec()) {
+    const res = await deployExamBuilderToVpsAction();
+    return {
+      success: res.success,
+      message: res.message,
+      error: res.error,
+      output: res.logs?.join("\n"),
+    };
+  }
+
+  const vpsCommand =
+    'ssh root@72.60.44.106 "cd /var/www/exam-builder && git pull origin main && npm run build && pm2 startOrReload ecosystem.config.js --update-env"';
 
   try {
-    // 1. Pull latest code from GitHub origin main
+    // Local dev machine: pull latest code from GitHub origin main
     const { stdout: pullOutput, stderr: pullErr } = await execAsync(
       "git pull origin main",
       { cwd: process.cwd(), timeout: 30000 }
     );
 
-    // 2. Fetch updated commit info
+    // Fetch updated commit info
     const commit = await getLatestCommitInfo();
 
-    // 3. Clear Next.js cache
+    // Clear Next.js cache
     revalidatePath("/admin");
     revalidatePath("/");
-    revalidatePath("/exam-builder");
 
     return {
       success: true,

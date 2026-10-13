@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSessionUser, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
+import { getSessionCookieName } from "@/lib/app-mode";
 import { findTenantById, findTenantByPhone, getTenantAccessBlock } from "@/lib/tenants-repository";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function GET() {
 
   if (reason) {
     const res = NextResponse.json({ authenticated: false, blocked: true, reason });
-    res.cookies.delete(AUTH_COOKIE_NAME);
+    res.cookies.delete(getSessionCookieName());
     return res;
   }
 

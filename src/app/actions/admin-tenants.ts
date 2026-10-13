@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSessionUser, hashPassword } from "@/lib/auth";
-import { generateNginxConfig, generateDockerConfig, HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
+import { requireSuperAdmin, hashPassword } from "@/lib/auth";
+import { generateDockerConfig, HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 import {
   createTenantRecord,
   findTenantByPhone,
@@ -13,14 +13,11 @@ import {
 import { syncTenantsToVps, provisionTenantDomain } from "@/lib/vps-sync";
 
 /**
- * Asserts the current user has SUPER_ADMIN role
+ * Asserts the current user has SUPER_ADMIN role AND this process runs in admin mode.
+ * (Server actions can be invoked directly by ID, so the proxy route block alone is not enough.)
  */
 async function assertSuperAdmin() {
-  const session = await getSessionUser();
-  if (!session || session.role !== "SUPER_ADMIN") {
-    throw new Error("غير مصرح لك بتنفيذ هذه العملية. يتطلب صلاحية مدير النظام (SUPER_ADMIN).");
-  }
-  return session;
+  return requireSuperAdmin();
 }
 
 export interface CreateTenantInput {

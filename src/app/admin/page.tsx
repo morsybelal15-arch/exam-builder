@@ -11,6 +11,7 @@ import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 import { getTenantsList, getTenantCounts } from "@/lib/tenants-repository";
 import { getLatestCommitInfo } from "@/app/actions/auto-update";
 import { isDatabaseReachable } from "@/lib/prisma";
+import { tenantEnabled } from "@/lib/app-mode";
 import {
   Users,
   CheckCircle2,
@@ -35,10 +36,10 @@ function formatBytes(bytes: bigint | number): string {
 }
 
 export default async function AdminDashboardPage() {
-  // 1. Strict Server-Side Super Admin Authentication Verification
+  // 1. Strict Server-Side Super Admin Authentication Verification (admin domain only)
   const session = await getSessionUser();
   if (!session || session.role !== "SUPER_ADMIN") {
-    redirect("/denied");
+    redirect("/login");
   }
 
   // 2. High-Availability Data Fetching (works seamlessly with PostgreSQL or persistent store)
@@ -96,14 +97,16 @@ export default async function AdminDashboardPage() {
             {/* Create Tenant Modal Trigger */}
             <CreateTenantModal />
 
-            {/* Back to Exam Builder */}
-            <Link
-              href="/exam-builder"
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/70 px-3.5 py-2.5 rounded-xl transition-all"
-            >
-              <span>منشئ الاختبارات</span>
-              <ArrowLeft className="w-3.5 h-3.5" />
-            </Link>
+            {/* Back to Exam Builder (local dev "all" mode only — not on the admin domain) */}
+            {tenantEnabled() && (
+              <Link
+                href="/exam-builder"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/70 px-3.5 py-2.5 rounded-xl transition-all"
+              >
+                <span>منشئ الاختبارات</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </Link>
+            )}
 
             {/* Logout */}
             <form action={logoutAction}>

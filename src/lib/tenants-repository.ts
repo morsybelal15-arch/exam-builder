@@ -51,7 +51,10 @@ function saveStoreFile(tenants: StoredTenant[]): void {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(STORE_FILE, JSON.stringify(tenants, null, 2), "utf-8");
+    // Atomic replace: the tenant app reads this file on every request while the admin app writes it.
+    const tmp = `${STORE_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(tenants, null, 2), "utf-8");
+    fs.renameSync(tmp, STORE_FILE);
   } catch (err) {
     console.error("Error saving local tenants store:", err);
   }

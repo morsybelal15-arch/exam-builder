@@ -1,83 +1,90 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, isDatabaseReachable } from "@/lib/prisma";
-import { verifyPassword, createSessionCookie, hashPassword } from "@/lib/auth";
+import { createSessionCookie, verifyPassword } from "@/lib/auth";
+import { getAppMode } from "@/lib/app-mode";
+import { isAdminConfigured, verifyAdminCredentials } from "@/lib/admin-credentials";
 import { findTenantByPhone, getTenantAccessBlock } from "@/lib/tenants-repository";
 
+const INVALID = "بيانات تسجيل الدخول غير صحيحة";
+
+// Simple in-memory brute-force protection (per process): 10 failed attempts / 15 min per IP.
+const WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILURES = 10;
+const failures = new Map<string, { count: number; resetAt: number }>();
+
+function clientKey(req: NextRequest): string {
+  return (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || req.headers.get("x-real-ip") || "local";
+}
+
+function isLocked(key: string): boolean {
+  const entry = failures.get(key);
+  if (!entry) return false;
+  if (entry.resetAt < Date.now()) {
+    failures.delete(key);
+    return false;
+  }
+  return entry.count >= MAX_FAILURES;
+}
+
+function recordFailure(key: string) {
+  const entry = failures.get(key);
+  if (!entry || entry.resetAt < Date.now()) {
+    failures.set(key, { count: 1, resetAt: Date.now() + WINDOW_MS });
+  } else {
+    entry.count += 1;
+  }
+}
+
 export async function POST(req: NextRequest) {
+  const key = clientKey(req);
+  if (isLocked(key)) {
+    return NextResponse.json(
+      { error: "تم تجاوز عدد محاولات الدخول المسموح بها. حاول مرة أخرى بعد 15 دقيقة." },
+      { status: 429 }
+    );
+  }
+
   try {
-    const body = await req.json();
-    const { phone, password } = body;
+    const body = await req.json().catch(() => ({}));
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
 
     if (!phone || !password) {
-      return NextResponse.json(
-        { error: "يرجى إدخال رقم الهاتف وكلمة المرور" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "يرجى إدخال رقم الهاتف وكلمة المرور" }, { status: 400 });
     }
 
-    const cleanPhone = phone.trim();
+    const mode = getAppMode();
 
-    // 1. Designated Super Admin master verification (works even if DB is offline)
-    if (cleanPhone === "01141159039" && password === "Adminbelal011$") {
-      let adminId = "admin-master";
-      let adminName = "Belal Morsy (مدير النظام)";
-
-      // Attempt to sync / upsert in PostgreSQL if available
-      try {
-        const hashedPassword = await hashPassword("Adminbelal011$");
-        const dbAdmin = await prisma.tenant.upsert({
-          where: { phone: "01141159039" },
-          update: {
-            role: "SUPER_ADMIN",
-            subscriptionStatus: "ACTIVE",
-            password: hashedPassword,
-          },
-          create: {
-            phone: "01141159039",
-            password: hashedPassword,
-            name: adminName,
-            role: "SUPER_ADMIN",
-            subscriptionStatus: "ACTIVE",
-          },
+    // 1. Super Admin — only on the admin process (or local "all" mode), credentials from env.
+    if (mode !== "tenant") {
+      const admin = verifyAdminCredentials(phone, password);
+      if (admin) {
+        failures.delete(key);
+        await createSessionCookie({ id: admin.id, phone: admin.phone, role: "SUPER_ADMIN", name: admin.name });
+        return NextResponse.json({
+          success: true,
+          message: "تم تسجيل الدخول بنجاح كمدير للنظام",
+          role: "SUPER_ADMIN",
+          redirectUrl: "/admin",
         });
-        if (dbAdmin?.id) adminId = dbAdmin.id;
-        if (dbAdmin?.name) adminName = dbAdmin.name;
-      } catch (dbErr) {
-        console.warn("Database offline during admin login, proceeding with master admin session.");
       }
-
-      await createSessionCookie({
-        id: adminId,
-        phone: "01141159039",
-        role: "SUPER_ADMIN",
-        name: adminName,
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "تم تسجيل الدخول بنجاح كمدير للنظام",
-        role: "SUPER_ADMIN",
-        redirectUrl: "/admin",
-      });
+      if (mode === "admin") {
+        recordFailure(key);
+        const error = isAdminConfigured() ? INVALID : "حساب مدير النظام غير مضبوط على الخادم (ADMIN_PHONE / ADMIN_PASSWORD_HASH).";
+        return NextResponse.json({ error }, { status: 401 });
+      }
     }
 
-    // 2. Query user / tenant via repository (handles both PostgreSQL & fallback store)
-    const user = await findTenantByPhone(cleanPhone);
-
-    if (!user || !user.password) {
-      return NextResponse.json(
-        { error: "بيانات تسجيل الدخول غير صحيحة" },
-        { status: 401 }
-      );
+    // 2. Tenants — never on the admin process.
+    const user = await findTenantByPhone(phone);
+    if (!user || !user.password || user.role !== "TENANT") {
+      recordFailure(key);
+      return NextResponse.json({ error: INVALID }, { status: 401 });
     }
 
-    // Verify Password
     const isValid = await verifyPassword(password, user.password);
     if (!isValid) {
-      return NextResponse.json(
-        { error: "بيانات تسجيل الدخول غير صحيحة" },
-        { status: 401 }
-      );
+      recordFailure(key);
+      return NextResponse.json({ error: INVALID }, { status: 401 });
     }
 
     // Check subscription status for tenants (stopped / expired / past due date)
@@ -86,41 +93,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: blockReason }, { status: 403 });
     }
 
-    // Establish authenticated session cookie
-    await createSessionCookie({
-      id: user.id,
-      phone: user.phone,
-      role: user.role,
-      name: user.name,
-    });
-
-    // Server-side Role Detection & Dynamic Routing:
-    // If SUPER_ADMIN -> redirect to /admin
-    // If TENANT -> redirect to standard app dashboard (/exam-builder)
-    let redirectUrl = "/exam-builder";
-    if (user.role === "SUPER_ADMIN") {
-      redirectUrl = "/admin";
-    } else {
-      redirectUrl = "/exam-builder";
-    }
+    failures.delete(key);
+    await createSessionCookie({ id: user.id, phone: user.phone, role: "TENANT", name: user.name });
 
     return NextResponse.json({
       success: true,
       message: "تم تسجيل الدخول بنجاح",
-      role: user.role,
-      redirectUrl,
+      role: "TENANT",
+      redirectUrl: "/exam-builder",
     });
   } catch (error: any) {
     console.error("Login authentication error:", error);
-    if (error?.code === "ECONNREFUSED" || error?.message?.includes("ECONNREFUSED")) {
-      return NextResponse.json(
-        { error: "تعذر الاتصال بقاعدة البيانات PostgreSQL. يرجى التأكد من تشغيل خادم قاعدة البيانات (PostgreSQL)." },
-        { status: 503 }
-      );
-    }
-    return NextResponse.json(
-      { error: error.message || "حدث خطأ أثناء تسجيل الدخول" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error?.message || "حدث خطأ أثناء تسجيل الدخول" }, { status: 500 });
   }
 }

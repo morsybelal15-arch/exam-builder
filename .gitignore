@@ -45,3 +45,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# PM2 ecosystem migration marker (VPS)
+.pm2-ecosystem
+

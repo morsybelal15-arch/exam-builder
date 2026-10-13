@@ -2,17 +2,25 @@
 
 import fs from "fs";
 import { revalidatePath } from "next/cache";
-import { getSessionUser } from "@/lib/auth";
-import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
+import { requireSuperAdmin } from "@/lib/auth";
+import {
+  HOSTINGER_VPS_CONFIG,
+  TENANT_APP_PORT,
+  ADMIN_APP_PORT,
+  DEFAULT_ADMIN_HOST,
+  CERTBOT_EMAIL,
+  generateTenantWildcardNginx,
+  generateAdminNginx,
+} from "@/lib/vps-service";
 import { updateTenantRecord } from "@/lib/tenants-repository";
 import {
   runOnVps,
+  isLocalExec,
   syncTenantsToVps,
   provisionTenantDomain,
   checkTenantDomainOnVps,
   SSH_KEY_PATH,
   VPS_APP_DIR,
-  VPS_APP_PORT,
 } from "@/lib/vps-sync";
 
 export interface VpsDeployResult {
@@ -25,23 +33,140 @@ export interface VpsDeployResult {
 }
 
 const REPO_URL = "https://github.com/morsybelal15-arch/exam-builder.git";
+const DEPLOY_LOG = "/var/log/exam-builder-deploy.log";
 
-async function assertSuperAdmin() {
-  const session = await getSessionUser();
-  if (!session || session.role !== "SUPER_ADMIN") {
-    throw new Error("غير مصرح لك بتنفيذ هذه العملية. يتطلب صلاحية مدير النظام.");
-  }
+function b64(text: string): string {
+  return Buffer.from(text, "utf-8").toString("base64");
 }
 
 /**
- * One-click full deployment of Exam Builder to the VPS:
- * pull code → install → build → (re)start PM2 on port 3015 → wildcard Nginx →
- * push tenant accounts → health check.
+ * Builds the full deployment script:
+ * pull → env files → install/build → PM2 (tenant :3015 + admin :3016) → Nginx (tenant wildcard
+ * + dedicated admin vhost) → Let's Encrypt for the admin domain → health checks.
+ */
+function buildDeployScript(): string {
+  const adminHost = (process.env.ADMIN_HOST || DEFAULT_ADMIN_HOST).trim().toLowerCase();
+  const geminiKey = process.env.GEMINI_API_KEY || "";
+  const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+
+  // Shared, non-secret runtime config. Mode / port / secrets come from ecosystem.config.js + .env.tenant/.env.admin.
+  const envLocal = `GEMINI_API_KEY="${geminiKey}"\nGEMINI_MODEL="${geminiModel}"\n`;
+
+  // Admin credentials are pushed from the deploying admin's own environment (never from git).
+  const adminPhone = process.env.ADMIN_PHONE || "";
+  const adminHash = process.env.ADMIN_PASSWORD_HASH || "";
+  const adminName = process.env.ADMIN_NAME || "";
+  const adminCreds =
+    adminPhone && adminHash
+      ? `ADMIN_PHONE=${adminPhone}\nADMIN_PASSWORD_HASH=${adminHash}\nADMIN_HOST=${adminHost}\n${adminName ? `ADMIN_NAME=${adminName}\n` : ""}`
+      : "";
+
+  return `
+set -e
+export PATH="$PATH:/usr/local/bin:/usr/bin"
+APP_DIR=${VPS_APP_DIR}
+ADMIN_HOST=${adminHost}
+CERT=/etc/letsencrypt/live/$ADMIN_HOST/fullchain.pem
+
+mkdir -p $APP_DIR
+cd $APP_DIR
+
+if [ ! -d ".git" ]; then
+  echo "[1/6] Cloning repository..."
+  git clone ${REPO_URL} .
+else
+  echo "[1/6] Pulling latest updates..."
+  git fetch origin main
+  git reset --hard origin/main
+fi
+
+echo "[2/6] Writing environment files..."
+rm -f .env
+echo '${b64(envLocal)}' | base64 -d > .env.local
+mkdir -p data
+
+# Tenant app secret (generated once, kept across deploys)
+if ! grep -qs '^SESSION_SECRET=' .env.tenant; then
+  echo "SESSION_SECRET=$(openssl rand -hex 32)" > .env.tenant
+fi
+
+# Admin app: credentials + its own secret (secret generated once, kept across deploys)
+ADMIN_SECRET=$(grep -s '^SESSION_SECRET=' .env.admin | head -1 | cut -d= -f2- || true)
+[ -z "$ADMIN_SECRET" ] && ADMIN_SECRET=$(openssl rand -hex 32)
+ADMIN_CREDS_B64='${b64(adminCreds)}'
+if [ -n "$ADMIN_CREDS_B64" ]; then
+  echo "$ADMIN_CREDS_B64" | base64 -d > .env.admin.tmp
+else
+  (grep -sv '^SESSION_SECRET=' .env.admin || true) > .env.admin.tmp
+fi
+echo "SESSION_SECRET=$ADMIN_SECRET" >> .env.admin.tmp
+mv .env.admin.tmp .env.admin
+chmod 600 .env.admin .env.tenant
+grep -qs '^ADMIN_PASSWORD_HASH=' .env.admin || echo "[warn] ADMIN_PHONE / ADMIN_PASSWORD_HASH not configured — admin login disabled"
+
+echo "[3/6] Installing & building..."
+npm install --no-audit --no-fund
+npx prisma generate
+npm run build
+
+echo "[4/6] (Re)starting PM2 apps (tenant :${TENANT_APP_PORT}, admin :${ADMIN_APP_PORT})..."
+if [ ! -f .pm2-ecosystem ]; then
+  # one-time migration from the legacy single "npm start" process
+  pm2 delete exam-builder >/dev/null 2>&1 || true
+  touch .pm2-ecosystem
+fi
+pm2 startOrReload ecosystem.config.js --update-env
+pm2 save
+
+echo "[5/6] Configuring Nginx (tenant wildcard + admin domain)..."
+echo '${b64(generateTenantWildcardNginx())}' | base64 -d > /etc/nginx/sites-available/exam-builder
+ln -sf /etc/nginx/sites-available/exam-builder /etc/nginx/sites-enabled/exam-builder
+mkdir -p /var/www/html
+if [ -f "$CERT" ]; then
+  echo '${b64(generateAdminNginx(adminHost, true))}' | base64 -d > /etc/nginx/sites-available/exam-admin
+else
+  echo '${b64(generateAdminNginx(adminHost, false))}' | base64 -d > /etc/nginx/sites-available/exam-admin
+fi
+ln -sf /etc/nginx/sites-available/exam-admin /etc/nginx/sites-enabled/exam-admin
+nginx -t
+systemctl reload nginx
+
+if [ ! -f "$CERT" ]; then
+  if command -v certbot >/dev/null 2>&1; then
+    if certbot certonly --webroot -w /var/www/html -d $ADMIN_HOST --non-interactive --agree-tos -m ${CERTBOT_EMAIL}; then
+      echo '${b64(generateAdminNginx(adminHost, true))}' | base64 -d > /etc/nginx/sites-available/exam-admin
+      nginx -t && systemctl reload nginx
+      echo "[ssl] HTTPS enabled for $ADMIN_HOST"
+    else
+      echo "[ssl] certbot failed for $ADMIN_HOST (check that DNS points to this server) — admin stays on HTTP for now"
+    fi
+  else
+    echo "[ssl] certbot not installed — run: apt install -y certbot"
+  fi
+fi
+
+echo "[6/6] Health checks..."
+sleep 6
+T=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${TENANT_APP_PORT}/login || echo 000)
+A=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $ADMIN_HOST" http://127.0.0.1:${ADMIN_APP_PORT}/login || echo 000)
+X=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${TENANT_APP_PORT}/admin || echo 000)
+echo "[health] tenant=$T admin=$A tenant_admin_path=$X"
+echo DEPLOY_COMPLETE_SUCCESS
+`;
+}
+
+/**
+ * One-click full deployment of Exam Builder (tenant + admin apps) to the VPS.
+ *
+ * - From a dev machine: runs synchronously over SSH and reports health.
+ * - From the admin app on the VPS itself: runs detached in the background, because the
+ *   script reloads this very process (results go to /var/log/exam-builder-deploy.log).
  */
 export async function deployExamBuilderToVpsAction(): Promise<VpsDeployResult> {
-  await assertSuperAdmin();
+  await requireSuperAdmin();
 
-  if (!fs.existsSync(SSH_KEY_PATH)) {
+  const local = isLocalExec();
+  if (!local && !fs.existsSync(SSH_KEY_PATH)) {
     return {
       success: false,
       message: "مفتاح SSH للاتصال بالسيرفر غير موجود.",
@@ -49,101 +174,45 @@ export async function deployExamBuilderToVpsAction(): Promise<VpsDeployResult> {
     };
   }
 
-  const logs: string[] = [`الاتصال بخادم Hostinger VPS (${HOSTINGER_VPS_CONFIG.ip})...`];
-  const geminiKey = process.env.GEMINI_API_KEY || "";
-  const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const script = buildDeployScript();
 
-  // Tenant accounts live in data/tenants.json (synced from this admin panel),
-  // so DATABASE_URL is intentionally NOT set on the VPS.
-  const envFile = `GEMINI_API_KEY="${geminiKey}"\nGEMINI_MODEL="${geminiModel}"\nPORT=${VPS_APP_PORT}\n`;
-  const envB64 = Buffer.from(envFile, "utf-8").toString("base64");
-
-  const nginxWildcard = `server {
-    listen 80;
-    listen [::]:80;
-    server_name *.oqabagency.com *.alasima-erp.com;
-
-    client_max_body_size 50M;
-
-    location / {
-        proxy_pass http://127.0.0.1:${VPS_APP_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+  if (local) {
+    try {
+      await runOnVps(
+        `cat > /tmp/exam-builder-deploy.sh <<'EB_DEPLOY_EOF'\n${script}\nEB_DEPLOY_EOF\n` +
+          `setsid nohup bash /tmp/exam-builder-deploy.sh > ${DEPLOY_LOG} 2>&1 < /dev/null &\necho STARTED`,
+        20_000
+      );
+      return {
+        success: true,
+        message: "بدأ النشر في الخلفية. ستُعاد تشغيل لوحة الإدارة خلال 2-4 دقائق — حدّث الصفحة بعدها.",
+        logs: [`سجل النشر على الخادم: ${DEPLOY_LOG}`],
+      };
+    } catch (err: any) {
+      return { success: false, message: "تعذر بدء النشر على الخادم.", error: err.message };
     }
-}
-`;
-  const nginxB64 = Buffer.from(nginxWildcard, "utf-8").toString("base64");
+  }
 
-  const remoteScript = `
-set -e
-mkdir -p ${VPS_APP_DIR}
-cd ${VPS_APP_DIR}
-
-if [ ! -d ".git" ]; then
-  echo "[1/5] Cloning repository..."
-  git clone ${REPO_URL} .
-else
-  echo "[1/5] Pulling latest updates..."
-  git fetch origin main
-  git reset --hard origin/main
-fi
-
-echo "[2/5] Writing environment..."
-rm -f .env
-echo '${envB64}' | base64 -d > .env.local
-mkdir -p data
-
-echo "[3/5] Installing & building..."
-npm install --no-audit --no-fund
-npx prisma generate
-npm run build
-
-echo "[4/5] (Re)starting PM2 on port ${VPS_APP_PORT}..."
-pm2 delete exam-builder >/dev/null 2>&1 || true
-PORT=${VPS_APP_PORT} pm2 start npm --name exam-builder -- start
-pm2 save
-
-echo "[5/5] Configuring Nginx wildcard proxy..."
-echo '${nginxB64}' | base64 -d > /etc/nginx/sites-available/exam-builder
-ln -sf /etc/nginx/sites-available/exam-builder /etc/nginx/sites-enabled/exam-builder
-nginx -t
-systemctl reload nginx
-echo DEPLOY_COMPLETE_SUCCESS
-`;
-
+  const logs: string[] = [`الاتصال بخادم Hostinger VPS (${HOSTINGER_VPS_CONFIG.ip})...`];
   try {
-    const { stdout } = await runOnVps(remoteScript, 15 * 60 * 1000);
+    const { stdout } = await runOnVps(script, 15 * 60 * 1000);
     logs.push(...stdout.split("\n").filter((l) => l.startsWith("[") || l.includes("DEPLOY")));
 
     if (!stdout.includes("DEPLOY_COMPLETE_SUCCESS")) {
       return { success: false, message: "لم يكتمل النشر على خادم VPS.", logs };
     }
 
-    // Push tenant accounts so logins work right after deployment
+    // First-time migration only: pushes local tenants.json when the VPS has none yet.
     const sync = await syncTenantsToVps();
     logs.push(sync.message);
 
-    // Give Next.js a few seconds to boot before checking health
-    await new Promise((r) => setTimeout(r, 6000));
-    const health = await runOnVps(
-      `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${VPS_APP_PORT}/login || echo 000`,
-      20_000
-    );
-    const code = health.stdout.trim();
-    logs.push(`فحص صحة التطبيق على المنفذ ${VPS_APP_PORT}: HTTP ${code}`);
-
+    const health = stdout.match(/\[health\] tenant=(\d+) admin=(\d+) tenant_admin_path=(\d+)/);
+    const ok = health ? health[1] === "200" && health[2] === "200" : false;
     return {
-      success: code === "200",
-      message:
-        code === "200"
-          ? "تم نشر المنصة على خادم VPS ومزامنة حسابات المستأجرين بنجاح!"
-          : `اكتمل النشر لكن التطبيق لم يستجب بعد (HTTP ${code}). أعد الفحص بعد قليل.`,
+      success: ok,
+      message: ok
+        ? "تم نشر منصة المعلمين ولوحة الإدارة المركزية على خادم VPS بنجاح!"
+        : "اكتمل النشر لكن أحد التطبيقين لم يستجب بعد. أعد الفحص بعد قليل.",
       logs,
     };
   } catch (err: any) {
@@ -165,7 +234,7 @@ export async function autoDeployTenantVpsAction(
   tenantId: string,
   domain: string
 ): Promise<VpsDeployResult> {
-  await assertSuperAdmin();
+  await requireSuperAdmin();
 
   const cleanDomain = domain.trim().toLowerCase();
   if (!cleanDomain) {
@@ -184,9 +253,6 @@ export async function autoDeployTenantVpsAction(
 
     const sync = await syncTenantsToVps();
     logs.push(sync.message);
-    if (!sync.synced) {
-      return { success: false, message: sync.message, logs };
-    }
 
     const health = await checkTenantDomainOnVps(cleanDomain);
     logs.push(health.message);
@@ -211,11 +277,12 @@ export async function autoDeployTenantVpsAction(
 }
 
 /**
- * Manually re-push all tenant accounts / subscriptions to the VPS.
+ * Manually force-push the local tenant store to the VPS (overwrites the server copy).
+ * Only meaningful from a dev machine; on the VPS the store is already shared.
  */
 export async function syncAllTenantsToVpsAction(): Promise<VpsDeployResult> {
-  await assertSuperAdmin();
-  const res = await syncTenantsToVps();
+  await requireSuperAdmin();
+  const res = await syncTenantsToVps({ force: true });
   return { success: res.synced, message: res.message };
 }
 
@@ -227,7 +294,7 @@ export async function checkDomainStatusAction(domain: string): Promise<{
   statusCode?: number;
   message: string;
 }> {
-  await assertSuperAdmin();
+  await requireSuperAdmin();
   const res = await checkTenantDomainOnVps(domain);
   return { isOnline: res.online, message: res.message };
 }
