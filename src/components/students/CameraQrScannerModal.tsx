@@ -172,7 +172,7 @@ export default function CameraQrScannerModal({
         onAttendanceRecorded();
       } else {
         // Could be a student code that wasn't found in group
-        console.warn("QR code not matched in this group:", cleanCode);
+        console.warn("QR code not matched in this group:", token);
       }
     } catch (err) {
       console.error(err);
