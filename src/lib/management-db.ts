@@ -5,6 +5,7 @@ import {
   Group,
   Student,
   FinancialRecord,
+  PaymentStatus,
   AttendanceRecord,
   AttendanceStatus,
   GroupClassSession,
@@ -718,7 +719,7 @@ export function getAttendance(groupId: string, date: string) {
 
 export function markAttendance(
   studentIdOrCode: string,
-  groupId: string,
+  groupId: string | undefined,
   date: string,
   status: AttendanceStatus,
   method: "camera_qr" | "manual" = "manual"
@@ -737,11 +738,14 @@ export function markAttendance(
   );
   if (!student) return { success: false, error: "الطالب غير موجود" };
 
+  const targetGroupId = (groupId && groupId !== "auto") ? groupId : student.groupId;
+  const group = store.groups.find((g) => g.id === targetGroupId);
+
   // Ensure class session exists for this day
-  if (!store.sessions.some((s) => s.groupId === groupId && s.date === date)) {
+  if (!store.sessions.some((s) => s.groupId === targetGroupId && s.date === date)) {
     store.sessions.push({
-      id: `ses-${Date.now()}`,
-      groupId,
+      id: `ses-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      groupId: targetGroupId,
       date,
       title: "حصة دراسية",
     });
@@ -759,6 +763,7 @@ export function markAttendance(
   if (idx >= 0) {
     store.attendance[idx] = {
       ...store.attendance[idx],
+      groupId: targetGroupId,
       status,
       time: status === "attended" ? time : undefined,
       method,
@@ -767,7 +772,7 @@ export function markAttendance(
     store.attendance.push({
       id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       studentId: student.id,
-      groupId,
+      groupId: targetGroupId,
       date,
       status,
       time: status === "attended" ? time : undefined,
@@ -776,7 +781,16 @@ export function markAttendance(
   }
 
   saveManagementStore(store);
-  return { success: true, student, status, time };
+  return {
+    success: true,
+    student: {
+      ...student,
+      groupName: group?.name || student.groupName,
+    },
+    group,
+    status,
+    time,
+  };
 }
 
 export function bulkMarkAttendance(
@@ -1015,4 +1029,475 @@ export function deleteSavedQrPdf(id: string): boolean {
   store.savedQrPdfs = store.savedQrPdfs.filter((p) => p.id !== id);
   saveManagementStore(store);
   return true;
+}
+
+// ==========================================
+// FAST PAYMENT & ZERO-LATENCY QR LOOKUP
+// ==========================================
+
+export function getStudentForPayment(studentIdOrCode: string, month?: string) {
+  const store = getManagementStore();
+  const clean = (studentIdOrCode || "").includes("/s/")
+    ? studentIdOrCode.split("/s/").pop()?.split("?")[0]?.trim() || studentIdOrCode.trim()
+    : (studentIdOrCode || "").trim();
+
+  const student = store.students.find(
+    (s) =>
+      s.id === clean ||
+      s.code === clean ||
+      s.id.toLowerCase() === clean.toLowerCase() ||
+      s.code.toLowerCase() === clean.toLowerCase()
+  );
+  if (!student) return null;
+
+  const targetMonth = month || new Date().toISOString().substring(0, 7);
+  const group = store.groups.find((g) => g.id === student.groupId);
+  const fin = store.financials.find(
+    (f) => f.studentId === student.id && f.month === targetMonth
+  );
+
+  const totalAmount = fin?.totalAmount ?? (student.monthlyFee || 250);
+  const paidAmount = fin?.paidAmount ?? 0;
+  const status: PaymentStatus = fin?.status ?? "unpaid";
+
+  return {
+    student: {
+      ...student,
+      groupName: group?.name || student.groupName,
+    },
+    group,
+    month: targetMonth,
+    financial: fin || {
+      id: `fin-${student.id}-${targetMonth}`,
+      studentId: student.id,
+      groupId: student.groupId,
+      month: targetMonth,
+      status,
+      paidAmount,
+      totalAmount,
+      updatedAt: Date.now(),
+    },
+  };
+}
+
+export function recordFastPayment(
+  studentIdOrCode: string,
+  month: string,
+  status: PaymentStatus = "paid",
+  customPaidAmount?: number,
+  notes?: string
+) {
+  const store = getManagementStore();
+  const clean = (studentIdOrCode || "").includes("/s/")
+    ? studentIdOrCode.split("/s/").pop()?.split("?")[0]?.trim() || studentIdOrCode.trim()
+    : (studentIdOrCode || "").trim();
+
+  const student = store.students.find(
+    (s) =>
+      s.id === clean ||
+      s.code === clean ||
+      s.id.toLowerCase() === clean.toLowerCase() ||
+      s.code.toLowerCase() === clean.toLowerCase()
+  );
+  if (!student) return { success: false, error: "الطالب غير موجود في النظام" };
+
+  const group = store.groups.find((g) => g.id === student.groupId);
+  const totalAmount = student.monthlyFee || 250;
+  let paidAmount = 0;
+  if (status === "paid") {
+    paidAmount = customPaidAmount !== undefined ? customPaidAmount : totalAmount;
+  } else if (status === "returned") {
+    paidAmount = 0;
+  } else {
+    paidAmount = customPaidAmount !== undefined ? customPaidAmount : 0;
+  }
+
+  const idx = store.financials.findIndex(
+    (f) => f.studentId === student.id && f.month === month
+  );
+
+  const now = Date.now();
+  let savedRecord: FinancialRecord;
+
+  if (idx >= 0) {
+    store.financials[idx] = {
+      ...store.financials[idx],
+      status,
+      paidAmount,
+      totalAmount,
+      notes: notes !== undefined ? notes : store.financials[idx].notes,
+      updatedAt: now,
+    };
+    savedRecord = store.financials[idx];
+  } else {
+    savedRecord = {
+      id: `fin-${student.id}-${month}-${now}`,
+      studentId: student.id,
+      groupId: student.groupId,
+      month,
+      status,
+      paidAmount,
+      totalAmount,
+      notes,
+      updatedAt: now,
+    };
+    store.financials.push(savedRecord);
+  }
+
+  saveManagementStore(store);
+
+  return {
+    success: true,
+    student: {
+      ...student,
+      groupName: group?.name || student.groupName,
+    },
+    group,
+    financial: savedRecord,
+  };
+}
+
+// ==========================================
+// HOME ANALYTICS API
+// ==========================================
+
+export interface HomeAnalytics {
+  todayDate: string;
+  currentMonth: string;
+  todayDateFormatted: string;
+  currentMonthFormatted: string;
+  overall: {
+    totalStudents: number;
+    activeStudents: number;
+    inactiveStudents: number;
+    totalGroups: number;
+    totalAcademicYears: number;
+    todayAttendedCount: number;
+    todayAbsentCount: number;
+    todayAttendanceRate: number;
+    monthlyExpectedRevenue: number;
+    monthlyCollectedRevenue: number;
+    monthlyRemainingRevenue: number;
+    monthlyCollectionRate: number;
+    paidStudentsCount: number;
+    unpaidStudentsCount: number;
+    partialStudentsCount: number;
+  };
+  byYear: Array<{
+    year: string;
+    studentsCount: number;
+    activeStudentsCount: number;
+    inactiveStudentsCount: number;
+    groupsCount: number;
+    percentageOfAllStudents: number;
+    monthlyExpectedRevenue: number;
+    monthlyCollectedRevenue: number;
+    todayAttendedCount: number;
+    todayTotalCount: number;
+    attendanceRate: number;
+  }>;
+  byGroup: Array<{
+    id: string;
+    name: string;
+    academicYear: string;
+    subject: string;
+    teacher: string;
+    studentsCount: number;
+    activeStudentsCount: number;
+    monthlyFee: number;
+    todayAttendedCount: number;
+    todayAttendanceRate: number;
+    monthlyPaidCount: number;
+    monthlyUnpaidCount: number;
+    monthlyPartialCount: number;
+    monthlyCollectionRate: number;
+  }>;
+  recentAttendance: Array<{
+    id: string;
+    studentId: string;
+    studentName: string;
+    studentCode: string;
+    groupName: string;
+    time?: string;
+    status: AttendanceStatus;
+    method?: string;
+    date: string;
+  }>;
+  recentPayments: Array<{
+    id: string;
+    studentId: string;
+    studentName: string;
+    studentCode: string;
+    groupName: string;
+    month: string;
+    status: PaymentStatus;
+    paidAmount: number;
+    totalAmount: number;
+    updatedAt: number;
+  }>;
+}
+
+export function getHomeAnalytics(targetDate?: string, targetMonth?: string): HomeAnalytics {
+  const store = getManagementStore();
+  const todayDate = targetDate || new Date().toISOString().split("T")[0];
+  const currentMonth = targetMonth || todayDate.substring(0, 7);
+
+  // Format Dates in Arabic
+  let todayDateFormatted = todayDate;
+  let currentMonthFormatted = currentMonth;
+  try {
+    const d = new Date(todayDate);
+    todayDateFormatted = d.toLocaleDateString("ar-EG", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    currentMonthFormatted = d.toLocaleDateString("ar-EG", {
+      year: "numeric",
+      month: "long",
+    });
+  } catch (e) {
+    // fallback
+  }
+
+  const totalStudents = store.students.length;
+  const activeStudents = store.students.filter((s) => s.status === "active").length;
+  const inactiveStudents = store.students.filter((s) => s.status === "inactive").length;
+  const totalGroups = store.groups.length;
+
+  // Distinct academic years
+  const yearsSet = new Set<string>();
+  store.students.forEach((s) => {
+    if (s.academicYear) yearsSet.add(s.academicYear);
+  });
+  store.groups.forEach((g) => {
+    if (g.academicYear) yearsSet.add(g.academicYear);
+  });
+  const academicYears = Array.from(yearsSet);
+
+  // Today's attendance
+  const todayAttendedRecords = store.attendance.filter(
+    (a) => a.date === todayDate && a.status === "attended"
+  );
+  const todayAttendedCount = todayAttendedRecords.length;
+  const todayAbsentCount = Math.max(0, totalStudents - todayAttendedCount);
+  const todayAttendanceRate =
+    totalStudents > 0 ? Math.round((todayAttendedCount / totalStudents) * 100) : 0;
+
+  // Monthly financials
+  let monthlyExpectedRevenue = 0;
+  let monthlyCollectedRevenue = 0;
+  let paidStudentsCount = 0;
+  let unpaidStudentsCount = 0;
+  let partialStudentsCount = 0;
+
+  store.students.forEach((s) => {
+    const fee = s.monthlyFee || 250;
+    if (s.status === "active") {
+      monthlyExpectedRevenue += fee;
+    }
+    const fin = store.financials.find(
+      (f) => f.studentId === s.id && f.month === currentMonth
+    );
+    if (fin) {
+      monthlyCollectedRevenue += fin.paidAmount || 0;
+      if (fin.status === "paid") {
+        paidStudentsCount++;
+      } else if (fin.status === "returned") {
+        unpaidStudentsCount++;
+      } else if (fin.paidAmount > 0 && fin.paidAmount < (fin.totalAmount || fee)) {
+        partialStudentsCount++;
+      } else {
+        unpaidStudentsCount++;
+      }
+    } else {
+      unpaidStudentsCount++;
+    }
+  });
+
+  const monthlyRemainingRevenue = Math.max(0, monthlyExpectedRevenue - monthlyCollectedRevenue);
+  const monthlyCollectionRate =
+    monthlyExpectedRevenue > 0
+      ? Math.round((monthlyCollectedRevenue / monthlyExpectedRevenue) * 100)
+      : 0;
+
+  // By Academic Year
+  const byYear = academicYears.map((year) => {
+    const yearStudents = store.students.filter((s) => s.academicYear === year);
+    const activeCount = yearStudents.filter((s) => s.status === "active").length;
+    const inactiveCount = yearStudents.filter((s) => s.status === "inactive").length;
+    const groupsCount = store.groups.filter((g) => g.academicYear === year).length;
+    const percentageOfAllStudents =
+      totalStudents > 0 ? Math.round((yearStudents.length / totalStudents) * 100) : 0;
+
+    let expectedRev = 0;
+    let collectedRev = 0;
+    let attendedToday = 0;
+
+    yearStudents.forEach((st) => {
+      const fee = st.monthlyFee || 250;
+      if (st.status === "active") expectedRev += fee;
+      const fin = store.financials.find(
+        (f) => f.studentId === st.id && f.month === currentMonth
+      );
+      if (fin) collectedRev += fin.paidAmount || 0;
+
+      const att = store.attendance.find(
+        (a) => a.studentId === st.id && a.date === todayDate && a.status === "attended"
+      );
+      if (att) attendedToday++;
+    });
+
+    const attRate =
+      yearStudents.length > 0 ? Math.round((attendedToday / yearStudents.length) * 100) : 0;
+
+    return {
+      year,
+      studentsCount: yearStudents.length,
+      activeStudentsCount: activeCount,
+      inactiveStudentsCount: inactiveCount,
+      groupsCount,
+      percentageOfAllStudents,
+      monthlyExpectedRevenue: expectedRev,
+      monthlyCollectedRevenue: collectedRev,
+      todayAttendedCount: attendedToday,
+      todayTotalCount: yearStudents.length,
+      attendanceRate: attRate,
+    };
+  });
+
+  // By Group
+  const byGroup = store.groups.map((grp) => {
+    const grpStudents = store.students.filter((s) => s.groupId === grp.id);
+    const activeCount = grpStudents.filter((s) => s.status === "active").length;
+    const avgFee =
+      grpStudents.length > 0
+        ? Math.round(
+            grpStudents.reduce((sum, s) => sum + (s.monthlyFee || 250), 0) /
+              grpStudents.length
+          )
+        : 250;
+
+    let attendedToday = 0;
+    let paidCount = 0;
+    let unpaidCount = 0;
+    let partialCount = 0;
+    let collectedAmount = 0;
+    let expectedAmount = 0;
+
+    grpStudents.forEach((st) => {
+      const fee = st.monthlyFee || 250;
+      if (st.status === "active") expectedAmount += fee;
+
+      const att = store.attendance.find(
+        (a) => a.studentId === st.id && a.date === todayDate && a.status === "attended"
+      );
+      if (att) attendedToday++;
+
+      const fin = store.financials.find(
+        (f) => f.studentId === st.id && f.month === currentMonth
+      );
+      if (fin) {
+        collectedAmount += fin.paidAmount || 0;
+        if (fin.status === "paid") paidCount++;
+        else if (fin.paidAmount > 0) partialCount++;
+        else unpaidCount++;
+      } else {
+        unpaidCount++;
+      }
+    });
+
+    const attRate =
+      grpStudents.length > 0 ? Math.round((attendedToday / grpStudents.length) * 100) : 0;
+    const collRate =
+      expectedAmount > 0 ? Math.round((collectedAmount / expectedAmount) * 100) : 0;
+
+    return {
+      id: grp.id,
+      name: grp.name,
+      academicYear: grp.academicYear,
+      subject: grp.subject,
+      teacher: grp.teacher,
+      studentsCount: grpStudents.length,
+      activeStudentsCount: activeCount,
+      monthlyFee: avgFee,
+      todayAttendedCount: attendedToday,
+      todayAttendanceRate: attRate,
+      monthlyPaidCount: paidCount,
+      monthlyUnpaidCount: unpaidCount,
+      monthlyPartialCount: partialCount,
+      monthlyCollectionRate: collRate,
+    };
+  });
+
+  // Recent attendance (latest 10)
+  const recentAttendance = [...store.attendance]
+    .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")))
+    .slice(0, 8)
+    .map((att) => {
+      const student = store.students.find((s) => s.id === att.studentId);
+      const group = store.groups.find((g) => g.id === att.groupId);
+      return {
+        id: att.id,
+        studentId: att.studentId,
+        studentName: student?.name || "طالب غير مسجل",
+        studentCode: student?.code || "",
+        groupName: group?.name || "مجموعة عامة",
+        time: att.time,
+        status: att.status,
+        method: att.method,
+        date: att.date,
+      };
+    });
+
+  // Recent payments (latest 8)
+  const recentPayments = [...store.financials]
+    .filter((f) => (f.paidAmount && f.paidAmount > 0) || f.status === "paid" || f.status === "returned")
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 8)
+    .map((fin) => {
+      const student = store.students.find((s) => s.id === fin.studentId);
+      const group = store.groups.find((g) => g.id === fin.groupId);
+      return {
+        id: fin.id,
+        studentId: fin.studentId,
+        studentName: student?.name || "طالب غير مسجل",
+        studentCode: student?.code || "",
+        groupName: group?.name || "مجموعة عامة",
+        month: fin.month,
+        status: fin.status,
+        paidAmount: fin.paidAmount,
+        totalAmount: fin.totalAmount,
+        updatedAt: fin.updatedAt,
+      };
+    });
+
+  return {
+    todayDate,
+    currentMonth,
+    todayDateFormatted,
+    currentMonthFormatted,
+    overall: {
+      totalStudents,
+      activeStudents,
+      inactiveStudents,
+      totalGroups,
+      totalAcademicYears: academicYears.length,
+      todayAttendedCount,
+      todayAbsentCount,
+      todayAttendanceRate,
+      monthlyExpectedRevenue,
+      monthlyCollectedRevenue,
+      monthlyRemainingRevenue,
+      monthlyCollectionRate,
+      paidStudentsCount,
+      unpaidStudentsCount,
+      partialStudentsCount,
+    },
+    byYear,
+    byGroup,
+    recentAttendance,
+    recentPayments,
+  };
 }

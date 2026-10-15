@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Home,
   PenTool,
   FolderUp,
   Image as ImageIcon,
@@ -29,6 +30,17 @@ interface NavSection {
 }
 
 const navSections: NavSection[] = [
+  {
+    title: "نظرة عامة",
+    items: [
+      {
+        name: "الرئيسية",
+        href: "/",
+        icon: Home,
+        description: "لوحة التحكم، المسح السريع والإحصائيات",
+      },
+    ],
+  },
   {
     title: "السنتر",
     items: [
@@ -101,7 +113,9 @@ export default function Sidebar() {
   if (
     pathname === "/login" ||
     pathname.startsWith("/admin") ||
-    pathname === "/denied"
+    pathname === "/denied" ||
+    pathname.startsWith("/s/") ||
+    pathname === "/s"
   ) {
     return null;
   }
@@ -111,8 +125,8 @@ export default function Sidebar() {
       <div>
         {/* Header / Brand */}
         <div className="p-6 pb-8 border-b border-slate-100/80">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
+          <Link href="/" className="flex items-center gap-3 group">
+            <div className="w-11 h-11 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20 group-hover:scale-105 transition-transform">
               <GraduationCap className="w-6 h-6" />
             </div>
             <div>
@@ -123,7 +137,7 @@ export default function Sidebar() {
                 إدارة وبناء النماذج التعليمية
               </p>
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Navigation Sections */}
@@ -136,9 +150,7 @@ export default function Sidebar() {
               <nav className="space-y-1">
                 {section.items.map((item) => {
                   const Icon = item.icon;
-                  const isActive =
-                    pathname === item.href ||
-                    (item.href === "/exam-builder" && pathname === "/");
+                  const isActive = pathname === item.href;
 
                   return (
                     <Link

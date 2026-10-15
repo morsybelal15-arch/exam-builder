@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     // Single / Camera QR check-in
     const { studentIdOrCode, groupId, date, status, method } = body;
-    if (!studentIdOrCode || !groupId) {
+    if (!studentIdOrCode) {
       return NextResponse.json({ error: "معرف الطالب أو رمز QR مطلوب" }, { status: 400 });
     }
 
