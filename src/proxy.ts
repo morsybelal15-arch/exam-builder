@@ -7,7 +7,7 @@ import { verifySessionToken } from "@/lib/session-token";
  * Domain / mode gate (Next.js 16 "proxy", formerly middleware).
  *
  *  - tenant mode: teacher domains. /admin and /api/admin do not exist (404).
- *  - admin mode : examsappadmin domain. Only /admin, /login and /api/auth/* exist.
+ *  - admin mode : exambuilderadmin domain. Only /admin, /login and /api/auth/* exist.
  *  - all mode   : local development, both sides available.
  *
  * Session cookies are HMAC-signed, so a forged role is rejected here and again
@@ -56,7 +56,7 @@ export function proxy(request: NextRequest) {
   const isAdmin = session?.role === "SUPER_ADMIN" && mode !== "tenant";
   const isTenant = session?.role === "TENANT" && mode !== "admin";
 
-  // ───────────────────────────── ADMIN DOMAIN ─────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ADMIN DOMAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (mode === "admin") {
     const adminHost = getAdminHost();
     if (adminHost && hostOf(request) !== adminHost) return notFound(request);
@@ -73,11 +73,11 @@ export function proxy(request: NextRequest) {
       return isAdmin ? NextResponse.next() : redirectTo(request, "/login", pathname);
     }
 
-    // Everything else (exam builder, OCR, files API, …) does not exist on the admin domain.
+    // Everything else (exam builder, OCR, files API, â€¦) does not exist on the admin domain.
     return notFound(request);
   }
 
-  // ───────────────────────────── TENANT DOMAINS ───────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TENANT DOMAINS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (mode === "tenant" && isAdminPath(pathname)) return notFound(request);
 
   if (pathname.startsWith("/api/auth/")) return NextResponse.next();

@@ -3,7 +3,7 @@
  *
  *  - "tenant": serves teacher domains only. Every admin route / action is disabled.
  *  - "admin" : serves the single Super Admin domain only (ADMIN_HOST). Tenant app is disabled.
- *  - "all"   : local development convenience — both sides enabled (never use on the VPS).
+ *  - "all"   : local development convenience â€” both sides enabled (never use on the VPS).
  *
  * When APP_MODE is not set, production defaults to the safe "tenant" mode and
  * development defaults to "all" so the local workflow keeps working.
@@ -30,13 +30,13 @@ export function tenantEnabled(): boolean {
   return mode === "tenant" || mode === "all";
 }
 
-/** Hostname of the dedicated admin domain, e.g. examsappadmin.oqabagency.com */
+/** Hostname of the dedicated admin domain, e.g. exambuilderadmin.oqabagency.com */
 export function getAdminHost(): string | null {
   const host = (process.env.ADMIN_HOST || "").trim().toLowerCase();
   return host || null;
 }
 
-/** Session cookie name — different per mode so admin & tenant sessions never mix. */
+/** Session cookie name â€” different per mode so admin & tenant sessions never mix. */
 export function getSessionCookieName(): string {
   return getAppMode() === "admin" ? "eb_admin_session" : "eb_session";
 }

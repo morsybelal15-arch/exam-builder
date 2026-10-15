@@ -1,13 +1,13 @@
 /**
- * PM2 process file — ONE build, TWO processes:
+ * PM2 process file â€” ONE build, TWO processes:
  *
- *   exam-builder  APP_MODE=tenant  127.0.0.1:3015  → every teacher domain (Nginx wildcard + tenant vhosts)
- *   exam-admin    APP_MODE=admin   127.0.0.1:3016  → only examsappadmin.oqabagency.com
+ *   exam-builder  APP_MODE=tenant  127.0.0.1:3015  â†’ every teacher domain (Nginx wildcard + tenant vhosts)
+ *   exam-admin    APP_MODE=admin   127.0.0.1:3016  â†’ only exambuilderadmin.oqabagency.com
  *
  * Secrets are NOT stored in git. They are read from server-only files next to this one
  * (both are created/updated by the "deploy to VPS" action and ignored by .gitignore):
- *   .env.tenant  → SESSION_SECRET
- *   .env.admin   → SESSION_SECRET, ADMIN_PHONE, ADMIN_PASSWORD_HASH, ADMIN_HOST, ADMIN_NAME
+ *   .env.tenant  â†’ SESSION_SECRET
+ *   .env.admin   â†’ SESSION_SECRET, ADMIN_PHONE, ADMIN_PASSWORD_HASH, ADMIN_HOST, ADMIN_NAME
  *
  * Usage on the VPS:  pm2 startOrReload ecosystem.config.js --update-env && pm2 save
  */
@@ -28,7 +28,7 @@ function readEnvFile(name) {
       out[m[1]] = value;
     }
   } catch {
-    // file missing → defaults only
+    // file missing â†’ defaults only
   }
   return out;
 }
@@ -60,8 +60,8 @@ module.exports = {
         NODE_ENV: "production",
         APP_MODE: "admin",
         PORT: "3016",
-        ADMIN_HOST: "examsappadmin.oqabagency.com",
-        // The admin lives on the VPS → run provisioning scripts locally instead of over SSH.
+        ADMIN_HOST: "exambuilderadmin.oqabagency.com",
+        // The admin lives on the VPS â†’ run provisioning scripts locally instead of over SSH.
         VPS_LOCAL_EXEC: "1",
         ...readEnvFile(".env.admin"),
       },

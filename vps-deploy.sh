@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Manual fallback for the in-app "نشر المنصة على VPS" button.
+# Manual fallback for the in-app "Ù†Ø´Ø± Ø§Ù„Ù…Ù†ØµØ© Ø¹Ù„Ù‰ VPS" button.
 # Builds ONE release and runs TWO PM2 apps (see ecosystem.config.js):
-#   exam-builder (tenant, :3015) → all teacher domains
-#   exam-admin   (admin,  :3016) → examsappadmin.oqabagency.com only
+#   exam-builder (tenant, :3015) â†’ all teacher domains
+#   exam-admin   (admin,  :3016) â†’ exambuilderadmin.oqabagency.com only
 set -e
 
-ADMIN_HOST="${ADMIN_HOST:-examsappadmin.oqabagency.com}"
+ADMIN_HOST="${ADMIN_HOST:-exambuilderadmin.oqabagency.com}"
 APP_DIR=/var/www/exam-builder
 
 echo "=== [1/5] Setting up Exam Builder Directory ==="
@@ -96,5 +96,5 @@ nginx -t
 systemctl reload nginx
 
 echo "=== [5/5] Deployment Finished ==="
-echo "Tenant domains → :3015 | Admin → http://${ADMIN_HOST} (:3016)"
+echo "Tenant domains â†’ :3015 | Admin â†’ http://${ADMIN_HOST} (:3016)"
 echo "For HTTPS on the admin domain use the in-app deploy button, or: certbot --nginx -d ${ADMIN_HOST} --redirect"
