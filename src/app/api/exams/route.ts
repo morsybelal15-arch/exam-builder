@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
         exam: {
           ...exam,
           questions: JSON.parse(exam.questions || "[]"),
+          models: exam.models ? JSON.parse(exam.models) : null,
         },
       });
     }
@@ -23,6 +24,7 @@ export async function GET(req: NextRequest) {
     const formatted = exams.map((e: any) => ({
       ...e,
       questions: JSON.parse(e.questions || "[]"),
+      models: e.models ? JSON.parse(e.models) : null,
     }));
     return NextResponse.json({ success: true, exams: formatted });
   } catch (error: any) {
@@ -44,6 +46,7 @@ export async function POST(req: NextRequest) {
       grade,
       duration,
       questions,
+      models,
       questionsCount,
       questions_count,
       totalPoints,
@@ -61,6 +64,7 @@ export async function POST(req: NextRequest) {
       grade: grade || "مستوى عام",
       duration: duration || "ساعتان",
       questions: typeof questions === "string" ? questions : JSON.stringify(questions || []),
+      models: typeof models === "string" ? models : models ? JSON.stringify(models) : undefined,
       questions_count: questions_count ?? questionsCount ?? (Array.isArray(questions) ? questions.length : 0),
       total_points: total_points ?? totalPoints ?? 20,
       date_created: date_created ?? dateCreated ?? "اليوم",

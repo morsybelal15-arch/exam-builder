@@ -1,0 +1,467 @@
+"use client";
+
+import React, { useState, useEffect, useRef } from "react";
+import {
+  X,
+  Camera,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  Upload,
+  RefreshCw,
+  Check,
+  User,
+  Award,
+  ChevronDown,
+} from "lucide-react";
+import { Student } from "@/lib/types/management";
+
+interface CameraAiGradeModalProps {
+  groupId: string;
+  examRecordId: string;
+  examName: string;
+  totalScore: number;
+  students: Student[];
+  onClose: () => void;
+  onGradeRecorded: () => void;
+}
+
+export default function CameraAiGradeModal({
+  groupId,
+  examRecordId,
+  examName,
+  totalScore,
+  students,
+  onClose,
+  onGradeRecorded,
+}: CameraAiGradeModalProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [hasCamera, setHasCamera] = useState<boolean>(true);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  // Analysis Result
+  const [ocrResult, setOcrResult] = useState<{
+    detectedStudentName: string;
+    matchedStudentId: string | null;
+    score: number;
+    notes: string;
+  } | null>(null);
+
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("");
+  const [editableScore, setEditableScore] = useState<string>("");
+  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [recordedCount, setRecordedCount] = useState<number>(0);
+
+  // Start Camera
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    const startCamera = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("الكاميرا غير مدعومة في هذا المتصفح");
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          setHasCamera(true);
+        }
+      } catch (err: any) {
+        console.warn("Camera init error:", err);
+        setHasCamera(false);
+      }
+    };
+
+    if (!capturedImage) {
+      startCamera();
+    }
+
+    return () => {
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+    };
+  }, [capturedImage]);
+
+  // Capture frame from video
+  const handleCapture = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current || document.createElement("canvas");
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const base64 = canvas.toDataURL("image/jpeg", 0.9);
+    setCapturedImage(base64);
+    analyzeImageWithAi(base64);
+  };
+
+  // Upload fallback
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        setCapturedImage(base64);
+        analyzeImageWithAi(base64);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const analyzeImageWithAi = async (base64: string) => {
+    try {
+      setIsAnalyzing(true);
+      setErrorMsg("");
+      setOcrResult(null);
+
+      const res = await fetch("/api/ai-grade-ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: base64,
+          groupId,
+          examRecordId,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "تعذر قراءة ورقة الامتحان بالذكاء الاصطناعي");
+      }
+
+      const data = json.data;
+      setOcrResult({
+        detectedStudentName: data.detectedStudentName || "غير محدد",
+        matchedStudentId: data.matchedStudentId || null,
+        score: data.score !== undefined ? data.score : 0,
+        notes: data.notes || "",
+      });
+
+      // Pre-select matched student or first match
+      if (data.matchedStudentId) {
+        setSelectedStudentId(data.matchedStudentId);
+      } else {
+        setSelectedStudentId(students[0]?.id || "");
+      }
+
+      setEditableScore(data.score !== undefined ? String(data.score) : "0");
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || "حدث خطأ أثناء فحص ورقة الامتحان");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleSaveGrade = async (continueNext = false) => {
+    if (!selectedStudentId || editableScore === "") {
+      setErrorMsg("يرجى اختيار الطالب وتحديد الدرجة");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setErrorMsg("");
+
+      const res = await fetch("/api/exam-grades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "saveGrade",
+          examRecordId,
+          studentIdOrCode: selectedStudentId,
+          score: Number(editableScore),
+          notes: ocrResult?.notes || "رصد تلقائي عبر كاميرا الذكاء الاصطناعي",
+          method: "camera_ai",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "فشل حفظ الدرجة");
+      }
+
+      setRecordedCount((prev) => prev + 1);
+      onGradeRecorded();
+
+      if (continueNext) {
+        // Reset for next paper in rapid grading mode
+        setCapturedImage(null);
+        setOcrResult(null);
+        setEditableScore("");
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2000);
+      } else {
+        onClose();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "حدث خطأ أثناء حفظ الدرجة");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRetake = () => {
+    setCapturedImage(null);
+    setOcrResult(null);
+    setErrorMsg("");
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
+      <div className="bg-slate-900 text-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-800 flex flex-col my-auto overflow-hidden animate-in fade-in zoom-in-95">
+        {/* Header */}
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold">
+                  تصحيح ورصد الدرجات بالذكاء الاصطناعي
+                </h3>
+                <span className="text-[10px] bg-blue-600/30 text-blue-400 font-bold px-2 py-0.5 rounded-full border border-blue-500/30">
+                  Gemini Vision OCR
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                {examName} • الدرجة العظمى: <span className="font-mono text-white">{totalScore}</span>
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Viewport / Result Area */}
+        <div className="relative aspect-video sm:aspect-[16/10] bg-black flex items-center justify-center overflow-hidden">
+          {!capturedImage ? (
+            <>
+              {hasCamera ? (
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  <canvas ref={canvasRef} className="hidden" />
+
+                  {/* Header Box Guide */}
+                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6">
+                    <div className="w-full max-w-md h-36 border-2 border-dashed border-amber-400/70 rounded-2xl flex flex-col items-center justify-center bg-black/20 backdrop-blur-2xs">
+                      <span className="text-xs font-bold text-amber-300 drop-shadow">
+                        وجّه الكاميرا نحو ترويسة ورقة الامتحان
+                      </span>
+                      <span className="text-[10px] text-slate-300 mt-1">
+                        (اسم الطالب ومربع الدرجة المرصودة)
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="p-8 text-center space-y-3">
+                  <Camera className="w-12 h-12 text-slate-600 mx-auto" />
+                  <p className="text-sm font-bold text-slate-300">
+                    الكاميرا غير متاحة
+                  </p>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 bg-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>رفع صورة الورقة</span>
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
+              <img
+                src={capturedImage}
+                alt="Captured Exam"
+                className="w-full h-full object-contain"
+              />
+
+              {isAnalyzing && (
+                <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center gap-3">
+                  <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs font-bold text-amber-300">
+                    جاري التعرف على اسم الطالب والدرجة بالذكاء الاصطناعي...
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Action Controls / OCR Analysis Results */}
+        <div className="p-5 bg-slate-900 border-t border-slate-800 space-y-4">
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+
+          {errorMsg && (
+            <div className="p-3 bg-red-950/80 border border-red-800 rounded-xl text-xs text-red-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {!capturedImage ? (
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>رفع صورة من الجهاز</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCapture}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+              >
+                <Camera className="w-4 h-4" />
+                <span>التقاط وقراءة الدرجة</span>
+              </button>
+            </div>
+          ) : ocrResult ? (
+            <div className="space-y-4 animate-in fade-in">
+              {/* OCR Detection Box */}
+              <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 space-y-3">
+                <div className="flex items-center justify-between text-xs border-b border-slate-700/60 pb-2">
+                  <span className="text-slate-400">الاسم المكتشف في الورقة:</span>
+                  <span className="font-bold text-amber-300 font-mono text-sm">
+                    {ocrResult.detectedStudentName}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Student Match Selector */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                      <User className="w-3.5 h-3.5 text-blue-400" />
+                      <span>تطابق الطالب في المجموعة:</span>
+                    </label>
+                    <select
+                      value={selectedStudentId}
+                      onChange={(e) => setSelectedStudentId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      {students.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Editable Degree / Score */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                      <Award className="w-3.5 h-3.5 text-amber-400" />
+                      <span>الدرجة المرصودة (من {totalScore}):</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.5"
+                        max={totalScore}
+                        min={0}
+                        value={editableScore}
+                        onChange={(e) => setEditableScore(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <span className="text-xs text-slate-400 font-mono shrink-0">
+                        / {totalScore}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleRetake}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>إعادة التقاط</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => handleSaveGrade(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer border border-slate-700"
+                    title="حفظ درجة الطالب الحالي وفتح الكاميرا فوراً للورقة التالية"
+                  >
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>حفظ والتقاط التالي</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => handleSaveGrade(false)}
+                    className="inline-flex items-center gap-1.5 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+                  >
+                    <span>{isSaving ? "جاري الحفظ..." : "تأكيد وحفظ"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleRetake}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700"
+              >
+                إلغاء والتقاط مجدداً
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Session Counter */}
+        {recordedCount > 0 && (
+          <div className="px-5 py-2.5 bg-slate-950 border-t border-slate-800/80 text-[11px] text-emerald-400 flex items-center justify-between">
+            <span>تم رصد درجات {recordedCount} طالب في هذه الجلسة بنجاح ✓</span>
+            <span className="text-slate-500 font-mono">وضع الرصد السريع نشط</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

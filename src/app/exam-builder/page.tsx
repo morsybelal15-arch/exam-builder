@@ -46,8 +46,16 @@ import {
   ImagePlus,
   Search,
   AlertCircle,
+  Shuffle,
 } from "lucide-react";
 import GeminiKeyModal from "@/components/GeminiKeyModal";
+import ModelGenerationModal from "@/components/ModelGenerationModal";
+import {
+  ExamModelsData,
+  generateExamModels,
+  reshuffleExamModels,
+  updateQuestionNumberPrefix,
+} from "@/lib/multi-model-exam";
 
 interface CropRect {
   x: number;
@@ -211,6 +219,10 @@ export default function ExamBuilderPage() {
   // Structured Exam Questions State (starts clean and empty)
   const [examQuestions, setExamQuestions] = useState<ExamQuestionItem[]>([]);
 
+  // Multi-Model Exam State (نماذج أ - ب - ج لمنع الغش)
+  const [examModels, setExamModels] = useState<ExamModelsData<ExamQuestionItem> | null>(null);
+  const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
+
   // Canva-like Free Floating Images on the A4 Canvas
   const [freeCanvasImages, setFreeCanvasImages] = useState<FreeCanvasItem[]>([]);
   const [activeFreeImageId, setActiveFreeImageId] = useState<string | null>(null);
@@ -358,6 +370,8 @@ export default function ExamBuilderPage() {
     setWatermarkImage(null);
     setEditingExamId(null);
     setQuestionStyles({});
+    setExamModels(null);
+    setIsModelModalOpen(false);
     setHistory([{ questions: [], freeImages: [], strokes: [] }]);
     setHistoryIndex(0);
     try {
@@ -390,8 +404,19 @@ export default function ExamBuilderPage() {
               setPaperTitle(ex.title);
             }
             if (ex.exam_code) setExamCode(ex.exam_code);
-            if (Array.isArray(ex.questions)) {
+            if (ex.models && ex.models.modelCount > 1) {
+              setExamModels(ex.models);
+              const activeKey = ex.models.activeModelKey || "A";
+              if (activeKey === "B" && ex.models.models?.B?.questions) {
+                setExamQuestions(ex.models.models.B.questions);
+              } else if (activeKey === "C" && ex.models.models?.C?.questions) {
+                setExamQuestions(ex.models.models.C.questions);
+              } else if (ex.models.models?.A?.questions) {
+                setExamQuestions(ex.models.models.A.questions);
+              }
+            } else if (Array.isArray(ex.questions)) {
               setExamQuestions(ex.questions);
+              setExamModels(null);
             }
             if (ex.total_points) setMaxScore(ex.total_points);
             setSaveStatus(`تم تحميل نموذج الاختبار للتعديل: ${ex.title}`);
@@ -415,6 +440,9 @@ export default function ExamBuilderPage() {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed.examQuestions)) {
             setExamQuestions(parsed.examQuestions);
+          }
+          if (parsed.examModels !== undefined) {
+            setExamModels(parsed.examModels);
           }
           if (parsed.archiveExamName !== undefined) setArchiveExamName(parsed.archiveExamName);
           if (parsed.paperTitle !== undefined) setPaperTitle(parsed.paperTitle);
@@ -452,6 +480,7 @@ export default function ExamBuilderPage() {
     try {
       const screenState = {
         examQuestions,
+        examModels,
         archiveExamName,
         paperTitle,
         examCode,
@@ -477,6 +506,7 @@ export default function ExamBuilderPage() {
       try {
         const compactState = {
           examQuestions,
+          examModels,
           archiveExamName,
           paperTitle,
           examCode,
@@ -495,6 +525,7 @@ export default function ExamBuilderPage() {
     }
   }, [
     examQuestions,
+    examModels,
     archiveExamName,
     paperTitle,
     examCode,
@@ -1013,7 +1044,26 @@ export default function ExamBuilderPage() {
 
     setSaveStatus("جاري الحفظ...");
     try {
-      const totalPts = examQuestions.reduce((acc, q) => acc + (q.points || 0), 0);
+      let modelsToSave = examModels;
+      let modelAQuestions = examQuestions;
+      if (examModels && examModels.modelCount > 1) {
+        const currentKey = examModels.activeModelKey;
+        const updatedModels = { ...examModels.models };
+        if (currentKey === "A") {
+          updatedModels.A = { ...updatedModels.A, questions: [...examQuestions] };
+          modelAQuestions = examQuestions;
+        } else if (currentKey === "B" && updatedModels.B) {
+          updatedModels.B = { ...updatedModels.B, questions: [...examQuestions] };
+          modelAQuestions = updatedModels.A.questions;
+        } else if (currentKey === "C" && updatedModels.C) {
+          updatedModels.C = { ...updatedModels.C, questions: [...examQuestions] };
+          modelAQuestions = updatedModels.A.questions;
+        }
+        modelsToSave = { ...examModels, models: updatedModels };
+        setExamModels(modelsToSave);
+      }
+
+      const totalPts = modelAQuestions.reduce((acc, q) => acc + (q.points || 0), 0);
       const examId = activeExamId || `exam-${examCode}-${Date.now()}`;
       const res = await fetch("/api/exams", {
         method: "POST",
@@ -1026,8 +1076,9 @@ export default function ExamBuilderPage() {
           subject: "عام",
           grade: "مستوى عام",
           duration: "ساعتان",
-          questions: JSON.stringify(examQuestions),
-          questions_count: examQuestions.length,
+          questions: JSON.stringify(modelAQuestions),
+          models: modelsToSave && modelsToSave.modelCount > 1 ? JSON.stringify(modelsToSave) : undefined,
+          questions_count: modelAQuestions.length,
           total_points: maxScore || totalPts,
           date_created: new Date().toLocaleDateString("ar-EG"),
         }),
@@ -1082,6 +1133,135 @@ export default function ExamBuilderPage() {
     setDuplicateModalOpen(false);
     setEditingExamId(existingId);
     handleSaveExamToDb(archiveExamName, existingId);
+  };
+
+  // -------------------------------------------------------------
+  // MULTI-MODEL GENERATOR HANDLERS (نماذج أ - ب - ج)
+  // -------------------------------------------------------------
+  const handleGenerateModels = (count: 2 | 3) => {
+    if (examQuestions.length === 0) return;
+    const baseQuestions =
+      examModels && examModels.activeModelKey !== "A"
+        ? examModels.models.A.questions
+        : examQuestions;
+
+    const generated = generateExamModels(baseQuestions, count);
+    setExamModels(generated);
+    setExamQuestions(generated.models.A.questions);
+    setSaveStatus(
+      count === 2
+        ? "تم توليد نموذجين (أ - ب) بنجاح مع خلط الأسئلة وتحديث الترقيم"
+        : "تم توليد ٣ نماذج (أ - ب - ج) بنجاح مع خلط الأسئلة وتحديث الترقيم"
+    );
+    setTimeout(() => setSaveStatus(null), 3500);
+  };
+
+  const handleReshuffleExistingModels = () => {
+    if (!examModels || examModels.modelCount <= 1) return;
+    const baseQuestions =
+      examModels.activeModelKey === "A"
+        ? examQuestions
+        : examModels.models.A.questions;
+
+    const nextModels = reshuffleExamModels({
+      ...examModels,
+      models: {
+        ...examModels.models,
+        A: { ...examModels.models.A, questions: baseQuestions },
+      },
+    });
+    setExamModels(nextModels);
+
+    if (nextModels.activeModelKey === "B" && nextModels.models.B) {
+      setExamQuestions(nextModels.models.B.questions);
+    } else if (nextModels.activeModelKey === "C" && nextModels.models.C) {
+      setExamQuestions(nextModels.models.C.questions);
+    } else {
+      setExamQuestions(nextModels.models.A.questions);
+    }
+
+    setSaveStatus("تمت إعادة خلط أسئلة النماذج بنجاح مع تحديث الترقيم");
+    setTimeout(() => setSaveStatus(null), 3000);
+  };
+
+  const handleResetSingleModel = () => {
+    if (examModels && examModels.models.A) {
+      setExamQuestions(examModels.models.A.questions);
+    }
+    setExamModels(null);
+    setSaveStatus("تمت العودة إلى نموذج اختبار واحد");
+    setTimeout(() => setSaveStatus(null), 2500);
+  };
+
+  const handleSelectModelTab = (targetKey: "A" | "B" | "C" | "ALL") => {
+    if (!examModels) return;
+    const currentKey = examModels.activeModelKey;
+    if (currentKey === targetKey) return;
+
+    // 1. Sync current examQuestions back to the model being navigated away from
+    const updatedModels = { ...examModels.models };
+    if (currentKey === "A") {
+      updatedModels.A = { ...updatedModels.A, questions: [...examQuestions] };
+    } else if (currentKey === "B" && updatedModels.B) {
+      updatedModels.B = { ...updatedModels.B, questions: [...examQuestions] };
+    } else if (currentKey === "C" && updatedModels.C) {
+      updatedModels.C = { ...updatedModels.C, questions: [...examQuestions] };
+    }
+
+    // 2. Load the target model's questions into examQuestions
+    if (targetKey === "A") {
+      setExamQuestions(updatedModels.A.questions);
+    } else if (targetKey === "B" && updatedModels.B) {
+      setExamQuestions(updatedModels.B.questions);
+    } else if (targetKey === "C" && updatedModels.C) {
+      setExamQuestions(updatedModels.C.questions);
+    }
+
+    setExamModels({
+      ...examModels,
+      activeModelKey: targetKey,
+      models: updatedModels,
+    });
+  };
+
+  const handlePrintAllModels = useCallback(() => {
+    if (!examModels || examModels.modelCount <= 1) {
+      handlePrint();
+      return;
+    }
+    const currentKey = examModels.activeModelKey;
+    const updatedModels = { ...examModels.models };
+    if (currentKey === "A") {
+      updatedModels.A = { ...updatedModels.A, questions: [...examQuestions] };
+    } else if (currentKey === "B" && updatedModels.B) {
+      updatedModels.B = { ...updatedModels.B, questions: [...examQuestions] };
+    } else if (currentKey === "C" && updatedModels.C) {
+      updatedModels.C = { ...updatedModels.C, questions: [...examQuestions] };
+    }
+
+    setExamModels({
+      ...examModels,
+      activeModelKey: "ALL",
+      models: updatedModels,
+    });
+    setIsPreviewMode(true);
+
+    setTimeout(() => {
+      window.print();
+    }, 250);
+  }, [examModels, examQuestions, handlePrint]);
+
+  const getCurrentModelBadge = (): string | null => {
+    if (!examModels || examModels.modelCount <= 1) return null;
+    if (examModels.activeModelKey === "B") return "نموذج (ب)";
+    if (examModels.activeModelKey === "C") return "نموذج (ج)";
+    return "نموذج (أ)";
+  };
+
+  // Helper to remove any duplicate numbering prefix in question preview
+  const cleanStem = (t: string) => {
+    if (!t) return "";
+    return t.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim();
   };
 
   // Pointer event handlers for Selection Pen marquee tool
@@ -1548,57 +1728,109 @@ export default function ExamBuilderPage() {
   // "ممنوع تقسيم سوال علي صفحتين" - Each question stays intact!
   // Prevents questions overflowing page boundaries in both Builder Mode and Preview Mode
   // -------------------------------------------------------------
+  const computePageSlots = useCallback(
+    (questionsList: ExamQuestionItem[]): PageSlot[] => {
+      if (!questionsList || questionsList.length === 0) {
+        return [{ pageNumber: 1, questionIndices: [] }];
+      }
+
+      // Standard A4 physical height budget (962px):
+      // Page 1 budget: ~740px questions area (Exam Header is ~105px, Footer ~35px, Padding ~35px)
+      // Perfectly fits 7 to 8 questions, filling the page evenly down to the footer without gaps or cut-offs
+      const PAGE_1_CAPACITY = 740;
+      // Page N budget: ~830px questions area (Subheader ~35px, Footer ~35px, Padding ~35px)
+      // Fits 8 to 10 questions evenly
+      const PAGE_N_CAPACITY = 830;
+
+      const slots: PageSlot[] = [{ pageNumber: 1, questionIndices: [] }];
+      let currentPageIdx = 0;
+      let currentHeight = 0;
+
+      questionsList.forEach((q, idx) => {
+        const charLimit = 60;
+        const lines = Math.max(1, Math.ceil((q.text || "").length / charLimit));
+        // Text height includes question label + lines * line-height
+        const textHeight = 16 + lines * (globalFontSize * 1.35);
+
+        let optionsHeight = 0;
+        if (q.type === "choice") {
+          const rows = Math.ceil(Math.max(1, q.options.length) / 2);
+          optionsHeight = rows * 26 + 4;
+        } else if (q.type === "trueFalse") {
+          optionsHeight = 26;
+        } else if (q.type === "essay") {
+          optionsHeight = 36;
+        }
+
+        const imageHeight = q.imageUrl ? 110 : 0;
+        const questionSpacing = 14;
+        const totalQuestionHeight = textHeight + optionsHeight + imageHeight + questionSpacing;
+
+        const capacity = currentPageIdx === 0 ? PAGE_1_CAPACITY : PAGE_N_CAPACITY;
+
+        if (currentHeight + totalQuestionHeight > capacity && slots[currentPageIdx].questionIndices.length > 0) {
+          currentPageIdx++;
+          slots.push({ pageNumber: currentPageIdx + 1, questionIndices: [idx] });
+          currentHeight = totalQuestionHeight;
+        } else {
+          slots[currentPageIdx].questionIndices.push(idx);
+          currentHeight += totalQuestionHeight;
+        }
+      });
+
+      return slots;
+    },
+    [globalFontSize]
+  );
+
   const pages: PageSlot[] = useMemo(() => {
-    if (examQuestions.length === 0) {
-      return [{ pageNumber: 1, questionIndices: [] }];
+    return computePageSlots(examQuestions);
+  }, [computePageSlots, examQuestions]);
+
+  // Dynamic sheets calculation for single model or sequential ALL models view
+  const sheetsToRender = useMemo(() => {
+    if (examModels && examModels.modelCount > 1 && examModels.activeModelKey === "ALL") {
+      const list: {
+        modelKey: "A" | "B" | "C";
+        modelBadge: string;
+        questions: ExamQuestionItem[];
+        page: PageSlot;
+        totalPages: number;
+      }[] = [];
+
+      const modelsList: Array<{ key: "A" | "B" | "C"; name: string; q: ExamQuestionItem[] }> = [
+        { key: "A", name: "نموذج (أ)", q: examModels.models.A.questions },
+        { key: "B", name: "نموذج (ب)", q: examModels.models.B?.questions || [] },
+      ];
+      if (examModels.modelCount === 3 && examModels.models.C) {
+        modelsList.push({ key: "C", name: "نموذج (ج)", q: examModels.models.C.questions });
+      }
+
+      modelsList.forEach((m) => {
+        const slots = computePageSlots(m.q);
+        slots.forEach((s) => {
+          list.push({
+            modelKey: m.key,
+            modelBadge: m.name,
+            questions: m.q,
+            page: s,
+            totalPages: slots.length,
+          });
+        });
+      });
+
+      return list;
     }
 
-    // Standard A4 physical height budget (962px):
-    // Page 1 budget: ~740px questions area (Exam Header is ~105px, Footer ~35px, Padding ~35px)
-    // Perfectly fits 7 to 8 questions, filling the page evenly down to the footer without gaps or cut-offs
-    const PAGE_1_CAPACITY = 740;
-    // Page N budget: ~830px questions area (Subheader ~35px, Footer ~35px, Padding ~35px)
-    // Fits 8 to 10 questions evenly
-    const PAGE_N_CAPACITY = 830;
-
-    const slots: PageSlot[] = [{ pageNumber: 1, questionIndices: [] }];
-    let currentPageIdx = 0;
-    let currentHeight = 0;
-
-    examQuestions.forEach((q, idx) => {
-      const charLimit = 60;
-      const lines = Math.max(1, Math.ceil((q.text || "").length / charLimit));
-      // Text height includes question label + lines * line-height
-      const textHeight = 16 + lines * (globalFontSize * 1.35);
-
-      let optionsHeight = 0;
-      if (q.type === "choice") {
-        const rows = Math.ceil(Math.max(1, q.options.length) / 2);
-        optionsHeight = rows * 26 + 4;
-      } else if (q.type === "trueFalse") {
-        optionsHeight = 26;
-      } else if (q.type === "essay") {
-        optionsHeight = 36;
-      }
-
-      const imageHeight = q.imageUrl ? 110 : 0;
-      const questionSpacing = 14;
-      const totalQuestionHeight = textHeight + optionsHeight + imageHeight + questionSpacing;
-
-      const capacity = currentPageIdx === 0 ? PAGE_1_CAPACITY : PAGE_N_CAPACITY;
-
-      if (currentHeight + totalQuestionHeight > capacity && slots[currentPageIdx].questionIndices.length > 0) {
-        currentPageIdx++;
-        slots.push({ pageNumber: currentPageIdx + 1, questionIndices: [idx] });
-        currentHeight = totalQuestionHeight;
-      } else {
-        slots[currentPageIdx].questionIndices.push(idx);
-        currentHeight += totalQuestionHeight;
-      }
-    });
-
-    return slots;
-  }, [examQuestions, globalFontSize]);
+    const badge = getCurrentModelBadge();
+    return pages.map((p) => ({
+      modelKey: (examModels?.activeModelKey as "A" | "B" | "C") || "A",
+      modelBadge: badge || "",
+      questions: examQuestions,
+      page: p,
+      totalPages: pages.length,
+    }));
+  }, [examModels, examQuestions, pages, computePageSlots]);
 
   // Option Label Helper (Arabic: أ ب ج د / English: A B C D)
   const getOptionLabel = (idx: number) => {
@@ -2500,6 +2732,30 @@ export default function ExamBuilderPage() {
                       A B C D
                     </button>
                   </div>
+
+                  {/* Multi-Model Generator Button (أ - ب - ج) */}
+                  <button
+                    type="button"
+                    onClick={() => setIsModelModalOpen(true)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95 ${
+                      examModels && examModels.modelCount > 1
+                        ? "bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-indigo-200"
+                        : "bg-gradient-to-r from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 text-indigo-700 border border-indigo-200/80"
+                    }`}
+                    title="توليد نماذج متعددة للاختبار لمنع الغش (أ - ب - ج)"
+                  >
+                    <Shuffle
+                      className={`w-3.5 h-3.5 ${
+                        examModels && examModels.modelCount > 1 ? "text-white" : "text-indigo-600"
+                      }`}
+                    />
+                    <span>توليد نماذج (أ - ب - ج)</span>
+                    {examModels && examModels.modelCount > 1 && (
+                      <span className="bg-white/20 text-white text-[10px] px-1.5 py-0.2 rounded-full font-black mr-0.5">
+                        {examModels.modelCount === 2 ? "أ - ب" : "أ - ب - ج"}
+                      </span>
+                    )}
+                  </button>
                 </div>
 
                 {/* Main Action Buttons */}
@@ -2733,10 +2989,118 @@ export default function ExamBuilderPage() {
           {/* Scrollable Canvas Viewport Rendering PHYSICAL A4 SHEETS */}
           {/* ======================================================== */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex flex-col items-center gap-8 a4-print-container print:p-0 print:m-0 print:gap-0 print:overflow-visible print:block print:w-full">
-            {pages.map((page) => (
+            {/* Sleek Tab Switcher right above the A4 paper: [ نموذج (أ) | نموذج (ب) | نموذج (ج) | عرض الكل للطباعة ] */}
+            {examModels && examModels.modelCount > 1 && (
+              <div className="w-full max-w-[680px] bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-sm p-2 flex flex-wrap items-center justify-between gap-2 shrink-0 no-print transition-all">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/70 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectModelTab("A")}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      examModels.activeModelKey === "A"
+                        ? "bg-white text-blue-700 shadow-xs ring-1 ring-blue-500/20"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                    <span>نموذج (أ)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectModelTab("B")}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      examModels.activeModelKey === "B"
+                        ? "bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-500/20"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                    <span>نموذج (ب)</span>
+                  </button>
+
+                  {examModels.modelCount === 3 && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectModelTab("C")}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        examModels.activeModelKey === "C"
+                          ? "bg-white text-purple-700 shadow-xs ring-1 ring-purple-500/20"
+                          : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                      <span>نموذج (ج)</span>
+                    </button>
+                  )}
+
+                  <div className="h-4 w-px bg-slate-300 mx-0.5" />
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectModelTab("ALL")}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      examModels.activeModelKey === "ALL"
+                        ? "bg-white text-emerald-700 shadow-xs ring-1 ring-emerald-500/20"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+                    }`}
+                    title="عرض جميع النماذج متتالية وتجهيزها للطباعة المجمعة"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>عرض الكل للطباعة</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleReshuffleExistingModels}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-blue-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                    title="إعادة خلط وترتيب أسئلة النماذج العشوائية"
+                  >
+                    <RotateCw className="w-3 h-3 text-slate-500" />
+                    <span>إعادة خلط الأسئلة</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintAllModels}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-black rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+                    title="طباعة جميع النماذج معاً في أمر طباعة واحد"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-slate-200" />
+                    <span>طباعة جميع النماذج معاً</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {examModels && examModels.modelCount > 1 && examModels.activeModelKey === "ALL" && (
+              <div className="w-full max-w-[680px] bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-between no-print shadow-2xs">
+                <span className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>معاينة طباعة النماذج المجمعة: يُطبع كل نموذج على ورقة مستقلة تلقائياً.</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handlePrintAllModels}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-xs font-extrabold shadow-2xs cursor-pointer"
+                >
+                  طباعة الكل الآن
+                </button>
+              </div>
+            )}
+
+            {sheetsToRender.map((sheet, sheetIdx) => {
+              const page = sheet.page;
+              const currentModelBadge = sheet.modelBadge;
+              const currentSheetQuestions = sheet.questions;
+              const isAllSequentialView = examModels?.activeModelKey === "ALL";
+
+              return (
               <div
-                key={`page-${page.pageNumber}`}
-                id={`a4-sheet-${page.pageNumber}`}
+                key={`page-${sheet.modelKey}-${page.pageNumber}-${sheetIdx}`}
+                id={`a4-sheet-${sheet.modelKey}-${page.pageNumber}`}
                 dir={examDirection}
                 onDragOver={(e) => {
                   if (e.dataTransfer.types.includes("Files")) {
@@ -2776,9 +3140,11 @@ export default function ExamBuilderPage() {
                     }
                   }
                 }}
-                className="a4-page-sheet w-full max-w-[680px] min-h-[962px] bg-white rounded-sm shadow-xl p-4 sm:p-5 relative flex flex-col justify-between transition-all border border-slate-200 select-text overflow-hidden print:p-[8mm_12mm] print:m-0 print:border-none print:shadow-none print:w-[210mm] print:max-w-[210mm] print:h-[296.5mm] print:max-h-[296.5mm]"
+                className="a4-page-sheet w-full max-w-[680px] min-h-[962px] bg-white rounded-sm shadow-xl p-4 sm:p-5 relative flex flex-col justify-between transition-all border border-slate-200 select-text overflow-hidden print:p-[8mm_12mm] print:m-0 print:border-none print:shadow-none print:w-[210mm] print:max-w-[210mm] print:h-[296.5mm] print:max-h-[296.5mm] print:break-after-page print:[break-after:page] print:[page-break-after:always]"
                 style={{
                   aspectRatio: "1 / 1.4142",
+                  breakAfter: "page",
+                  pageBreakAfter: "always",
                 }}
               >
                 {/* SVG Annotation / Drawing Layer over this A4 Page */}
@@ -2932,8 +3298,17 @@ export default function ExamBuilderPage() {
                           </div>
                         </div>
 
-                        {/* Left Column: Exam Code (Top) & Exam Grade (Bottom, Bigger & Directly Under Exam Code) */}
+                        {/* Left Column: Model Badge (Top-Left) & Exam Code & Exam Grade */}
                         <div className="shrink-0 flex flex-col justify-between items-end gap-1.5 min-w-[140px] sm:min-w-[155px]">
+                          {/* Top-Left Model Name Badge */}
+                          {currentModelBadge && (
+                            <div className="w-full flex items-center justify-center bg-slate-900 text-white rounded-lg py-1 px-2.5 shadow-2xs border-2 border-slate-900 print:bg-white print:text-black print:border-2 print:border-black">
+                              <span className="font-black text-xs sm:text-sm tracking-wide">
+                                {currentModelBadge}
+                              </span>
+                            </div>
+                          )}
+
                           {/* Top: Exam Code */}
                           <div className="w-full flex items-center justify-between gap-2 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-300">
                             <span className="text-[10px] font-bold text-slate-700 whitespace-nowrap">
@@ -2984,7 +3359,19 @@ export default function ExamBuilderPage() {
                         </div>
                       </div>
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="flex items-center justify-between border-b border-slate-300 pb-1 mb-2 text-xs text-slate-600 font-bold select-none" dir={examDirection}>
+                      <span className="truncate">تتمة: {paperTitle || "ورقة الامتحان"}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {currentModelBadge && (
+                          <span className="border-2 border-slate-900 bg-slate-100 text-slate-950 font-black text-[11px] px-2.5 py-0.5 rounded-md print:bg-white print:text-black">
+                            {currentModelBadge}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-500 font-mono">صفحة {page.pageNumber}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* List of intact questions allocated to this A4 page */}
                   <div
@@ -3013,7 +3400,9 @@ export default function ExamBuilderPage() {
                     )}
 
                     {page.questionIndices.map((index) => {
-                      const q = examQuestions[index];
+                      const q = isAllSequentialView
+                        ? (currentSheetQuestions[index] || examQuestions[index])
+                        : (examQuestions[index] || currentSheetQuestions[index]);
                       if (!q) return null;
 
                       const style = getQuestionStyle(index);
@@ -3067,7 +3456,7 @@ export default function ExamBuilderPage() {
                                     overflowWrap: "anywhere",
                                   }}
                                 >
-                                  {q.text}
+                                  {cleanStem(q.text)}
                                 </p>
                               ) : (
                                 <textarea
@@ -3392,7 +3781,8 @@ export default function ExamBuilderPage() {
                   <span className="mx-auto">- {page.pageNumber} -</span>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </section>
       </div>
@@ -3452,6 +3842,17 @@ export default function ExamBuilderPage() {
           </div>
         </div>
       )}
+
+      {/* Multi-Model Generator Modal (أ - ب - ج) */}
+      <ModelGenerationModal
+        isOpen={isModelModalOpen}
+        onClose={() => setIsModelModalOpen(false)}
+        currentModelCount={examModels?.modelCount || 1}
+        questionsCount={examQuestions.length}
+        onGenerate={handleGenerateModels}
+        onReshuffle={handleReshuffleExistingModels}
+        onResetSingleModel={handleResetSingleModel}
+      />
     </div>
   );
 }

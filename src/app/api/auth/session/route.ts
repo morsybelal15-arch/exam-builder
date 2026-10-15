@@ -25,7 +25,13 @@ export async function GET() {
 
   if (reason) {
     const res = NextResponse.json({ authenticated: false, blocked: true, reason });
-    res.cookies.delete(getSessionCookieName());
+    res.cookies.set(getSessionCookieName(), "", {
+      path: "/",
+      maxAge: 0,
+      expires: new Date(0),
+      httpOnly: true,
+      sameSite: "lax",
+    });
     return res;
   }
 

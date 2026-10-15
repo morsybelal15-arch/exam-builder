@@ -16,6 +16,9 @@ import { verifySessionToken } from "@/lib/session-token";
 
 const TENANT_APP_PREFIXES = [
   "/exam-builder",
+  "/groups",
+  "/students",
+  "/qr-printing",
   "/uploaded-files",
   "/images-to-pdf",
   "/created-exams",
@@ -80,6 +83,15 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/auth/")) return NextResponse.next();
 
   if (pathname === "/login") {
+    if (request.nextUrl.searchParams.has("blocked") || request.nextUrl.searchParams.has("logout")) {
+      const response = NextResponse.next();
+      response.cookies.set(getSessionCookieName(), "", {
+        path: "/",
+        maxAge: 0,
+        expires: new Date(0),
+      });
+      return response;
+    }
     if (isAdmin) return redirectTo(request, "/admin");
     if (isTenant) return redirectTo(request, "/exam-builder");
     return NextResponse.next();

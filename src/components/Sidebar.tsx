@@ -10,6 +10,9 @@ import {
   GraduationCap,
   CreditCard,
   LogOut,
+  Users,
+  UserCheck,
+  QrCode,
 } from "lucide-react";
 import { logoutAction } from "@/app/actions/auth";
 
@@ -20,36 +23,74 @@ interface NavItem {
   description: string;
 }
 
-const navItems: NavItem[] = [
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
   {
-    name: "منشئ الاختبارات",
-    href: "/exam-builder",
-    icon: PenTool,
-    description: "إعداد وصياغة أسئلة الامتحانات",
+    title: "السنتر",
+    items: [
+      {
+        name: "المجموعات",
+        href: "/groups",
+        icon: Users,
+        description: "إدارة الصفوف والمجموعات الدراسية",
+      },
+      {
+        name: "الطلاب",
+        href: "/students",
+        icon: UserCheck,
+        description: "بيانات الطلاب، الحضور، المالية والدرجات",
+      },
+      {
+        name: "طباعة رموز QR",
+        href: "/qr-printing",
+        icon: QrCode,
+        description: "طباعة بطاقات ورموز QR للطلاب",
+      },
+    ],
   },
   {
-    name: "الملفات المرفوعة",
-    href: "/uploaded-files",
-    icon: FolderUp,
-    description: "إدارة المستندات والمراجع",
+    title: "الامتحانات",
+    items: [
+      {
+        name: "منشئ الاختبارات",
+        href: "/exam-builder",
+        icon: PenTool,
+        description: "إعداد وصياغة أسئلة الامتحانات",
+      },
+      {
+        name: "الاختبارات المنشأة",
+        href: "/created-exams",
+        icon: FileText,
+        description: "أرشيف ونماذج الاختبارات السابقة",
+      },
+      {
+        name: "الملفات المرفوعة",
+        href: "/uploaded-files",
+        icon: FolderUp,
+        description: "إدارة المستندات والمراجع",
+      },
+      {
+        name: "تحويل الصور إلى PDF",
+        href: "/images-to-pdf",
+        icon: ImageIcon,
+        description: "دمج وتحويل المستندات المصورة",
+      },
+    ],
   },
   {
-    name: "تحويل الصور إلى PDF",
-    href: "/images-to-pdf",
-    icon: ImageIcon,
-    description: "دمج وتحويل المستندات المصورة",
-  },
-  {
-    name: "الاختبارات المنشأة",
-    href: "/created-exams",
-    icon: FileText,
-    description: "أرشيف ونماذج الاختبارات السابقة",
-  },
-  {
-    name: "اشتراكي",
-    href: "/my-subscription",
-    icon: CreditCard,
-    description: "تفاصيل الخطة وتاريخ التجديد والحدود",
+    title: "الإعدادات",
+    items: [
+      {
+        name: "اشتراكي",
+        href: "/my-subscription",
+        icon: CreditCard,
+        description: "تفاصيل الخطة وتاريخ التجديد والحدود",
+      },
+    ],
   },
 ];
 
@@ -85,41 +126,45 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* Navigation Items */}
-        <div className="px-4 py-6">
-          <div className="text-xs font-semibold text-slate-400 px-3 mb-3">
-            القائمة الرئيسية
-          </div>
-          <nav className="space-y-2">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive =
-                pathname === item.href ||
-                (item.href === "/exam-builder" && pathname === "/");
+        {/* Navigation Sections */}
+        <div className="px-4 py-5 space-y-4">
+          {navSections.map((section, sectionIdx) => (
+            <div key={section.title} className={sectionIdx > 0 ? "pt-4 border-t border-slate-100" : ""}>
+              <div className="text-[11px] font-bold text-slate-400 px-3 mb-2 flex items-center justify-between">
+                <span>{section.title}</span>
+              </div>
+              <nav className="space-y-1">
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive =
+                    pathname === item.href ||
+                    (item.href === "/exam-builder" && pathname === "/");
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch={true}
-                  className={`group flex items-center gap-3.5 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all duration-200 ${
-                    isActive
-                      ? "bg-blue-600 text-white shadow-sm shadow-blue-600/25"
-                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/70"
-                  }`}
-                >
-                  <Icon
-                    className={`w-5 h-5 shrink-0 transition-transform duration-200 group-hover:scale-105 ${
-                      isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600"
-                    }`}
-                  />
-                  <div className="flex flex-col">
-                    <span>{item.name}</span>
-                  </div>
-                </Link>
-              );
-            })}
-          </nav>
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      prefetch={true}
+                      className={`group flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-medium transition-all duration-200 ${
+                        isActive
+                          ? "bg-blue-600 text-white shadow-sm shadow-blue-600/25"
+                          : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
+                      }`}
+                    >
+                      <Icon
+                        className={`w-4 h-4 shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+                          isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600"
+                        }`}
+                      />
+                      <div className="flex flex-col">
+                        <span>{item.name}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          ))}
         </div>
       </div>
 

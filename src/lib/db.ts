@@ -92,6 +92,9 @@ function initSchema(db: any) {
   try {
     db.exec("ALTER TABLE exams ADD COLUMN exam_code TEXT;");
   } catch {}
+  try {
+    db.exec("ALTER TABLE exams ADD COLUMN models TEXT;");
+  } catch {}
 
   try {
     const examsCount = db.prepare("SELECT count(*) as count FROM exams").get() as { count: number };
@@ -267,6 +270,7 @@ export function saveLocalExam(exam: {
   questions_count: number;
   total_points: number;
   date_created: string;
+  models?: string;
 }) {
   const db = getDb();
   if (db) {
@@ -274,7 +278,7 @@ export function saveLocalExam(exam: {
     if (existing) {
       const stmt = db.prepare(`
         UPDATE exams 
-        SET title = ?, paper_title = ?, exam_code = ?, subject = ?, grade = ?, duration = ?, questions = ?, questions_count = ?, total_points = ?, date_created = ?
+        SET title = ?, paper_title = ?, exam_code = ?, subject = ?, grade = ?, duration = ?, questions = ?, questions_count = ?, total_points = ?, date_created = ?, models = ?
         WHERE id = ?
       `);
       stmt.run(
@@ -288,12 +292,13 @@ export function saveLocalExam(exam: {
         exam.questions_count,
         exam.total_points,
         exam.date_created,
+        exam.models || null,
         exam.id
       );
     } else {
       const stmt = db.prepare(`
-        INSERT INTO exams (id, title, paper_title, exam_code, subject, grade, duration, questions, questions_count, total_points, date_created, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO exams (id, title, paper_title, exam_code, subject, grade, duration, questions, questions_count, total_points, date_created, models, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run(
         exam.id,
@@ -307,6 +312,7 @@ export function saveLocalExam(exam: {
         exam.questions_count,
         exam.total_points,
         exam.date_created,
+        exam.models || null,
         Date.now()
       );
     }
@@ -321,6 +327,7 @@ export function saveLocalExam(exam: {
     paper_title: exam.paper_title || exam.title,
     exam_code: exam.exam_code || "X7K2",
     duration: exam.duration || "ساعتان",
+    models: exam.models || null,
     created_at: index >= 0 ? store.exams[index].created_at : Date.now(),
   };
 

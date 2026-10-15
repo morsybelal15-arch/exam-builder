@@ -14,6 +14,9 @@ import {
   Award,
   CheckCircle2,
   Trash2,
+  Shuffle,
+  X,
+  ExternalLink,
 } from "lucide-react";
 
 interface ExamCardItem {
@@ -31,6 +34,7 @@ interface ExamCardItem {
   questionsCount?: number;
   total_points?: number;
   totalPoints?: number;
+  models?: any;
   questions?: Array<{
     id: string;
     type?: string;
@@ -103,6 +107,8 @@ export default function CreatedExamsPage() {
   const [exams, setExams] = useState<ExamCardItem[]>(fallbackExams);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [printModalExam, setPrintModalExam] = useState<ExamCardItem | null>(null);
+  const [selectedPrintModel, setSelectedPrintModel] = useState<"ALL" | "A" | "B" | "C">("ALL");
 
   // Load exams from local SQLite database
   useEffect(() => {
@@ -132,12 +138,77 @@ export default function CreatedExamsPage() {
     }
   };
 
-  const handlePrint = (title: string) => {
-    window.print();
+  const handlePrintClick = (exam: ExamCardItem) => {
+    setPrintModalExam(exam);
+    if (exam.models && (exam.models.modelCount > 1 || exam.models.models?.B)) {
+      setSelectedPrintModel("ALL");
+    } else {
+      setSelectedPrintModel("A");
+      setTimeout(() => {
+        window.print();
+      }, 250);
+    }
+  };
+
+  const executePrint = (modelKey: "ALL" | "A" | "B" | "C") => {
+    setSelectedPrintModel(modelKey);
+    setTimeout(() => {
+      window.print();
+    }, 250);
   };
 
   const handleDownload = (title: string) => {
     alert(`جاري تجهيز وتحميل ملف PDF للاختبار: ${title}`);
+  };
+
+  const getSheetsForPrint = (exam: ExamCardItem, modelKey: "ALL" | "A" | "B" | "C") => {
+    const sheets: Array<{ modelKey: string; modelBadge: string; questions: any[] }> = [];
+    const modelsData = exam.models;
+
+    if (modelsData && modelsData.models) {
+      if (modelKey === "ALL") {
+        if (modelsData.models.A) {
+          sheets.push({
+            modelKey: "A",
+            modelBadge: "نموذج (أ)",
+            questions: modelsData.models.A.questions || exam.questions || [],
+          });
+        }
+        if (modelsData.models.B) {
+          sheets.push({
+            modelKey: "B",
+            modelBadge: "نموذج (ب)",
+            questions: modelsData.models.B.questions || [],
+          });
+        }
+        if (modelsData.models.C) {
+          sheets.push({
+            modelKey: "C",
+            modelBadge: "نموذج (ج)",
+            questions: modelsData.models.C.questions || [],
+          });
+        }
+      } else {
+        const targetModel = modelsData.models[modelKey];
+        if (targetModel) {
+          const badge =
+            modelKey === "A" ? "نموذج (أ)" : modelKey === "B" ? "نموذج (ب)" : "نموذج (ج)";
+          sheets.push({
+            modelKey,
+            modelBadge: badge,
+            questions: targetModel.questions || [],
+          });
+        }
+      }
+    } else {
+      sheets.push({
+        modelKey: "A",
+        modelBadge: "",
+        questions: exam.questions || [],
+      });
+    }
+
+    return sheets;
   };
 
   const filteredExams = exams.filter((exam) => {
@@ -265,6 +336,20 @@ export default function CreatedExamsPage() {
                     <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/5 transition-colors pointer-events-none rounded-xl" />
                   </div>
 
+                  {/* Multi-Model Badge if available */}
+                  {exam.models && (exam.models.modelCount > 1 || exam.models.models?.B) && (
+                    <div className="mb-2">
+                      <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-extrabold shadow-2xs">
+                        <Shuffle className="w-3.5 h-3.5 text-amber-600" />
+                        <span>
+                          {exam.models.modelCount === 3 || exam.models.models?.C
+                            ? "٣ نماذج (أ - ب - ج)"
+                            : "نموذجين (أ - ب)"}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+
                   {/* Exam Title */}
                   <h3 className="font-bold text-base text-slate-800 line-clamp-1 group-hover:text-blue-600 transition-colors" title={exam.title}>
                     {exam.title}
@@ -298,7 +383,7 @@ export default function CreatedExamsPage() {
                     </button>
 
                     <button
-                      onClick={() => handlePrint(exam.title)}
+                      onClick={() => handlePrintClick(exam)}
                       className="inline-flex items-center justify-center p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
                       title="طباعة الاختبار مباشرة"
                     >
@@ -330,6 +415,200 @@ export default function CreatedExamsPage() {
           </div>
         )}
       </div>
+
+      {/* Multi-Model Print Selection Modal */}
+      {printModalExam && printModalExam.models && (printModalExam.models.modelCount > 1 || printModalExam.models.models?.B) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 no-print animate-in fade-in">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-100 text-right space-y-5" dir="rtl">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                  <Shuffle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">طباعة نماذج الاختبار</h3>
+                  <p className="text-xs text-slate-500 font-medium truncate max-w-xs">{printModalExam.title}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPrintModalExam(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+              يحتوي هذا الاختبار على نماذج متعددة لمنع الغش بترتيبات أسئلة مختلفة. اختر طباعة جميع النماذج معاً في أمر طباعة واحد أو طباعة نموذج محدد:
+            </p>
+
+            {/* Print Options */}
+            <div className="space-y-2.5">
+              {/* Print All Models (Primary) */}
+              <button
+                type="button"
+                onClick={() => executePrint("ALL")}
+                className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-slate-900 hover:bg-black text-white font-bold transition-all shadow-md hover:shadow-lg cursor-pointer group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-white">
+                    <Printer className="w-4 h-4" />
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-extrabold">طباعة جميع النماذج معاً</div>
+                    <div className="text-[11px] text-slate-300 font-normal">
+                      {printModalExam.models?.modelCount === 3 ? "طباعة النماذج (أ - ب - ج) متتالية" : "طباعة النموذجين (أ - ب) متتاليين"}
+                    </div>
+                  </div>
+                </div>
+                <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-400/30 font-bold">
+                  موصى به
+                </span>
+              </button>
+
+              {/* Individual Model Buttons */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => executePrint("A")}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-blue-200 bg-blue-50/60 hover:bg-blue-100 text-blue-900 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  <span className="font-extrabold text-sm mb-0.5">نموذج (أ)</span>
+                  <span className="text-[10px] text-blue-600 font-normal">الترتيب الأصلي</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => executePrint("B")}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100 text-indigo-900 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  <span className="font-extrabold text-sm mb-0.5">نموذج (ب)</span>
+                  <span className="text-[10px] text-indigo-600 font-normal">ترتيب متبادل</span>
+                </button>
+
+                {(printModalExam.models?.modelCount === 3 || printModalExam.models?.models?.C) && (
+                  <button
+                    type="button"
+                    onClick={() => executePrint("C")}
+                    className="flex flex-col items-center justify-center p-3 rounded-xl border border-purple-200 bg-purple-50/60 hover:bg-purple-100 text-purple-900 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    <span className="font-extrabold text-sm mb-0.5">نموذج (ج)</span>
+                    <span className="text-[10px] text-purple-600 font-normal">ترتيب عشوائي</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Links */}
+            <div className="pt-2 flex items-center justify-between border-t border-slate-100 text-xs">
+              <Link
+                href={`/exam-builder?id=${printModalExam.id}`}
+                className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 font-bold hover:underline"
+              >
+                <span>فتح وتعديل النماذج في منشئ الاختبارات</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+              <button
+                type="button"
+                onClick={() => setPrintModalExam(null)}
+                className="text-slate-400 hover:text-slate-600 font-semibold cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Printable Sheets rendering sequentially for Print Preview */}
+      {printModalExam && (
+        <div className="hidden print:block print:w-full print:m-0 print:p-0 a4-print-container">
+          {getSheetsForPrint(printModalExam, selectedPrintModel).map((sheet, sIdx) => (
+            <div
+              key={`created-print-${sheet.modelKey}-${sIdx}`}
+              className="a4-page-sheet"
+              dir="rtl"
+            >
+              {/* Main Content */}
+              <div className="main-paper-content">
+                {/* Header Box */}
+                <div className="border-2 border-slate-800 rounded-xl p-2.5 mb-2 bg-white exam-header-box">
+                  <div className="flex items-stretch justify-between gap-3">
+                    <div className="flex-1 flex flex-col justify-between gap-1.5 py-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-xs text-slate-900 whitespace-nowrap">عنوان الامتحان :</span>
+                        <span className="font-bold text-xs text-slate-900 truncate">
+                          {printModalExam.paper_title || printModalExam.paperTitle || printModalExam.title}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-xs text-slate-900 whitespace-nowrap">اسم الطالب :</span>
+                        <div className="flex-1 border-b-2 border-dotted border-slate-400 h-3.5 mr-1" />
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex flex-col justify-between items-end gap-1.5 min-w-[140px]">
+                      {sheet.modelBadge && (
+                        <div className="w-full flex items-center justify-center bg-white text-black rounded-lg py-1 px-2 border-2 border-black">
+                          <span className="font-black text-xs">{sheet.modelBadge}</span>
+                        </div>
+                      )}
+                      <div className="w-full flex items-center justify-between gap-2 bg-slate-100 px-2 py-0.5 rounded border border-slate-300">
+                        <span className="text-[10px] font-bold text-slate-700">كود الامتحان :</span>
+                        <span className="font-mono font-extrabold text-xs">
+                          {printModalExam.exam_code || printModalExam.examCode || "EXAM"}
+                        </span>
+                      </div>
+                      <div className="w-full flex items-center justify-between gap-1.5 bg-white border-2 border-slate-800 rounded px-2 py-0.5">
+                        <span className="text-xs font-extrabold text-slate-900">الدرجة :</span>
+                        <span className="font-extrabold text-xs text-slate-900">
+                          ..... / {printModalExam.total_points ?? printModalExam.totalPoints ?? 20}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Questions */}
+                <div className="questions-container">
+                  {sheet.questions.map((q: any, qIdx: number) => (
+                    <div key={q.id || qIdx} className="question-card">
+                      <div className="flex items-start gap-1.5 font-bold text-slate-900 text-xs">
+                        <span className="font-extrabold text-blue-950 shrink-0">س{qIdx + 1}:</span>
+                        <p className="flex-1 leading-relaxed">
+                          {q.text?.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim() || q.text}
+                        </p>
+                      </div>
+                      {Array.isArray(q.options) && q.options.length > 0 && (
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-1.5 text-xs text-slate-800">
+                          {q.options.map((opt: string, optIdx: number) => {
+                            const letters = ["أ", "ب", "ج", "د"];
+                            return (
+                              <div key={optIdx} className="flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full border border-slate-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                  {letters[optIdx] || optIdx + 1}
+                                </span>
+                                <span>{opt}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="page-footer">
+                <span className="text-[10px] text-slate-500">- انتهت الأسئلة -</span>
+                <span className="text-[10px] text-slate-500 font-mono">- 1 -</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
