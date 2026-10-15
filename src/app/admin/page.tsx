@@ -7,7 +7,7 @@ import CreateTenantModal from "@/components/admin/CreateTenantModal";
 import TenantListView from "@/components/admin/TenantListView";
 import AutoUpdateButton from "@/components/admin/AutoUpdateButton";
 import VpsDeployButton from "@/components/admin/VpsDeployButton";
-import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
+import { HOSTINGER_VPS_CONFIG, DEFAULT_MAIN_APP_URL } from "@/lib/vps-service";
 import { getTenantsList, getTenantCounts } from "@/lib/tenants-repository";
 import { getLatestCommitInfo } from "@/app/actions/auto-update";
 import { isDatabaseReachable } from "@/lib/prisma";
@@ -22,6 +22,8 @@ import {
   Server,
   Activity,
   Check,
+  Globe,
+  ExternalLink,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -97,7 +99,20 @@ export default async function AdminDashboardPage() {
             {/* Create Tenant Modal Trigger */}
             <CreateTenantModal />
 
-            {/* Back to Exam Builder (local dev "all" mode only — not on the admin domain) */}
+            {/* Direct Link to Main Application Platform (exambuilderapp.oqabagency.com) */}
+            <a
+              href={DEFAULT_MAIN_APP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200/80 px-3.5 py-2.5 rounded-xl transition-all shadow-xs"
+              title="الانتقال إلى المنصة الرئيسية: exambuilderapp.oqabagency.com"
+            >
+              <Globe className="w-3.5 h-3.5 text-indigo-600" />
+              <span>المنصة الرئيسية</span>
+              <ExternalLink className="w-3 h-3 text-indigo-400" />
+            </a>
+
+            {/* Back to Exam Builder (local dev "all" mode only) */}
             {tenantEnabled() && (
               <Link
                 href="/exam-builder"

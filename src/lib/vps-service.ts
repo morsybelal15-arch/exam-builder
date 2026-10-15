@@ -29,6 +29,9 @@ export const TENANT_APP_PORT = 3015;
 export const ADMIN_APP_PORT = 3016;
 /** The one and only Super Admin domain. */
 export const DEFAULT_ADMIN_HOST = "exambuilderadmin.oqabagency.com";
+/** The primary main tenant/client application platform. */
+export const DEFAULT_MAIN_APP_HOST = "exambuilderapp.oqabagency.com";
+export const DEFAULT_MAIN_APP_URL = "https://exambuilderapp.oqabagency.com";
 /** Wildcard tenant domains routed to the tenant app. */
 export const TENANT_WILDCARD_SERVER_NAMES = "*.oqabagency.com *.alasima-erp.com";
 export const CERTBOT_EMAIL = "admin@alasima-erp.com";
