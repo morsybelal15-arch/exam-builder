@@ -65,6 +65,44 @@ ln -sf /etc/nginx/sites-available/exam-builder /etc/nginx/sites-enabled/
 
 # Admin domain: exact server_name beats the *.oqabagency.com wildcard.
 mkdir -p /var/www/html
+if [ -f "/etc/letsencrypt/live/${ADMIN_HOST}/fullchain.pem" ]; then
+cat << EOF > /etc/nginx/sites-available/exam-admin
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${ADMIN_HOST};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${ADMIN_HOST};
+
+    ssl_certificate /etc/letsencrypt/live/${ADMIN_HOST}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${ADMIN_HOST}/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 50M;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3016;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+else
 cat << EOF > /etc/nginx/sites-available/exam-admin
 server {
     listen 80;
@@ -91,6 +129,7 @@ server {
     }
 }
 EOF
+fi
 ln -sf /etc/nginx/sites-available/exam-admin /etc/nginx/sites-enabled/
 nginx -t
 systemctl reload nginx
