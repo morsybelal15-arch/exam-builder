@@ -24,7 +24,7 @@ import {
   Download,
 } from "lucide-react";
 import { Group, Student, SavedQrPdf } from "@/lib/types/management";
-import { generateQrDataUrl } from "@/lib/qr-service";
+import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
 import StudentProfileModal from "@/components/students/StudentProfileModal";
 
 function QrPrintingContent() {
@@ -135,13 +135,14 @@ function QrPrintingContent() {
         `بطاقات QR - ${targetGroup?.name || "مجموعة مخصصة"} - ${new Date().toLocaleDateString("ar-EG")}`;
       setPdfTitle(defaultName);
 
-      // Generate QR data URLs for all selected students
+      // Generate QR data URLs for all selected students with full smart public parent URL
       const newMap: Record<string, string> = {};
       const targetStudents = allStudents.filter((s) => targetIds.includes(s.id));
 
       await Promise.all(
         targetStudents.map(async (st) => {
-          const url = await generateQrDataUrl(st.code || st.id, 260);
+          const qrUrl = getStudentQrUrl(st.code || st.id);
+          const url = await generateQrDataUrl(qrUrl, 260);
           newMap[st.id] = url;
         })
       );

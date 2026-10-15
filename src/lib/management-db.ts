@@ -724,8 +724,16 @@ export function markAttendance(
   method: "camera_qr" | "manual" = "manual"
 ) {
   const store = getManagementStore();
+  const clean = (studentIdOrCode || "").includes("/s/")
+    ? studentIdOrCode.split("/s/").pop()?.split("?")[0]?.trim() || studentIdOrCode.trim()
+    : (studentIdOrCode || "").trim();
+
   const student = store.students.find(
-    (s) => s.id === studentIdOrCode || s.code === studentIdOrCode
+    (s) =>
+      s.id === clean ||
+      s.code === clean ||
+      s.id.toLowerCase() === clean.toLowerCase() ||
+      s.code.toLowerCase() === clean.toLowerCase()
   );
   if (!student) return { success: false, error: "الطالب غير موجود" };
 
@@ -925,7 +933,17 @@ export function saveStudentGrade(
 
 export function getFullStudentProfile(studentId: string) {
   const store = getManagementStore();
-  const student = store.students.find((s) => s.id === studentId || s.code === studentId);
+  const clean = (studentId || "").includes("/s/")
+    ? studentId.split("/s/").pop()?.split("?")[0]?.trim() || studentId.trim()
+    : (studentId || "").trim();
+
+  const student = store.students.find(
+    (s) =>
+      s.id === clean ||
+      s.code === clean ||
+      s.id.toLowerCase() === clean.toLowerCase() ||
+      s.code.toLowerCase() === clean.toLowerCase()
+  );
   if (!student) return null;
 
   const group = store.groups.find((g) => g.id === student.groupId);

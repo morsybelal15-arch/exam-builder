@@ -131,12 +131,16 @@ export default function CameraQrScannerModal({
     };
   }, []);
 
-  const handleCodeDetected = async (rawCode: string) => {
+  const handleCodeDetected = async (decodedText: string) => {
     if (isProcessing) return;
-    const cleanCode = rawCode.trim();
+    const token = decodedText.includes("/s/")
+      ? decodedText.split("/s/").pop()?.split("?")[0]?.trim() || decodedText.trim()
+      : decodedText.trim();
+
+    if (!token) return;
 
     // Check if recently scanned in last 4 seconds
-    if (scannedStudents.some((s) => s.code === cleanCode)) {
+    if (scannedStudents.some((s) => s.code === token || s.code === decodedText.trim())) {
       return;
     }
 
@@ -147,7 +151,7 @@ export default function CameraQrScannerModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          studentIdOrCode: cleanCode,
+          studentIdOrCode: token,
           groupId,
           date,
           status: "attended",

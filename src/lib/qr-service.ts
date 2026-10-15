@@ -34,3 +34,16 @@ export async function generateQrSvg(text: string, size = 200): Promise<string> {
     return "";
   }
 }
+
+/**
+ * Returns the public Zero-Login Parent Portal URL for the student's QR code card.
+ * Encodes full URL: https://${domain}/s/${student.qrCodeToken}
+ */
+export function getStudentQrUrl(tokenOrCode: string): string {
+  const clean = (tokenOrCode || "").trim();
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/s/${encodeURIComponent(clean)}`;
+  }
+  return `https://exambuilderapp.oqabagency.com/s/${encodeURIComponent(clean)}`;
+}
+

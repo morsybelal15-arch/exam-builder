@@ -85,6 +85,11 @@ export function proxy(request: NextRequest) {
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TENANT DOMAINS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (mode === "tenant" && isAdminPath(pathname)) return notFound(request);
 
+  // Public zero-login parent portal exemption: /s/* is directly accessible by parents without login
+  if (pathname === "/s" || pathname.startsWith("/s/")) {
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/auth/")) return NextResponse.next();
 
   if (pathname === "/login") {

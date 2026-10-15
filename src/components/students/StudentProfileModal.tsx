@@ -22,7 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Student } from "@/lib/types/management";
-import { generateQrDataUrl } from "@/lib/qr-service";
+import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
 
 interface StudentProfileModalProps {
   studentId: string;
@@ -54,9 +54,9 @@ export default function StudentProfileModal({
       const res = await fetch(`/api/students?id=${studentId}&profile=true`);
       const data = await res.json();
       if (data.success && data.profile) {
-        setProfileData(data.profile);
-        // Generate QR code data URL
-        const qrUrl = await generateQrDataUrl(data.profile.student.code || data.profile.student.id, 240);
+        // Generate QR code data URL encoding full smart parent portal URL
+        const portalUrl = getStudentQrUrl(data.profile.student.code || data.profile.student.id);
+        const qrUrl = await generateQrDataUrl(portalUrl, 240);
         setQrDataUrl(qrUrl);
       }
     } catch (err) {
@@ -140,11 +140,14 @@ ${gradesSummary}
       return;
     }
 
+    const token = s.code || s.id;
+    const portalUrl = getStudentQrUrl(token);
     const msg = `مرحباً ولي أمر الطالب: *${s.name}*
-كود الحضور السريع الخاص بالطالب هو:
-*${s.code}*
+رابط بطاقة المتابعة المباشرة للطالب (حضور، درجات واشتراكات):
+${portalUrl}
 
-يرجى إبراز هذا الكود عند حضور الطالب في الحصص لتسجيل الحضور فورياً عبر الماسح.`;
+كود الحضور: *${s.code}*
+يمكنك مسح كود QR أو فتح الرابط أعلاه في أي وقت لمتابعة مستوى الطالب والاطلاع على الدرجات والحضور فورياً.`;
 
     const cleanPhone = phone.startsWith("0") ? "2" + phone : phone;
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
