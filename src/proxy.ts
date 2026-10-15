@@ -30,8 +30,13 @@ function notFound(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
-  // Rewriting to a route that doesn't exist renders the app's 404 page with a 404 status.
-  return NextResponse.rewrite(new URL("/__not-found", request.url));
+  // Plain 404 (a rewrite would be proxied to https://localhost behind Nginx SSL and fail with 500).
+  return new NextResponse(
+    '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>404</title></head>' +
+      '<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a">' +
+      '<div style="text-align:center"><h1 style="font-size:48px;margin:0">404</h1><p>الصفحة غير موجودة</p></div></body></html>',
+    { status: 404, headers: { "content-type": "text/html; charset=utf-8" } }
+  );
 }
 
 function redirectTo(request: NextRequest, path: string, callbackUrl?: string) {
