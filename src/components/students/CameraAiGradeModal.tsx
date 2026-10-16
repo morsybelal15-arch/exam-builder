@@ -13,6 +13,7 @@ import {
   User,
   Award,
   ChevronDown,
+  Search,
 } from "lucide-react";
 import { Student } from "@/lib/types/management";
 
@@ -53,6 +54,8 @@ export default function CameraAiGradeModal({
   } | null>(null);
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
+  const [studentSearchQuery, setStudentSearchQuery] = useState<string>("");
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [editableScore, setEditableScore] = useState<string>("");
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -153,8 +156,11 @@ export default function CameraAiGradeModal({
       // Pre-select matched student or first match
       if (data.matchedStudentId) {
         setSelectedStudentId(data.matchedStudentId);
+        const match = students.find((s) => s.id === data.matchedStudentId);
+        setStudentSearchQuery(match?.name || data.detectedStudentName || "");
       } else {
         setSelectedStudentId(students[0]?.id || "");
+        setStudentSearchQuery(data.detectedStudentName || students[0]?.name || "");
       }
 
       setEditableScore(data.score !== undefined ? String(data.score) : "0");
@@ -267,15 +273,24 @@ export default function CameraAiGradeModal({
                   />
                   <canvas ref={canvasRef} className="hidden" />
 
-                  {/* Header Box Guide */}
-                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6">
-                    <div className="w-full max-w-md h-36 border-2 border-dashed border-amber-400/70 rounded-2xl flex flex-col items-center justify-center bg-black/20 backdrop-blur-2xs">
-                      <span className="text-xs font-bold text-amber-300 drop-shadow">
-                        وجّه الكاميرا نحو ترويسة ورقة الامتحان
+                  {/* Full View Area Framing - Corner Accents */}
+                  <div className="absolute inset-0 pointer-events-none p-4 sm:p-6 flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                      <div className="w-10 h-10 border-t-3 border-r-3 border-amber-400 rounded-tr-xl" />
+                      <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-500/30 text-center">
+                        <span className="text-[11px] font-bold text-amber-300">
+                          المساحة كاملة جاهزة لالتقاط ورقة الامتحان
+                        </span>
+                      </div>
+                      <div className="w-10 h-10 border-t-3 border-l-3 border-amber-400 rounded-tl-xl" />
+                    </div>
+
+                    <div className="flex justify-between items-end">
+                      <div className="w-10 h-10 border-b-3 border-r-3 border-amber-400 rounded-br-xl" />
+                      <span className="text-[10px] text-slate-300 bg-black/50 px-3 py-1 rounded-full">
+                        تأكد من وضوح اسم الطالب والدرجة
                       </span>
-                      <span className="text-[10px] text-slate-300 mt-1">
-                        (اسم الطالب ومربع الدرجة المرصودة)
-                      </span>
+                      <div className="w-10 h-10 border-b-3 border-l-3 border-amber-400 rounded-bl-xl" />
                     </div>
                   </div>
                 </>
@@ -316,7 +331,7 @@ export default function CameraAiGradeModal({
         </div>
 
         {/* Action Controls / OCR Analysis Results */}
-        <div className="p-5 bg-slate-900 border-t border-slate-800 space-y-4">
+        <div className="p-4 sm:p-5 bg-slate-900 border-t border-slate-800 space-y-4">
           <input
             type="file"
             ref={fileInputRef}
@@ -356,35 +371,125 @@ export default function CameraAiGradeModal({
             <div className="space-y-4 animate-in fade-in">
               {/* OCR Detection Box */}
               <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 space-y-3">
-                <div className="flex items-center justify-between text-xs border-b border-slate-700/60 pb-2">
-                  <span className="text-slate-400">الاسم المكتشف في الورقة:</span>
-                  <span className="font-bold text-amber-300 font-mono text-sm">
-                    {ocrResult.detectedStudentName}
-                  </span>
-                </div>
-
+                {/* Detected Name & Score Row */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Student Match Selector */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
-                      <User className="w-3.5 h-3.5 text-blue-400" />
-                      <span>تطابق الطالب في المجموعة:</span>
+                  {/* Editable Student Search & Matching */}
+                  <div className="space-y-1.5 relative">
+                    <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <User className="w-3.5 h-3.5 text-blue-400" />
+                        <span>اسم الطالب (المكتشف / تعديل يدوي):</span>
+                      </span>
+                      {selectedStudentId && (
+                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-800/60">
+                          تم الربط بنجاح ✓
+                        </span>
+                      )}
                     </label>
-                    <select
-                      value={selectedStudentId}
-                      onChange={(e) => setSelectedStudentId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                    >
-                      {students.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} ({s.code})
-                        </option>
-                      ))}
-                    </select>
+
+                    {/* Search / Edit input */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={studentSearchQuery}
+                        onChange={(e) => {
+                          setStudentSearchQuery(e.target.value);
+                          setIsDropdownOpen(true);
+                          // Auto match if exact match found
+                          const found = students.find(
+                            (s) => s.name.trim() === e.target.value.trim()
+                          );
+                          if (found) setSelectedStudentId(found.id);
+                        }}
+                        onFocus={() => setIsDropdownOpen(true)}
+                        placeholder="اكتب اسم أو كود الطالب للبحث..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    {/* Quick Suggestion Chips from Group */}
+                    <div className="pt-1">
+                      <span className="text-[10px] text-slate-400 block mb-1">
+                        اقتراحات سريعة قريبة من الاسم:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
+                        {students
+                          .filter((s) => {
+                            const query = (studentSearchQuery || ocrResult.detectedStudentName || "").toLowerCase().trim();
+                            if (!query) return true;
+                            const words = query.split(/\s+/).filter(Boolean);
+                            return words.some((w) => s.name.toLowerCase().includes(w)) || s.name.toLowerCase().includes(query) || s.code.includes(query);
+                          })
+                          .slice(0, 4)
+                          .map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedStudentId(s.id);
+                                setStudentSearchQuery(s.name);
+                                setIsDropdownOpen(false);
+                              }}
+                              className={`text-[10px] px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
+                                selectedStudentId === s.id
+                                  ? "bg-blue-600 text-white border-blue-400 shadow-xs"
+                                  : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700"
+                              }`}
+                            >
+                              {s.name} ({s.code})
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+
+                    {/* Mobile-Friendly Search Dropdown */}
+                    {isDropdownOpen && (
+                      <div className="absolute z-50 top-full mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto divide-y divide-slate-800">
+                        {students
+                          .filter(
+                            (s) =>
+                              s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()) ||
+                              s.code.toLowerCase().includes(studentSearchQuery.toLowerCase())
+                          )
+                          .map((s) => (
+                            <div
+                              key={s.id}
+                              onClick={() => {
+                                setSelectedStudentId(s.id);
+                                setStudentSearchQuery(s.name);
+                                setIsDropdownOpen(false);
+                              }}
+                              className={`p-2.5 text-xs flex items-center justify-between cursor-pointer hover:bg-blue-600/20 transition-colors ${
+                                selectedStudentId === s.id ? "bg-blue-600/30 text-blue-200" : "text-slate-200"
+                              }`}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-bold">{s.name}</span>
+                                <span className="text-[10px] text-slate-400">
+                                  {s.academicYear} {s.groupName ? `• ${s.groupName}` : ""}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-amber-400">
+                                {s.code}
+                              </span>
+                            </div>
+                          ))}
+                        {students.filter(
+                          (s) =>
+                            s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()) ||
+                            s.code.toLowerCase().includes(studentSearchQuery.toLowerCase())
+                        ).length === 0 && (
+                          <div className="p-3 text-center text-slate-400 text-xs">
+                            لا توجد نتائج مطابقة للطالب
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Editable Degree / Score */}
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
                       <Award className="w-3.5 h-3.5 text-amber-400" />
                       <span>الدرجة المرصودة (من {totalScore}):</span>
@@ -403,6 +508,12 @@ export default function CameraAiGradeModal({
                         / {totalScore}
                       </span>
                     </div>
+
+                    {ocrResult.notes && (
+                      <p className="text-[10px] text-slate-400 bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                        {ocrResult.notes}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

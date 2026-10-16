@@ -103,13 +103,13 @@ export function proxy(request: NextRequest) {
       return response;
     }
     if (isAdmin) return redirectTo(request, "/admin");
-    if (isTenant) return redirectTo(request, "/exam-builder");
+    if (isTenant) return redirectTo(request, "/");
     return NextResponse.next();
   }
 
   if (pathname === "/") {
     if (isAdmin) return redirectTo(request, "/admin");
-    if (isTenant) return redirectTo(request, "/exam-builder");
+    if (isTenant) return NextResponse.next();
     return redirectTo(request, "/login");
   }
 

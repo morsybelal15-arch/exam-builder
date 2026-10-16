@@ -54,6 +54,7 @@ export default function StudentProfileModal({
       const res = await fetch(`/api/students?id=${studentId}&profile=true`);
       const data = await res.json();
       if (data.success && data.profile) {
+        setProfileData(data.profile);
         // Generate QR code data URL encoding full smart parent portal URL
         const portalUrl = getStudentQrUrl(data.profile.student.code || data.profile.student.id);
         const qrUrl = await generateQrDataUrl(portalUrl, 240);

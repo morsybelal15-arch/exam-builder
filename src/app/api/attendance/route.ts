@@ -5,6 +5,8 @@ import {
   markAttendance,
   bulkMarkAttendance,
   createClassSession,
+  deleteClassSession,
+  deleteStudentAttendance,
 } from "@/lib/management-db";
 
 export async function GET(req: NextRequest) {
@@ -53,6 +55,26 @@ export async function POST(req: NextRequest) {
       }
       const session = createClassSession(groupId, date, title);
       return NextResponse.json({ success: true, session });
+    }
+
+    // Delete session / class day
+    if (action === "deleteSession") {
+      const { groupId, date } = body;
+      if (!groupId || !date) {
+        return NextResponse.json({ error: "Missing groupId or date" }, { status: 400 });
+      }
+      deleteClassSession(groupId, date);
+      return NextResponse.json({ success: true, message: "تم محو جلسة اليوم وسجلاتها بنجاح" });
+    }
+
+    // Delete single student attendance
+    if (action === "deleteStudentAttendance") {
+      const { groupId, studentId, date } = body;
+      if (!groupId || !studentId || !date) {
+        return NextResponse.json({ error: "بيانات الحذف غير مكتملة" }, { status: 400 });
+      }
+      deleteStudentAttendance(groupId, studentId, date);
+      return NextResponse.json({ success: true, message: "تم حذف سجل حضور الطالب بنجاح" });
     }
 
     // Bulk mark

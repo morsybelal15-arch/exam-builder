@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -108,6 +109,18 @@ const navSections: NavSection[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [userName, setUserName] = useState<string>("المعلم المشرف");
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.authenticated && data.name) {
+          setUserName(data.name);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Hide sidebar on login, admin, and denied pages
   if (
@@ -120,6 +133,8 @@ export default function Sidebar() {
     return null;
   }
 
+  const initialLetter = userName?.trim().charAt(0) || "م";
+
   return (
     <aside className="w-72 shrink-0 bg-white shadow-sm h-screen overflow-y-auto flex flex-col justify-between select-none z-20 print:hidden border-l border-slate-100">
       <div>
@@ -131,10 +146,10 @@ export default function Sidebar() {
             </div>
             <div>
               <h1 className="font-bold text-lg text-slate-800 tracking-tight">
-                منصة الاختبارات
+                السنتر
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
-                إدارة وبناء النماذج التعليمية
+                نظام إدارة السناتر
               </p>
             </div>
           </Link>
@@ -187,11 +202,11 @@ export default function Sidebar() {
           className="flex items-center gap-3 hover:opacity-80 transition-opacity"
         >
           <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm">
-            م
+            {initialLetter}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-800 truncate">
-              المعلم المشرف
+              {userName}
             </p>
             <p className="text-[11px] text-emerald-600 font-semibold truncate flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>

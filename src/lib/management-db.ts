@@ -941,6 +941,41 @@ export function saveStudentGrade(
   return { success: true, student, score };
 }
 
+export function deleteStudentGrade(examRecordId: string, studentId: string): boolean {
+  const store = getManagementStore();
+  store.studentGrades = store.studentGrades.filter(
+    (g) => !(g.examRecordId === examRecordId && g.studentId === studentId)
+  );
+  saveManagementStore(store);
+  return true;
+}
+
+export function deleteFinancialRecord(groupId: string, studentId: string, month: string): boolean {
+  const store = getManagementStore();
+  store.financials = store.financials.filter(
+    (f) => !(f.groupId === groupId && f.studentId === studentId && f.month === month)
+  );
+  saveManagementStore(store);
+  return true;
+}
+
+export function deleteClassSession(groupId: string, date: string): boolean {
+  const store = getManagementStore();
+  store.sessions = store.sessions.filter((s) => !(s.groupId === groupId && s.date === date));
+  store.attendance = store.attendance.filter((a) => !(a.groupId === groupId && a.date === date));
+  saveManagementStore(store);
+  return true;
+}
+
+export function deleteStudentAttendance(groupId: string, studentId: string, date: string): boolean {
+  const store = getManagementStore();
+  store.attendance = store.attendance.filter(
+    (a) => !(a.groupId === groupId && a.studentId === studentId && a.date === date)
+  );
+  saveManagementStore(store);
+  return true;
+}
+
 // ==========================================
 // STUDENT PROFILE AGGREGATOR
 // ==========================================

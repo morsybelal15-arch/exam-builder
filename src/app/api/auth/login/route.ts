@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       success: true,
       message: "تم تسجيل الدخول بنجاح",
       role: "TENANT",
-      redirectUrl: "/exam-builder",
+      redirectUrl: "/",
     });
   } catch (error: any) {
     console.error("Login authentication error:", error);

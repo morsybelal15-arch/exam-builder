@@ -5,6 +5,7 @@ import {
   deleteExamRecord,
   getExamGrades,
   saveStudentGrade,
+  deleteStudentGrade,
 } from "@/lib/management-db";
 
 export async function GET(req: NextRequest) {
@@ -67,6 +68,16 @@ export async function POST(req: NextRequest) {
         saveStudentGrade(examRecordId, g.studentId, g.score, g.notes, g.method || "manual");
       });
       return NextResponse.json({ success: true, message: "تم حفظ درجات الطلاب بنجاح" });
+    }
+
+    // Delete single student grade
+    if (action === "deleteGrade") {
+      const { examRecordId, studentId } = body;
+      if (!examRecordId || !studentId) {
+        return NextResponse.json({ error: "بيانات الحذف غير مكتملة" }, { status: 400 });
+      }
+      deleteStudentGrade(examRecordId, studentId);
+      return NextResponse.json({ success: true, message: "تم حذف درجة الطالب بنجاح" });
     }
 
     return NextResponse.json({ error: "Action not recognized" }, { status: 400 });

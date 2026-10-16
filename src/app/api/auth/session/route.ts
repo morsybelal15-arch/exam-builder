@@ -38,6 +38,8 @@ export async function GET() {
   return NextResponse.json({
     authenticated: true,
     role: "TENANT",
+    name: tenant?.name || session.name || "المعلم المشرف",
+    phone: session.phone,
     subscriptionDueDate: tenant?.subscriptionDueDate ?? null,
   });
 }

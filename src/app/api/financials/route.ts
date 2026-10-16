@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFinancials, updateFinancial, bulkUpdateFinancials } from "@/lib/management-db";
+import { getFinancials, updateFinancial, bulkUpdateFinancials, deleteFinancialRecord } from "@/lib/management-db";
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,6 +22,16 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { action } = body;
+
+    // Delete financial record
+    if (action === "delete") {
+      const { studentId, groupId, month } = body;
+      if (!studentId || !groupId || !month) {
+        return NextResponse.json({ error: "بيانات الحذف غير مكتملة" }, { status: 400 });
+      }
+      deleteFinancialRecord(groupId, studentId, month);
+      return NextResponse.json({ success: true, message: "تم حذف السجل المالي بنجاح" });
+    }
 
     // Bulk update
     if (action === "bulk") {

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Users,
   UserCheck,
@@ -31,6 +31,7 @@ import {
   Sparkles,
   Printer,
   ChevronDown,
+  Scan,
 } from "lucide-react";
 import {
   Group,
@@ -43,10 +44,42 @@ import {
 import StudentProfileModal from "@/components/students/StudentProfileModal";
 import CameraQrScannerModal from "@/components/students/CameraQrScannerModal";
 import CameraAiGradeModal from "@/components/students/CameraAiGradeModal";
+import ContinuousPaymentQrScannerModal from "@/components/students/ContinuousPaymentQrScannerModal";
+
+const months2026_2027 = [
+  { value: "2026-01", label: "يناير ٢٠٢٦" },
+  { value: "2026-02", label: "فبراير ٢٠٢٦" },
+  { value: "2026-03", label: "مارس ٢٠٢٦" },
+  { value: "2026-04", label: "أبريل ٢٠٢٦" },
+  { value: "2026-05", label: "مايو ٢٠٢٦" },
+  { value: "2026-06", label: "يونيو ٢٠٢٦" },
+  { value: "2026-07", label: "يوليو ٢٠٢٦" },
+  { value: "2026-08", label: "أغسطس ٢٠٢٦" },
+  { value: "2026-09", label: "سبتمبر ٢٠٢٦" },
+  { value: "2026-10", label: "أكتوبر ٢٠٢٦" },
+  { value: "2026-11", label: "نوفمبر ٢٠٢٦" },
+  { value: "2026-12", label: "ديسمبر ٢٠٢٦" },
+  { value: "2027-01", label: "يناير ٢٠٢٧" },
+  { value: "2027-02", label: "فبراير ٢٠٢٧" },
+  { value: "2027-03", label: "مارس ٢٠٢٧" },
+  { value: "2027-04", label: "أبريل ٢٠٢٧" },
+  { value: "2027-05", label: "مايو ٢٠٢٧" },
+  { value: "2027-06", label: "يونيو ٢٠٢٧" },
+  { value: "2027-07", label: "يوليو ٢٠٢٧" },
+  { value: "2027-08", label: "أغسطس ٢٠٢٧" },
+  { value: "2027-09", label: "سبتمبر ٢٠٢٧" },
+  { value: "2027-10", label: "أكتوبر ٢٠٢٧" },
+  { value: "2027-11", label: "نوفمبر ٢٠٢٧" },
+  { value: "2027-12", label: "ديسمبر ٢٠٢٧" },
+];
 
 function StudentsPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialGroupId = searchParams.get("groupId");
+  const initialTab = (searchParams.get("tab") as any) || "students";
+  const initialDate = searchParams.get("date") || new Date().toISOString().split("T")[0];
+  const initialMonth = searchParams.get("month") || new Date().toISOString().slice(0, 7);
 
   // Groups and Selected Group
   const [groups, setGroups] = useState<Group[]>([]);
@@ -54,7 +87,9 @@ function StudentsPageContent() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
   // Active Tab View: 4 toggles
-  const [activeTab, setActiveTab] = useState<"students" | "financials" | "attendance" | "grades">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "financials" | "attendance" | "grades">(
+    ["students", "financials", "attendance", "grades"].includes(initialTab) ? initialTab : "students"
+  );
 
   // Students Data
   const [students, setStudents] = useState<Student[]>([]);
@@ -63,14 +98,15 @@ function StudentsPageContent() {
   const [activeProfileStudentId, setActiveProfileStudentId] = useState<string | null>(null);
 
   // Financials State
-  const [financialMonth, setFinancialMonth] = useState<string>("2026-10");
+  const [financialMonth, setFinancialMonth] = useState<string>(initialMonth);
   const [financialRecords, setFinancialRecords] = useState<any[]>([]);
   const [partialAmountInput, setPartialAmountInput] = useState<string>("");
   const [showPartialModal, setShowPartialModal] = useState<boolean>(false);
   const [partialStudentId, setPartialStudentId] = useState<string | null>(null);
+  const [isContinuousPaymentOpen, setIsContinuousPaymentOpen] = useState<boolean>(false);
 
   // Attendance State
-  const [attendanceDate, setAttendanceDate] = useState<string>("2026-10-14");
+  const [attendanceDate, setAttendanceDate] = useState<string>(initialDate);
   const [classSessions, setClassSessions] = useState<GroupClassSession[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [isCameraAttendanceOpen, setIsCameraAttendanceOpen] = useState(false);
@@ -93,6 +129,12 @@ function StudentsPageContent() {
   const [transferSourceGroupId, setTransferSourceGroupId] = useState("");
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
 
+  // Enhanced Transfer Pool State
+  const [transferSearchQuery, setTransferSearchQuery] = useState("");
+  const [transferPoolStudents, setTransferPoolStudents] = useState<Student[]>([]);
+  const [transferDropdownOpen, setTransferDropdownOpen] = useState(false);
+  const [allAvailableStudents, setAllAvailableStudents] = useState<Student[]>([]);
+
   // Student Form
   const [studentFormData, setStudentFormData] = useState({
     name: "",
@@ -105,6 +147,30 @@ function StudentsPageContent() {
   });
 
   const [isLoading, setIsLoading] = useState(true);
+
+  // Synchronize state with URL search params so browser refresh preserves the exact view
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (selectedGroupId) {
+      params.set("groupId", selectedGroupId);
+    } else {
+      params.delete("groupId");
+    }
+    params.set("tab", activeTab);
+    if (activeTab === "attendance" && attendanceDate) {
+      params.set("date", attendanceDate);
+    } else {
+      params.delete("date");
+    }
+    if (activeTab === "financials" && financialMonth) {
+      params.set("month", financialMonth);
+    } else {
+      params.delete("month");
+    }
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState(null, "", newUrl);
+  }, [selectedGroupId, activeTab, attendanceDate, financialMonth]);
 
   // Initial load
   useEffect(() => {
@@ -547,21 +613,93 @@ function StudentsPageContent() {
     }
   };
 
-  const handleTransferSubmit = async () => {
-    if (!transferTargetGroupId || selectedStudentIds.length === 0) return;
+  const handleOpenTransferModal = async (transferringHere = false) => {
+    setIsTransferringHere(transferringHere);
+    setTransferSearchQuery("");
+    setTransferDropdownOpen(false);
+
+    if (transferringHere) {
+      setTransferTargetGroupId(selectedGroupId || "");
+      setTransferPoolStudents([]);
+    } else {
+      setTransferTargetGroupId("");
+      // Add currently selected students into pool
+      const pool = students.filter((s) => selectedStudentIds.includes(s.id));
+      setTransferPoolStudents(pool);
+    }
+    setIsTransferModalOpen(true);
+
+    // Fetch all students across all groups so user can search and pick anyone
     try {
-      await fetch("/api/students", {
+      const res = await fetch("/api/students");
+      const data = await res.json();
+      if (data.success) {
+        setAllAvailableStudents(data.students || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleTransferSubmit = async () => {
+    if (!transferTargetGroupId || transferPoolStudents.length === 0) {
+      alert("يرجى اختيار الطلاب والمجموعة الهدف للنقل إليها");
+      return;
+    }
+    try {
+      const studentIdsToTransfer = transferPoolStudents.map((s) => s.id);
+      const res = await fetch("/api/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "transfer",
-          studentIds: selectedStudentIds,
+          studentIds: studentIdsToTransfer,
           targetGroupId: transferTargetGroupId,
         }),
       });
-      setIsTransferModalOpen(false);
-      loadGroupData(selectedGroupId!);
-      setSelectedStudentIds([]);
+      const data = await res.json();
+      if (data.success) {
+        setIsTransferModalOpen(false);
+        setTransferPoolStudents([]);
+        setSelectedStudentIds([]);
+        if (selectedGroupId) {
+          await loadGroupData(selectedGroupId);
+        }
+      } else {
+        alert(data.error || "فشل نقل الطلاب");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء نقل الطلاب");
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!selectedGroupId || !attendanceDate) return;
+    if (!confirm(`هل أنت متأكد من محو جلسة يوم (${attendanceDate}) بالكامل وحذف كافة سجلات الحضور لهذا اليوم؟`)) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "deleteSession",
+          groupId: selectedGroupId,
+          date: attendanceDate,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              setAttendanceRecords(d.attendance || []);
+              setClassSessions(d.sessions || []);
+            }
+          });
+      }
     } catch (err) {
       console.error(err);
     }
@@ -818,10 +956,7 @@ function StudentsPageContent() {
                 </button>
 
                 <button
-                  onClick={() => {
-                    setIsTransferringHere(true);
-                    setIsTransferModalOpen(true);
-                  }}
+                  onClick={() => handleOpenTransferModal(true)}
                   className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer"
                 >
                   <ArrowRightLeft className="w-4 h-4 text-blue-600" />
@@ -878,10 +1013,7 @@ function StudentsPageContent() {
                   </button>
 
                   <button
-                    onClick={() => {
-                      setIsTransferringHere(false);
-                      setIsTransferModalOpen(true);
-                    }}
+                    onClick={() => handleOpenTransferModal(false)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-xl font-semibold transition-colors cursor-pointer"
                   >
                     <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400" />
@@ -959,7 +1091,7 @@ function StudentsPageContent() {
 
                             <td
                               className="p-4 font-bold text-slate-900"
-                              onClick={() => setActiveProfileStudentId(student.id)}
+                              onClick={() => router.push(`/students/${student.id}`)}
                             >
                               <div className="flex items-center gap-2">
                                 <span className="hover:text-blue-600 transition-colors">{student.name}</span>
@@ -1012,8 +1144,8 @@ function StudentsPageContent() {
                             <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-center gap-1">
                                 <button
-                                  onClick={() => setActiveProfileStudentId(student.id)}
-                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-bold"
+                                  onClick={() => router.push(`/students/${student.id}`)}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-bold cursor-pointer"
                                   title="عرض ملف الطالب"
                                 >
                                   الملف
@@ -1070,24 +1202,37 @@ function StudentsPageContent() {
                     متابعة الاشتراكات الشهرية
                   </h3>
                   <p className="text-xs text-slate-400">
-                    فلترة بالشهور، وتحديد حالات السداد (الافتراضي: غير مدفوع)
+                    فلترة بالشهور (٢٠٢٦ - ٢٠٢٧)، وتحديد حالات السداد، والمسح المستمر بالباركود
                   </p>
                 </div>
               </div>
 
-              {/* Month Selector Filter */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-500">الشهر المالي:</span>
-                <select
-                  value={financialMonth}
-                  onChange={(e) => setFinancialMonth(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Continuous Barcode Payment Scanner */}
+                <button
+                  type="button"
+                  onClick={() => setIsContinuousPaymentOpen(true)}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-2xl text-xs font-black shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
                 >
-                  <option value="2026-10">أكتوبر ٢٠٢٦</option>
-                  <option value="2026-11">نوفمبر ٢٠٢٦</option>
-                  <option value="2026-12">ديسمبر ٢٠٢٦</option>
-                  <option value="2026-09">سبتمبر ٢٠٢٦</option>
-                </select>
+                  <Scan className="w-4 h-4" />
+                  <span>مسح الباركود والسداد السريع</span>
+                </button>
+
+                {/* Month Selector Filter (2026-2027 Compact) */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-500">الشهر المالي:</span>
+                  <select
+                    value={financialMonth}
+                    onChange={(e) => setFinancialMonth(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer max-w-[170px]"
+                  >
+                    {months2026_2027.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1118,12 +1263,7 @@ function StudentsPageContent() {
               </div>
             )}
 
-            {/* Financials List Table with Color Coded Rows:
-                - Light green: paid
-                - Light red: unpaid (default)
-                - Light brown: partial paid with paid amount shown
-                - Two check status beside student name
-            */}
+            {/* Financials List Table with Color Coded Rows */}
             <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-right text-xs">
@@ -1149,6 +1289,7 @@ function StudentsPageContent() {
                       <th className="p-4">المدفوع حالياً</th>
                       <th className="p-4">المتبقي</th>
                       <th className="p-4 text-center">تغيير الحالة</th>
+                      <th className="p-4 text-center">حذف</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1160,17 +1301,13 @@ function StudentsPageContent() {
                       const isSelected = selectedStudentIds.includes(fin.studentId);
                       const remaining = Math.max(0, fin.totalAmount - fin.paidAmount);
 
-                      // Row color classes:
-                      // Light red for unpaid (default)
-                      // Light green for paid
-                      // Light brown for partial paid
                       const rowColorClass = isPaid
                         ? "bg-emerald-50/70 hover:bg-emerald-50 text-emerald-950"
                         : isPartial
-                        ? "bg-[#faf0e6] hover:bg-[#f5e6d3] text-amber-950" // Light brown
+                        ? "bg-[#faf0e6] hover:bg-[#f5e6d3] text-amber-950"
                         : isReturned
                         ? "bg-slate-100/80 hover:bg-slate-100 text-slate-700"
-                        : "bg-red-50/70 hover:bg-red-50 text-red-950"; // Light red (default)
+                        : "bg-red-50/70 hover:bg-red-50 text-red-950";
 
                       return (
                         <tr
@@ -1178,7 +1315,7 @@ function StudentsPageContent() {
                           className={`transition-colors cursor-pointer border-b border-slate-100/60 ${rowColorClass} ${
                             isSelected ? "ring-2 ring-blue-500/50" : ""
                           }`}
-                          onClick={() => setActiveProfileStudentId(fin.studentId)}
+                          onClick={() => router.push(`/students/${fin.studentId}`)}
                         >
                           <td className="p-4" onClick={(e) => e.stopPropagation()}>
                             <input
@@ -1266,6 +1403,34 @@ function StudentsPageContent() {
                               </button>
                             </div>
                           </td>
+
+                          {/* Delete row */}
+                          <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (confirm(`هل أنت متأكد من حذف السجل المالي للطالب ${fin.studentName} لشهر ${financialMonth}؟`)) {
+                                  await fetch("/api/financials", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      action: "delete",
+                                      groupId: selectedGroupId,
+                                      studentId: fin.studentId,
+                                      month: financialMonth,
+                                    }),
+                                  });
+                                  fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`)
+                                    .then((r) => r.json())
+                                    .then((d) => d.success && setFinancialRecords(d.financials || []));
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              title="حذف السجل المالي"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -1341,22 +1506,61 @@ function StudentsPageContent() {
               </div>
             </div>
 
-            {/* Selected Day View Header:
-                "Above the list view a record attendance with camera and students qr's button + search bar by student filter"
-            */}
+            {/* Selected Day View Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-100 shadow-2xs">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <button
                   onClick={() => setIsCameraAttendanceOpen(true)}
-                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-md shadow-indigo-500/20 active:scale-95 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-2xl text-xs font-bold shadow-md shadow-indigo-500/20 active:scale-95 transition-all cursor-pointer"
                 >
                   <Camera className="w-4 h-4" />
-                  <span>تسجيل الحضور بالكاميرا ورموز QR للطلاب</span>
+                  <span>تسجيل الحضور بالكاميرا و QR</span>
                 </button>
 
-                <div className="text-xs text-slate-500 font-medium">
-                  عرض كشف يوم: <strong className="text-slate-800 font-mono">{attendanceDate}</strong>
-                </div>
+                {/* Create / Confirm Session Button */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await fetch("/api/attendance", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          action: "createSession",
+                          groupId: selectedGroupId,
+                          date: attendanceDate,
+                          title: "حصة دراسية",
+                        }),
+                      });
+                      fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                        .then((r) => r.json())
+                        .then((d) => {
+                          if (d.success) {
+                            setAttendanceRecords(d.attendance || []);
+                            setClassSessions(d.sessions || []);
+                          }
+                        });
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  title="تثبيت أن اليوم يوم حصة دراسية حتى وإن غاب الجميع"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>تثبيت حصة اليوم ({attendanceDate})</span>
+                </button>
+
+                {/* Clear / Delete Session Button */}
+                <button
+                  type="button"
+                  onClick={handleDeleteSession}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  title="محو جلسة هذا اليوم وسجلاتها بالكامل"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                  <span>محو جلسة هذا اليوم</span>
+                </button>
               </div>
 
               {/* Search Bar by student filter */}
@@ -1419,6 +1623,7 @@ function StudentsPageContent() {
                       <th className="p-4">وقت التسجيل</th>
                       <th className="p-4">طريقة التسجيل</th>
                       <th className="p-4 text-center">تغيير الحالة (حاضر / غائب)</th>
+                      <th className="p-4 text-center">حذف</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1438,7 +1643,7 @@ function StudentsPageContent() {
                             className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
                               isAttended ? "bg-emerald-50/30" : "bg-red-50/20"
                             } ${isSelected ? "ring-2 ring-indigo-500/50" : ""}`}
-                            onClick={() => setActiveProfileStudentId(att.studentId)}
+                            onClick={() => router.push(`/students/${att.studentId}`)}
                           >
                             <td className="p-4" onClick={(e) => e.stopPropagation()}>
                               <input
@@ -1518,6 +1723,34 @@ function StudentsPageContent() {
                                   غائب
                                 </button>
                               </div>
+                            </td>
+
+                            {/* Delete single attendance row */}
+                            <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (confirm(`حذف سجل حضور الطالب ${att.studentName} لهذا اليوم؟`)) {
+                                    await fetch("/api/attendance", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        action: "deleteStudentAttendance",
+                                        groupId: selectedGroupId,
+                                        studentId: att.studentId,
+                                        date: attendanceDate,
+                                      }),
+                                    });
+                                    fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                                      .then((r) => r.json())
+                                      .then((d) => d.success && setAttendanceRecords(d.attendance || []));
+                                  }
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                title="حذف سجل الحضور"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </td>
                           </tr>
                         );
@@ -1620,6 +1853,7 @@ function StudentsPageContent() {
                               <th className="p-4">النسبة المئوية</th>
                               <th className="p-4">طريقة الرصد</th>
                               <th className="p-4 text-center">إشعار ولي الأمر (واتساب)</th>
+                              <th className="p-4 text-center">حذف</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -1631,7 +1865,7 @@ function StudentsPageContent() {
                                 <tr
                                   key={gradeItem.studentId}
                                   className="hover:bg-slate-50/80 transition-colors cursor-pointer"
-                                  onClick={() => setActiveProfileStudentId(gradeItem.studentId)}
+                                  onClick={() => router.push(`/students/${gradeItem.studentId}`)}
                                 >
                                   <td className="p-4 font-bold text-slate-900">
                                     {gradeItem.studentName}
@@ -1708,6 +1942,33 @@ function StudentsPageContent() {
                                       <span>إرسال واتساب</span>
                                     </button>
                                   </td>
+
+                                  {/* Delete single grade row */}
+                                  <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        if (confirm(`حذف درجة الطالب ${gradeItem.studentName} من هذا الاختبار؟`)) {
+                                          await fetch("/api/exam-grades", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                              action: "deleteGrade",
+                                              examRecordId: selectedExamRecordId,
+                                              studentId: gradeItem.studentId,
+                                            }),
+                                          });
+                                          if (selectedExamRecordId) {
+                                            loadExamGrades(selectedExamRecordId);
+                                          }
+                                        }
+                                      }}
+                                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                      title="حذف درجة الطالب"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
                                 </tr>
                               );
                             })}
@@ -1779,6 +2040,23 @@ function StudentsPageContent() {
             students={students}
             onClose={() => setIsCameraAiGradeOpen(false)}
             onGradeRecorded={() => loadExamGrades(selectedExamRecordId)}
+          />
+        )}
+
+        {/* 3.5. Continuous Payment QR / Barcode Scanner Modal */}
+        {isContinuousPaymentOpen && (
+          <ContinuousPaymentQrScannerModal
+            groupId={selectedGroupId || ""}
+            month={financialMonth}
+            students={students}
+            onClose={() => setIsContinuousPaymentOpen(false)}
+            onPaymentRecorded={() => {
+              if (selectedGroupId) {
+                fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`)
+                  .then((r) => r.json())
+                  .then((d) => d.success && setFinancialRecords(d.financials || []));
+              }
+            }}
           />
         )}
 
@@ -1900,82 +2178,235 @@ function StudentsPageContent() {
           </div>
         )}
 
-        {/* 5. Transfer Modal */}
+        {/* 5. Enhanced Large Transfer Modal */}
         {isTransferModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100 animate-in fade-in zoom-in-95">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-xs">
+            <div className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-7 shadow-2xl space-y-5 border border-slate-100 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
+              {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <ArrowRightLeft className="w-5 h-5 text-blue-600" />
-                  <h3 className="text-base font-bold text-slate-800">
-                    {isTransferringHere ? "نقل طلاب إلى هذه المجموعة" : "نقل الطلاب إلى مجموعة أخرى"}
-                  </h3>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                    <ArrowRightLeft className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-slate-800">
+                      نقل الطلاب بين المجموعات الدراسية
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      اختر الطلاب المراد نقلهم إما بالبحث الفردي أو بتحديد مجموعة كاملة
+                    </p>
+                  </div>
                 </div>
                 <button
                   onClick={() => setIsTransferModalOpen(false)}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {isTransferringHere ? (
-                <div className="space-y-3 text-xs">
-                  <p className="text-slate-500">
-                    اختر المجموعة المصدر لاستيراد الطلاب منها إلى: <strong>{selectedGroup?.name}</strong>
-                  </p>
-                  <select
-                    value={transferSourceGroupId}
-                    onChange={(e) => setTransferSourceGroupId(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold"
-                  >
-                    <option value="">اختر المجموعة المصدر...</option>
-                    {groups
-                      .filter((g) => g.id !== selectedGroupId)
-                      .map((g) => (
+              {/* Modal Body */}
+              <div className="space-y-4 overflow-y-auto flex-1 pr-1 text-xs">
+                {/* 1. Search by Student Name / Code */}
+                <div className="space-y-1.5 relative">
+                  <label className="font-bold text-slate-700 block">
+                    ١. ابحث عن طالب بالاسم أو الكود لإضافته للنقل:
+                  </label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={transferSearchQuery}
+                      onChange={(e) => {
+                        setTransferSearchQuery(e.target.value);
+                        setTransferDropdownOpen(true);
+                      }}
+                      onFocus={() => setTransferDropdownOpen(true)}
+                      placeholder="اكتب اسم أو كود الطالب..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  {/* Dropdown with Student Name, Academic Year, and Group */}
+                  {transferDropdownOpen && transferSearchQuery.trim() && (
+                    <div className="absolute z-50 top-full mt-1 w-full bg-white border border-slate-200 rounded-2xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
+                      {(allAvailableStudents.length > 0 ? allAvailableStudents : students)
+                        .filter(
+                          (s) =>
+                            s.name.toLowerCase().includes(transferSearchQuery.toLowerCase()) ||
+                            s.code.toLowerCase().includes(transferSearchQuery.toLowerCase())
+                        )
+                        .map((s) => {
+                          const isAlreadyInPool = transferPoolStudents.some((p) => p.id === s.id);
+                          return (
+                            <div
+                              key={s.id}
+                              onClick={() => {
+                                if (!isAlreadyInPool) {
+                                  setTransferPoolStudents((prev) => [...prev, s]);
+                                }
+                                setTransferSearchQuery("");
+                                setTransferDropdownOpen(false);
+                              }}
+                              className={`p-3 text-xs flex items-center justify-between cursor-pointer hover:bg-blue-50 transition-colors ${
+                                isAlreadyInPool ? "opacity-50 bg-slate-50 cursor-not-allowed" : ""
+                              }`}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-bold text-slate-900">{s.name}</span>
+                                <span className="text-[11px] text-slate-500 mt-0.5">
+                                  {s.academicYear} {s.groupName ? `• ${s.groupName}` : ""}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-bold">
+                                  {s.code}
+                                </span>
+                                {isAlreadyInPool ? (
+                                  <span className="text-[10px] text-emerald-600 font-bold">محدد ✓</span>
+                                ) : (
+                                  <span className="text-[10px] text-blue-600 font-bold">+ إضافة</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Or Select Entire Group */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="font-bold text-slate-700 block">
+                    ٢. أو إضافة كل طلاب مجموعة معينة إلى قائمة النقل:
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={transferSourceGroupId}
+                      onChange={(e) => setTransferSourceGroupId(e.target.value)}
+                      className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                    >
+                      <option value="">اختر المجموعة لإضافة طلابها...</option>
+                      {groups.map((g) => (
                         <option key={g.id} value={g.id}>
                           {g.name} ({g.academicYear})
                         </option>
                       ))}
-                  </select>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={!transferSourceGroupId}
+                      onClick={() => {
+                        const targetList = allAvailableStudents.length > 0 ? allAvailableStudents : students;
+                        const groupStudents = targetList.filter((s) => s.groupId === transferSourceGroupId);
+                        // Add unique
+                        setTransferPoolStudents((prev) => {
+                          const existingIds = new Set(prev.map((p) => p.id));
+                          const newToAdd = groupStudents.filter((s) => !existingIds.has(s.id));
+                          return [...prev, ...newToAdd];
+                        });
+                        setTransferSourceGroupId("");
+                      }}
+                      className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      إضافة طلابها
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <div className="space-y-3 text-xs">
-                  <p className="text-slate-500">
-                    سيتم نقل <strong>{selectedStudentIds.length}</strong> طالب محدد إلى المجموعة التالية:
-                  </p>
+
+                {/* 3. Selected Students Pool */}
+                <div className="space-y-1.5 pt-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700">
+                      الطلاب المختارون للنقل (
+                      <strong className="text-blue-600">{transferPoolStudents.length}</strong> طالب):
+                    </label>
+                    {transferPoolStudents.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTransferPoolStudents([])}
+                        className="text-[11px] text-red-600 hover:underline font-bold"
+                      >
+                        مسح الكل
+                      </button>
+                    )}
+                  </div>
+
+                  {transferPoolStudents.length > 0 ? (
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 max-h-36 overflow-y-auto">
+                      {transferPoolStudents.map((s) => (
+                        <div
+                          key={s.id}
+                          className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 flex items-center gap-2 shadow-2xs text-xs"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-800">{s.name}</span>
+                            <span className="text-[9px] text-slate-400">
+                              {s.academicYear} {s.groupName ? `• ${s.groupName}` : ""}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setTransferPoolStudents((prev) => prev.filter((p) => p.id !== s.id))
+                            }
+                            className="text-slate-400 hover:text-red-600 p-0.5"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center text-slate-400 text-xs">
+                      لم يتم اختيار أي طالب بعد. ابحث عن اسم الطالب أعلاه أو اختر مجموعة لإضافتها.
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Target Group Selection */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="font-bold text-slate-700 block">
+                    ٣. المجموعة المنقول إليها (الهدف) *:
+                  </label>
                   <select
                     value={transferTargetGroupId}
                     onChange={(e) => setTransferTargetGroupId(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">اختر المجموعة الهدف...</option>
-                    {groups
-                      .filter((g) => g.id !== selectedGroupId)
-                      .map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.name} ({g.academicYear})
-                        </option>
-                      ))}
+                    <option value="">اختر المجموعة المنقول إليها...</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({g.academicYear})
+                      </option>
+                    ))}
                   </select>
                 </div>
-              )}
+              </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 text-xs font-bold">
-                <button
-                  type="button"
-                  onClick={() => setIsTransferModalOpen(false)}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="button"
-                  onClick={handleTransferSubmit}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm"
-                >
-                  تأكيد النقل
-                </button>
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 text-xs font-bold">
+                <span className="text-slate-500">
+                  سيتم نقل <strong className="text-blue-600 font-mono">{transferPoolStudents.length}</strong> طالب
+                </span>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsTransferModalOpen(false)}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    disabled={transferPoolStudents.length === 0 || !transferTargetGroupId}
+                    onClick={handleTransferSubmit}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                  >
+                    تأكيد نقل الطلاب ({transferPoolStudents.length})
+                  </button>
+                </div>
               </div>
             </div>
           </div>
