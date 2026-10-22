@@ -11,6 +11,14 @@ if (!fs.existsSync(dataDir)) {
 
 const dbPath = path.join(dataDir, "exam_builder.db");
 const jsonStorePath = path.join(dataDir, "exam_builder_store.json");
+const uploadsDir = path.join(dataDir, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+export function getUploadsDir() {
+  return uploadsDir;
+}
 
 // Dynamically check if node:sqlite is supported on this Node runtime (Node 22+)
 let DatabaseSyncClass: any = null;

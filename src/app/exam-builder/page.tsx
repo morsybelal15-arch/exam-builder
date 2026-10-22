@@ -12,6 +12,10 @@ import {
   PlusCircle,
   FileText,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ZoomIn,
   ZoomOut,
   Trash2,
@@ -47,6 +51,8 @@ import {
   Search,
   AlertCircle,
   Shuffle,
+  BookOpen,
+  Clock,
 } from "lucide-react";
 import GeminiKeyModal from "@/components/GeminiKeyModal";
 import ModelGenerationModal from "@/components/ModelGenerationModal";
@@ -57,12 +63,33 @@ import {
   updateQuestionNumberPrefix,
 } from "@/lib/multi-model-exam";
 
+const loadPdfJs = (): Promise<any> => {
+  if (typeof window === "undefined") return Promise.reject("SSR");
+  if ((window as any).pdfjsLib) return Promise.resolve((window as any).pdfjsLib);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = () => {
+      const pdfjs = (window as any).pdfjsLib;
+      if (pdfjs) {
+        pdfjs.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      }
+      resolve(pdfjs);
+    };
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+};
+
 interface CropRect {
   x: number;
   y: number;
   width: number;
   height: number;
 }
+
+const PEN_CURSOR_URL = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M19 3a2.121 2.121 0 0 1 3 3L7 21l-4 1 1-4L19 3z' fill='%23ffffff' stroke='%230f172a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M15 7l3 3' stroke='%232563eb' stroke-width='1.8'/%3E%3Cpath d='M3 22l1-4 3 3-4 1z' fill='%232563eb'/%3E%3Ccircle cx='2' cy='22' r='1.2' fill='%23ef4444'/%3E%3C/svg%3E") 2 22, crosshair`;
 
 interface QuestionStyle {
   fontSize: number;
@@ -72,7 +99,7 @@ interface QuestionStyle {
 
 export interface ExamQuestionItem {
   id: string;
-  type: "choice" | "trueFalse" | "essay";
+  type: "choice" | "trueFalse" | "essay" | "passage";
   text: string;
   options: string[];
   correctOptionIndex?: number;
@@ -82,7 +109,31 @@ export interface ExamQuestionItem {
   imageUrl?: string;
   imageWidth?: number; // percentage (25..100)
   imageAlign?: "right" | "center" | "left";
+  // Enhanced properties for English & rich multi-subject exams
+  optionsLayout?: "grid" | "vertical";
+  answerLinesCount?: number;
+  passageText?: string;
+  passageTitle?: string;
+  subType?: "passage" | "translation" | "writing" | "story" | "regular";
 }
+
+function sanitizeFormattedText(raw?: string): string {
+  if (!raw) return "";
+  let s = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  // Restore allowed safe formatting tags with clean standard exam styling:
+  s = s.replace(/&lt;u&gt;(.*?)&lt;\/u&gt;/gi, '<u class="underline underline-offset-2 decoration-1.5 decoration-slate-900 font-bold">$1</u>');
+  s = s.replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/gi, '<strong class="font-bold">$1</strong>');
+  s = s.replace(/&lt;strong&gt;(.*?)&lt;\/strong&gt;/gi, '<strong class="font-bold">$1</strong>');
+  s = s.replace(/&lt;i&gt;(.*?)&lt;\/i&gt;/gi, '<em class="italic">$1</em>');
+  // Support markdown **word** or _word_
+  s = s.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold">$1</strong>');
+  s = s.replace(/\b_([^_]+)_\b/g, '<u class="underline underline-offset-2 decoration-1.5 decoration-slate-900 font-bold">$1</u>');
+  return s;
+}
+const sanitizePassageHtml = sanitizeFormattedText;
 
 interface PageSlot {
   pageNumber: number;
@@ -149,6 +200,161 @@ export default function ExamBuilderPage() {
   const imageUploadInputRef = useRef<HTMLInputElement>(null);
   const freeImageInputRef = useRef<HTMLInputElement>(null);
 
+  // PDF Multi-page viewer & jump states
+  const [pdfDoc, setPdfDoc] = useState<any | null>(null);
+  const pdfDocRef = useRef<any | null>(null);
+  const [pdfTotalPages, setPdfTotalPages] = useState<number>(1);
+  const [pdfCurrentPage, setPdfCurrentPage] = useState<number>(1);
+  const pdfCurrentPageRef = useRef<number>(1);
+  useEffect(() => {
+    pdfCurrentPageRef.current = pdfCurrentPage;
+  }, [pdfCurrentPage]);
+
+  // Smooth 60fps Lasso drawing & scroll throttle refs
+  const lassoPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const lassoRafRef = useRef<number | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
+  const rectRafRef = useRef<number | null>(null);
+
+  const [pdfPageInput, setPdfPageInput] = useState<string>("1");
+  const [pdfPagesCache, setPdfPagesCache] = useState<Record<number, string>>({});
+  const pdfPagesCacheRef = useRef<Record<number, string>>({});
+  const renderQueueRef = useRef<number[]>([]);
+  const isQueueProcessingRef = useRef<boolean>(false);
+  const [activePdfCropPage, setActivePdfCropPage] = useState<number>(1);
+  const activePdfCropPageRef = useRef<number>(1);
+  const [pdfPageAspectRatio, setPdfPageAspectRatio] = useState<number>(1.414);
+
+  // High-performance queue worker for PDF pages (scale 1.5 + fast JPEG blob compression)
+  const processRenderQueue = useCallback(async () => {
+    if (isQueueProcessingRef.current) return;
+    isQueueProcessingRef.current = true;
+
+    try {
+      while (renderQueueRef.current.length > 0) {
+        const pageNum = renderQueueRef.current.shift();
+        if (!pageNum) continue;
+        if (pdfPagesCacheRef.current[pageNum]) continue;
+
+        const doc = pdfDocRef.current;
+        if (!doc) break;
+
+        try {
+          const page = await doc.getPage(pageNum);
+          // Scale 1.5 gives crisp 150 DPI resolution with ultra-fast rendering & low memory footprint
+          const viewport = page.getViewport({ scale: 1.5 });
+          if (viewport.width && viewport.height) {
+            setPdfPageAspectRatio(viewport.height / viewport.width);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(viewport.width);
+          canvas.height = Math.round(viewport.height);
+          const ctx = canvas.getContext("2d", { alpha: false });
+          if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          await page.render({ canvasContext: ctx, viewport }).promise;
+
+          // Asynchronous, off-thread JPEG compression is 10x faster than synchronous toDataURL PNG
+          let pageUrl = "";
+          if (canvas.toBlob) {
+            const blob = await new Promise<Blob | null>((resolve) => {
+              canvas.toBlob(resolve, "image/jpeg", 0.88);
+            });
+            if (blob) {
+              pageUrl = URL.createObjectURL(blob);
+            }
+          }
+          if (!pageUrl) {
+            pageUrl = canvas.toDataURL("image/jpeg", 0.88);
+          }
+
+          pdfPagesCacheRef.current[pageNum] = pageUrl;
+          setPdfPagesCache((prev) => ({ ...prev, [pageNum]: pageUrl }));
+        } catch (err) {
+          console.error(`Failed to render PDF page ${pageNum}:`, err);
+        }
+      }
+    } finally {
+      isQueueProcessingRef.current = false;
+    }
+  }, []);
+
+  const queuePdfPage = useCallback((pageNum: number, priority = false) => {
+    if (pdfPagesCacheRef.current[pageNum]) return;
+    const existingIndex = renderQueueRef.current.indexOf(pageNum);
+    if (priority) {
+      if (existingIndex > -1) {
+        renderQueueRef.current.splice(existingIndex, 1);
+      }
+      renderQueueRef.current.unshift(pageNum);
+    } else {
+      if (existingIndex === -1) {
+        renderQueueRef.current.push(pageNum);
+      }
+    }
+    processRenderQueue();
+  }, [processRenderQueue]);
+
+  const handleJumpToPdfPage = useCallback((pageNum: number) => {
+    if (!pdfDoc) return;
+    const targetPage = Math.max(1, Math.min(pdfTotalPages, pageNum));
+    setPdfCurrentPage(targetPage);
+    pdfCurrentPageRef.current = targetPage;
+    setPdfPageInput(String(targetPage));
+    setActivePdfCropPage(targetPage);
+    activePdfCropPageRef.current = targetPage;
+
+    // Prioritize target page immediately
+    queuePdfPage(targetPage, true);
+    if (targetPage + 1 <= pdfTotalPages) queuePdfPage(targetPage + 1, false);
+    if (targetPage - 1 >= 1) queuePdfPage(targetPage - 1, false);
+
+    const pageWidth = (fileZoom / 100) * 620;
+    const singleSlotHeight = pageWidth * pdfPageAspectRatio + 24;
+    const targetScrollTop = (targetPage - 1) * singleSlotHeight;
+
+    if (imageContainerRef.current) {
+      imageContainerRef.current.scrollTo({
+        top: targetScrollTop,
+        behavior: "smooth",
+      });
+    }
+  }, [pdfDoc, pdfTotalPages, queuePdfPage, fileZoom, pdfPageAspectRatio]);
+
+  const handleViewerScroll = useCallback(() => {
+    if (!imageContainerRef.current || !pdfDoc || pdfTotalPages <= 0) return;
+    if (scrollRafRef.current) return;
+
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      if (!imageContainerRef.current) return;
+      const scrollTop = imageContainerRef.current.scrollTop;
+      const pageWidth = (fileZoom / 100) * 620;
+      const slotHeight = pageWidth * pdfPageAspectRatio + 24;
+      const current = Math.max(
+        1,
+        Math.min(
+          pdfTotalPages,
+          Math.floor((scrollTop + slotHeight * 0.35) / slotHeight) + 1
+        )
+      );
+
+      if (current !== pdfCurrentPageRef.current) {
+        pdfCurrentPageRef.current = current;
+        setPdfCurrentPage(current);
+        setPdfPageInput(String(current));
+
+        // Predictive queue adjacent pages
+        queuePdfPage(current, true);
+        if (current + 1 <= pdfTotalPages) queuePdfPage(current + 1, false);
+        if (current + 2 <= pdfTotalPages) queuePdfPage(current + 2, false);
+        if (current - 1 >= 1) queuePdfPage(current - 1, false);
+      }
+    });
+  }, [pdfDoc, pdfTotalPages, fileZoom, pdfPageAspectRatio, queuePdfPage]);
+
   // Top bar archive exam name vs. In-paper exam title (completely independent states, clean empty start)
   const [archiveExamName, setArchiveExamName] = useState<string>("");
   const [paperTitle, setPaperTitle] = useState<string>("");
@@ -157,6 +363,8 @@ export default function ExamBuilderPage() {
   const [duplicateModalOpen, setDuplicateModalOpen] = useState<boolean>(false);
   const [existingDuplicateExam, setExistingDuplicateExam] = useState<any>(null);
   const [editingExamId, setEditingExamId] = useState<string | null>(null);
+  const [isNewExamConfirmOpen, setIsNewExamConfirmOpen] = useState<boolean>(false);
+  const [newExamSaveTitle, setNewExamSaveTitle] = useState<string>("");
 
   // Watermark State
   const [watermarkImage, setWatermarkImage] = useState<string | null>(null);
@@ -198,15 +406,91 @@ export default function ExamBuilderPage() {
   const [refiningTask, setRefiningTask] = useState<string | null>(null);
   const [isBatchRefining, setIsBatchRefining] = useState<boolean>(false);
 
-  // Selection Pen (Crop Marquee) states
+  // Uploaded File Viewer Tools & Lasso & Pan & Split states
+  type ViewerTool = "lasso" | "hand" | "rect";
+  const [viewerTool, setViewerTool] = useState<ViewerTool>("lasso");
   const [isSelectionPenActive, setIsSelectionPenActive] = useState<boolean>(true);
+  const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([]);
+  const [isDrawingLasso, setIsDrawingLasso] = useState<boolean>(false);
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const [panStart, setPanStart] = useState<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [isDraggingCrop, setIsDraggingCrop] = useState<boolean>(false);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
   const [currentCrop, setCurrentCrop] = useState<CropRect | null>(null);
   const [completedCrop, setCompletedCrop] = useState<CropRect | null>(null);
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
+  const [extractProgress, setExtractProgress] = useState<number>(0);
+  const extractProgressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [extractionFeedback, setExtractionFeedback] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [isDuplicateFileModalOpen, setIsDuplicateFileModalOpen] = useState<boolean>(false);
+  const [pendingFileToUpload, setPendingFileToUpload] = useState<File | null>(null);
+
+  // Large File Upload Progress Tracking with Circular Loading & Remaining Time
+  interface UploadProgressState {
+    isOpen: boolean;
+    fileName: string;
+    percent: number;
+    speedMb: string;
+    remainingSec: number;
+    loadedMb: string;
+    totalMb: string;
+    status: "uploading" | "processing" | "success" | "error";
+    errorMessage?: string;
+  }
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+
+  // Passage & Reading Comprehension Workflow (Solution 2 & Unified Solution 1)
+  const [isPassageModalOpen, setIsPassageModalOpen] = useState<boolean>(false);
+  const [isPassageLassoWaiting, setIsPassageLassoWaiting] = useState<boolean>(false);
+  const [manualPassageTitle, setManualPassageTitle] = useState<string>("• Read the following passage, then choose the correct answer:");
+  const [manualPassageText, setManualPassageText] = useState<string>("");
+  const [passageTargetIndex, setPassageTargetIndex] = useState<number | "new">("new");
+
+  // Resizable Split View between uploaded document and paper canvas
+  const [viewerWidthPercent, setViewerWidthPercent] = useState<number>(42);
+  const [isResizingPanes, setIsResizingPanes] = useState<boolean>(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  // Resize Panes mouse / touch effect
+  useEffect(() => {
+    if (!isResizingPanes) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!splitContainerRef.current) return;
+      const containerRect = splitContainerRef.current.getBoundingClientRect();
+      const viewerPixels = containerRect.right - e.clientX;
+      const totalPixels = containerRect.width;
+      let newPercent = (viewerPixels / totalPixels) * 100;
+      newPercent = Math.max(18, Math.min(75, newPercent));
+      setViewerWidthPercent(newPercent);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!splitContainerRef.current || !e.touches[0]) return;
+      const containerRect = splitContainerRef.current.getBoundingClientRect();
+      const viewerPixels = containerRect.right - e.touches[0].clientX;
+      const totalPixels = containerRect.width;
+      let newPercent = (viewerPixels / totalPixels) * 100;
+      newPercent = Math.max(18, Math.min(75, newPercent));
+      setViewerWidthPercent(newPercent);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingPanes(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("touchmove", handleTouchMove);
+    window.addEventListener("touchend", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleMouseUp);
+    };
+  }, [isResizingPanes]);
 
   // Exam Layout, Direction, Language & Choice Format
   const [examDirection, setExamDirection] = useState<"rtl" | "ltr">("rtl");
@@ -264,6 +548,88 @@ export default function ExamBuilderPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
+
+  // Continuous Scrolling: Lazy-load visible PDF pages & track current active page on scroll
+  useEffect(() => {
+    if (!pdfDoc || pdfTotalPages <= 0 || !imageContainerRef.current) return;
+
+    const container = imageContainerRef.current;
+    let renderObserver: IntersectionObserver | null = null;
+    let activeObserver: IntersectionObserver | null = null;
+
+    const timeoutId = setTimeout(() => {
+      const pageWrappers = container.querySelectorAll<HTMLElement>(".pdf-page-wrapper");
+      if (pageWrappers.length === 0) return;
+
+      // 1. Observer to queue pages when within 1000px of viewport
+      renderObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              const p = Number((entry.target as HTMLElement).dataset.pageNumber);
+              if (p && !pdfPagesCacheRef.current[p]) {
+                queuePdfPage(p, false);
+              }
+            }
+          });
+        },
+        {
+          root: container,
+          rootMargin: "1000px 0px 1000px 0px",
+          threshold: 0.01,
+        }
+      );
+
+      // 2. Observer to detect active visible page, sync toolbar, and pre-buffer neighbors
+      activeObserver = new IntersectionObserver(
+        (entries) => {
+          let maxRatio = 0;
+          let visiblePage = 0;
+          entries.forEach((entry) => {
+            if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+              maxRatio = entry.intersectionRatio;
+              const p = Number((entry.target as HTMLElement).dataset.pageNumber);
+              if (p) visiblePage = p;
+            }
+          });
+          if (visiblePage > 0) {
+            setPdfCurrentPage(visiblePage);
+            setPdfPageInput(String(visiblePage));
+
+            // Priority queue current page if not yet cached
+            if (!pdfPagesCacheRef.current[visiblePage]) {
+              queuePdfPage(visiblePage, true);
+            }
+            // Predictive buffer: preload next 2 pages and previous page in background
+            if (visiblePage + 1 <= pdfTotalPages && !pdfPagesCacheRef.current[visiblePage + 1]) {
+              queuePdfPage(visiblePage + 1, false);
+            }
+            if (visiblePage + 2 <= pdfTotalPages && !pdfPagesCacheRef.current[visiblePage + 2]) {
+              queuePdfPage(visiblePage + 2, false);
+            }
+            if (visiblePage - 1 >= 1 && !pdfPagesCacheRef.current[visiblePage - 1]) {
+              queuePdfPage(visiblePage - 1, false);
+            }
+          }
+        },
+        {
+          root: container,
+          threshold: [0.1, 0.3, 0.5, 0.7, 0.9],
+        }
+      );
+
+      pageWrappers.forEach((el) => {
+        renderObserver?.observe(el);
+        activeObserver?.observe(el);
+      });
+    }, 40);
+
+    return () => {
+      clearTimeout(timeoutId);
+      renderObserver?.disconnect();
+      activeObserver?.disconnect();
+    };
+  }, [pdfDoc, pdfTotalPages, queuePdfPage]);
 
   // Push new snapshot into history stack for Ctrl+Z
   const pushHistorySnapshot = useCallback(
@@ -543,6 +909,9 @@ export default function ExamBuilderPage() {
     editingExamId,
   ]);
 
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+
   // Fetch real uploaded files list from backend
   const loadUploadedFiles = useCallback(async () => {
     try {
@@ -552,8 +921,9 @@ export default function ExamBuilderPage() {
         setUploadedFilesList(data.files);
         // If user has a selectedFile but imageSrc was omitted from localStorage due to quota, restore it from backend
         setImageSrc((curr) => {
-          if (!curr && selectedFile) {
-            const match = data.files.find((f: any) => f.name === selectedFile);
+          const currentSelected = selectedFileRef.current;
+          if (!curr && currentSelected) {
+            const match = data.files.find((f: any) => f.name === currentSelected);
             if (match && match.filepath) return match.filepath;
           }
           return curr;
@@ -562,7 +932,7 @@ export default function ExamBuilderPage() {
     } catch {
       // Ignore if offline
     }
-  }, [selectedFile]);
+  }, []);
 
   useEffect(() => {
     loadUploadedFiles();
@@ -698,65 +1068,332 @@ export default function ExamBuilderPage() {
     pushHistorySnapshot(examQuestions, nextFree, strokes);
   };
 
-  // Process Document File Upload (File Input or Drag & Drop)
-  const processDocumentFileUpload = async (file: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        setImageSrc(dataUrl);
-        setSelectedFile(file.name);
-
-        // Save to backend database so it becomes available in "الملفات المرفوعة"
-        try {
-          const sizeMb = (file.size / (1024 * 1024)).toFixed(1) + " ميجابايت";
-          await fetch("/api/files", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: file.name,
-              type: file.name.endsWith(".pdf") ? "pdf" : "image",
-              size: sizeMb,
-              date: "الآن",
-              filepath: dataUrl,
-            }),
-          });
-          loadUploadedFiles();
-          setSaveStatus(`تم رفع وحفظ ملف "${file.name}" بنجاح`);
-          setTimeout(() => setSaveStatus(null), 3000);
-        } catch {
-          // Local fallback
-        }
-      }
+  // Global dragover & drop prevention to completely prevent browser from navigating/reloading when dropping files
+  useEffect(() => {
+    const handleGlobalDragOver = (e: DragEvent) => {
+      e.preventDefault();
     };
-    reader.readAsDataURL(file);
+    const handleGlobalDrop = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", handleGlobalDragOver);
+    window.addEventListener("drop", handleGlobalDrop);
+    return () => {
+      window.removeEventListener("dragover", handleGlobalDragOver);
+      window.removeEventListener("drop", handleGlobalDrop);
+    };
+  }, []);
+
+  // Process Document File Upload (File Input or Drag & Drop) with Real Progress & Memory Safety for Heavy 200MB+ PDFs
+  const processDocumentFileUpload = async (file: File, isReplace = false) => {
+    if (!file) return;
+
+    // Reset crop and lasso
+    setCompletedCrop(null);
+    setCurrentCrop(null);
+    setLassoPoints([]);
+
+    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+
+    // 1. Client-side instant display for optimal UX (Streaming Blob URL to prevent RAM exhaustion on 200MB+ PDFs)
+    if (isPdf) {
+      try {
+        setSaveStatus(`جاري تجهيز مستند PDF (${file.name})...`);
+        const pdfjs = await loadPdfJs();
+        const blobUrl = URL.createObjectURL(file);
+        const loadingTask = pdfjs.getDocument({ url: blobUrl });
+        const pdf = await loadingTask.promise;
+        setPdfDoc(pdf);
+        pdfDocRef.current = pdf;
+        setPdfTotalPages(pdf.numPages);
+        setPdfCurrentPage(1);
+        setPdfPageInput("1");
+        setActivePdfCropPage(1);
+        activePdfCropPageRef.current = 1;
+        setPdfPagesCache({});
+        pdfPagesCacheRef.current = {};
+        renderQueueRef.current = [];
+        queuePdfPage(1, true);
+        if (pdf.numPages > 1) queuePdfPage(2, false);
+        if (pdf.numPages > 2) queuePdfPage(3, false);
+        setSelectedFile(file.name);
+        setImageSrc(blobUrl);
+        URL.revokeObjectURL(blobUrl);
+      } catch (err) {
+        console.warn("Could not render PDF via PDF.js on client:", err);
+      }
+    } else {
+      setPdfDoc(null);
+      setPdfTotalPages(1);
+      setPdfCurrentPage(1);
+      setPdfPageInput("1");
+      setPdfPagesCache({});
+      pdfPagesCacheRef.current = {};
+      // Direct image file
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        if (dataUrl) {
+          setImageSrc(dataUrl);
+          setSelectedFile(file.name);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // 2. Upload file to backend storage via direct streaming XMLHttpRequest with circular progress & time remaining
+    const startTime = Date.now();
+    const totalMbVal = (file.size / (1024 * 1024)).toFixed(1);
+    setUploadProgress({
+      isOpen: true,
+      fileName: file.name,
+      percent: 0,
+      speedMb: "0.0",
+      remainingSec: 0,
+      loadedMb: "0.0",
+      totalMb: totalMbVal,
+      status: "uploading",
+    });
+
+    await new Promise<void>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/files", true);
+      xhr.setRequestHeader("x-upload-mode", "stream");
+      xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
+      xhr.setRequestHeader("x-file-size", String(file.size));
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
+          const now = Date.now();
+          const elapsedSec = (now - startTime) / 1000;
+          const bytesPerSec = elapsedSec > 0 ? event.loaded / elapsedSec : 0;
+          const remainingBytes = event.total - event.loaded;
+          const remainingSec = bytesPerSec > 0 ? Math.ceil(remainingBytes / bytesPerSec) : 0;
+
+          setUploadProgress({
+            isOpen: true,
+            fileName: file.name,
+            percent,
+            speedMb: (bytesPerSec / (1024 * 1024)).toFixed(1),
+            remainingSec,
+            loadedMb: (event.loaded / (1024 * 1024)).toFixed(1),
+            totalMb: (event.total / (1024 * 1024)).toFixed(1),
+            status: "uploading",
+          });
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setUploadProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  percent: 100,
+                  remainingSec: 0,
+                  status: "success",
+                }
+              : null
+          );
+          loadUploadedFiles();
+          setSaveStatus(
+            isReplace
+              ? `تم استبدال وحفظ مستند "${file.name}" بنجاح`
+              : `تم رفع وحفظ مستند "${file.name}" بنجاح`
+          );
+          setTimeout(() => {
+            setUploadProgress(null);
+            setSaveStatus(null);
+          }, 1400);
+          resolve();
+        } else {
+          setUploadProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: "error",
+                  errorMessage: "حدث خطأ أثناء حفظ الملف على الخادم.",
+                }
+              : null
+          );
+          resolve();
+        }
+      };
+
+      xhr.onerror = () => {
+        setUploadProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "error",
+                errorMessage: "تعذر الاتصال بالخادم لرفع الملف.",
+              }
+            : null
+        );
+        resolve();
+      };
+
+      xhr.send(file);
+    });
+  };
+
+  // Manual Passage text insertion handler
+  const handleApplyManualPassage = () => {
+    if (!manualPassageText.trim()) return;
+
+    if (passageTargetIndex !== "new" && typeof passageTargetIndex === "number" && examQuestions[passageTargetIndex]) {
+      const updated = [...examQuestions];
+      updated[passageTargetIndex].passageText = manualPassageText.trim();
+      updated[passageTargetIndex].passageTitle = manualPassageTitle.trim() || undefined;
+      updated[passageTargetIndex].subType = "passage";
+      setExamQuestions(updated);
+      pushHistorySnapshot(updated);
+      setSaveStatus(`تم إرفاق القطعة بالسؤال ${passageTargetIndex + 1} بنجاح`);
+    } else {
+      const newIndex = examQuestions.length;
+      const isEnglish = /[a-zA-Z]{3,}/.test(manualPassageText);
+      const newPassageItem: ExamQuestionItem = {
+        id: `passage-${Date.now()}`,
+        type: "passage",
+        text: "",
+        options: [],
+        points: 0,
+        passageText: manualPassageText.trim(),
+        passageTitle: manualPassageTitle.trim() || (isEnglish ? "• Read the following passage, then answer the questions:" : "• اقرأ القطعة التالية ثم أجب عن الأسئلة:"),
+        subType: "passage",
+      };
+      const updated = [...examQuestions, newPassageItem];
+      setExamQuestions(updated);
+      pushHistorySnapshot(updated);
+      setFocusedQuestionIndex(newIndex);
+      setSaveStatus("تم إضافة قطعة الفهم كعنصر مستقل بنجاح");
+    }
+
+    setIsPassageModalOpen(false);
+    setManualPassageText("");
+    setTimeout(() => setSaveStatus(null), 2500);
+  };
+
+  // Inspect incoming file for duplicate check before uploading
+  const handleIncomingFile = (file: File) => {
+    if (!file) return;
+
+    // Duplicate check by file name
+    const exists = uploadedFilesList.some(
+      (f) => f.name.trim().toLowerCase() === file.name.trim().toLowerCase()
+    );
+
+    if (exists) {
+      setPendingFileToUpload(file);
+      setIsDuplicateFileModalOpen(true);
+    } else {
+      processDocumentFileUpload(file, false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      processDocumentFileUpload(file);
+      handleIncomingFile(file);
       e.target.value = "";
     }
   };
 
-  // Drag and Drop files onto Document Viewer
+  // Selection from Dropdown or Full Modal
+  const handleSelectUploadedFile = async (f: UploadedFileItem) => {
+    setSelectedFile(f.name);
+    setCompletedCrop(null);
+    setCurrentCrop(null);
+    setLassoPoints([]);
+
+    const fileUrl = f.filepath || `/api/files/content?name=${encodeURIComponent(f.name)}`;
+
+    if (f.name.toLowerCase().endsWith(".pdf")) {
+      try {
+        setSaveStatus(`جاري تجهيز مستند PDF للعرض: ${f.name}...`);
+        const pdfjs = await loadPdfJs();
+        const response = await fetch(fileUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        setPdfDoc(pdf);
+        pdfDocRef.current = pdf;
+        setPdfTotalPages(pdf.numPages);
+        setPdfCurrentPage(1);
+        setPdfPageInput("1");
+        setActivePdfCropPage(1);
+        activePdfCropPageRef.current = 1;
+        setPdfPagesCache({});
+        pdfPagesCacheRef.current = {};
+        renderQueueRef.current = [];
+        queuePdfPage(1, true);
+        if (pdf.numPages > 1) queuePdfPage(2, false);
+        if (pdf.numPages > 2) queuePdfPage(3, false);
+        setImageSrc(fileUrl);
+        setSaveStatus(`تم تحميل المستند: ${f.name} (${pdf.numPages} صفحة)`);
+      } catch (err) {
+        console.warn("Could not render PDF via PDF.js, using direct URL:", err);
+        setPdfDoc(null);
+        setPdfTotalPages(1);
+        setPdfPagesCache({});
+        pdfPagesCacheRef.current = {};
+        setImageSrc(fileUrl);
+        setSaveStatus(`تم تحديد: ${f.name}`);
+      }
+    } else {
+      setPdfDoc(null);
+      setPdfTotalPages(1);
+      setPdfPagesCache({});
+      pdfPagesCacheRef.current = {};
+      setImageSrc(fileUrl);
+      setSaveStatus(`تم تحميل المستند: ${f.name}`);
+    }
+
+    setIsFileDropdownOpen(false);
+    setIsAllFilesModalOpen(false);
+    setTimeout(() => setSaveStatus(null), 2500);
+  };
+
+  // Drag and Drop files onto Document Viewer without flickering
+  const dragCounterRef = useRef<number>(0);
+
+  const handleViewerDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragOverViewer(true);
+    }
+  };
+
   const handleViewerDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragOverViewer(true);
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    if (!isDragOverViewer) {
+      setIsDragOverViewer(true);
+    }
   };
 
   const handleViewerDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragOverViewer(false);
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragOverViewer(false);
+    }
   };
 
   const handleViewerDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
     setIsDragOverViewer(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      processDocumentFileUpload(e.dataTransfer.files[0]);
+      handleIncomingFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -1264,9 +1901,9 @@ export default function ExamBuilderPage() {
     return t.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim();
   };
 
-  // Pointer event handlers for Selection Pen marquee tool
+  // Pointer event handlers for Lasso, Hand Pan, and Rect marquee tool
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isSelectionPenActive || isExtracting) return;
+    if (isExtracting) return;
 
     if ((e.target as HTMLElement).closest(".floating-extract-btn")) {
       return;
@@ -1275,53 +1912,202 @@ export default function ExamBuilderPage() {
     const container = imageContainerRef.current;
     if (!container) return;
 
-    const rect = container.getBoundingClientRect();
-    const x = e.clientX - rect.left + container.scrollLeft;
-    const y = e.clientY - rect.top + container.scrollTop;
+    // 1. Hand Pan Tool
+    if (viewerTool === "hand") {
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      setIsPanning(true);
+      setPanStart({
+        x: e.clientX,
+        y: e.clientY,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop,
+      });
+      return;
+    }
+
+    if (!isSelectionPenActive) return;
+
+    // Determine target container: either specific PDF page or imgElementRef
+    let targetEl: HTMLElement | null = null;
+    let targetPageNum = 1;
+
+    if (pdfDoc && pdfTotalPages > 0) {
+      const pageWrapper = (e.target as HTMLElement).closest<HTMLElement>(".pdf-page-wrapper");
+      if (pageWrapper) {
+        targetEl = pageWrapper;
+        targetPageNum = Number(pageWrapper.dataset.pageNumber) || 1;
+      }
+    } else {
+      targetEl = imgElementRef.current;
+    }
+
+    if (!targetEl) return;
+
+    setActivePdfCropPage(targetPageNum);
+    activePdfCropPageRef.current = targetPageNum;
+
+    const imgRect = targetEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(imgRect.width, e.clientX - imgRect.left));
+    const y = Math.max(0, Math.min(imgRect.height, e.clientY - imgRect.top));
 
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-    setIsDraggingCrop(true);
-    setStartPos({ x, y });
-    setCurrentCrop({ x, y, width: 0, height: 0 });
-    setCompletedCrop(null);
     setExtractionFeedback(null);
-  };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingCrop || !startPos || !imageContainerRef.current) return;
-
-    const container = imageContainerRef.current;
-    const currentX = e.clientX - container.getBoundingClientRect().left + container.scrollLeft;
-    const currentY = e.clientY - container.getBoundingClientRect().top + container.scrollTop;
-
-    const x = Math.max(0, Math.min(startPos.x, currentX));
-    const y = Math.max(0, Math.min(startPos.y, currentY));
-    const width = Math.abs(currentX - startPos.x);
-    const height = Math.abs(currentY - startPos.y);
-
-    setCurrentCrop({ x, y, width, height });
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingCrop) return;
-    setIsDraggingCrop(false);
-
-    try {
-      (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
-    } catch {}
-
-    if (currentCrop && currentCrop.width > 20 && currentCrop.height > 20) {
-      setCompletedCrop(currentCrop);
-    } else {
-      setCurrentCrop(null);
+    // 2. Lasso Tool (Photoshop-like freehand polygon selection)
+    if (viewerTool === "lasso") {
+      setIsDrawingLasso(true);
+      lassoPointsRef.current = [{ x, y }];
+      setLassoPoints([{ x, y }]);
       setCompletedCrop(null);
+      setCurrentCrop(null);
+      return;
+    }
+
+    // 3. Rect Tool
+    if (viewerTool === "rect") {
+      setIsDraggingCrop(true);
+      setStartPos({ x, y });
+      setCurrentCrop({ x, y, width: 0, height: 0 });
+      setCompletedCrop(null);
+      setLassoPoints([]);
+      lassoPointsRef.current = [];
     }
   };
 
-  // Helper to crop base64 image from selected region
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 1. Hand Pan movement
+    if (viewerTool === "hand" && isPanning && panStart && imageContainerRef.current) {
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      imageContainerRef.current.scrollLeft = panStart.scrollLeft - dx;
+      imageContainerRef.current.scrollTop = panStart.scrollTop - dy;
+      return;
+    }
+
+    // 2. Lasso freehand drawing with smooth 60fps rAF throttle
+    if (viewerTool === "lasso" && isDrawingLasso) {
+      let targetEl: HTMLElement | null = null;
+      if (pdfDoc && pdfTotalPages > 0) {
+        targetEl = document.getElementById(`pdf-page-container-${activePdfCropPageRef.current}`);
+      } else {
+        targetEl = imgElementRef.current;
+      }
+      if (!targetEl) return;
+
+      const imgRect = targetEl.getBoundingClientRect();
+      const x = Math.max(0, Math.min(imgRect.width, e.clientX - imgRect.left));
+      const y = Math.max(0, Math.min(imgRect.height, e.clientY - imgRect.top));
+
+      const pts = lassoPointsRef.current;
+      const last = pts[pts.length - 1];
+      if (!last || Math.hypot(x - last.x, y - last.y) >= 3) {
+        pts.push({ x, y });
+        if (!lassoRafRef.current) {
+          lassoRafRef.current = requestAnimationFrame(() => {
+            setLassoPoints([...lassoPointsRef.current]);
+            lassoRafRef.current = null;
+          });
+        }
+      }
+      return;
+    }
+
+    // 3. Rect dragging with smooth rAF throttle
+    if (viewerTool === "rect" && isDraggingCrop && startPos) {
+      let targetEl: HTMLElement | null = null;
+      if (pdfDoc && pdfTotalPages > 0) {
+        targetEl = document.getElementById(`pdf-page-container-${activePdfCropPageRef.current}`);
+      } else {
+        targetEl = imgElementRef.current;
+      }
+      if (!targetEl) return;
+
+      const imgRect = targetEl.getBoundingClientRect();
+      const currentX = Math.max(0, Math.min(imgRect.width, e.clientX - imgRect.left));
+      const currentY = Math.max(0, Math.min(imgRect.height, e.clientY - imgRect.top));
+
+      const x = Math.min(startPos.x, currentX);
+      const y = Math.min(startPos.y, currentY);
+      const width = Math.abs(currentX - startPos.x);
+      const height = Math.abs(currentY - startPos.y);
+
+      if (!rectRafRef.current) {
+        rectRafRef.current = requestAnimationFrame(() => {
+          setCurrentCrop({ x, y, width, height });
+          rectRafRef.current = null;
+        });
+      }
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 1. Hand Pan release
+    if (isPanning) {
+      setIsPanning(false);
+      setPanStart(null);
+      try {
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+      } catch {}
+      return;
+    }
+
+    // 2. Lasso release: compute bounding box
+    if (isDrawingLasso) {
+      setIsDrawingLasso(false);
+      try {
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+      } catch {}
+
+      if (lassoPoints.length >= 3) {
+        const xs = lassoPoints.map((p) => p.x);
+        const ys = lassoPoints.map((p) => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        if (width > 15 && height > 15) {
+          setCompletedCrop({ x: minX, y: minY, width, height });
+        } else {
+          setLassoPoints([]);
+          setCompletedCrop(null);
+        }
+      } else {
+        setLassoPoints([]);
+        setCompletedCrop(null);
+      }
+      return;
+    }
+
+    // 3. Rect release
+    if (isDraggingCrop) {
+      setIsDraggingCrop(false);
+      try {
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+      } catch {}
+
+      if (currentCrop && currentCrop.width > 20 && currentCrop.height > 20) {
+        setCompletedCrop(currentCrop);
+      } else {
+        setCurrentCrop(null);
+        setCompletedCrop(null);
+      }
+    }
+  };
+
+  // Helper to crop base64 image from selected region (Polygon Lasso clipping or Rect)
   const getCroppedImageBase64 = (crop: CropRect): Promise<string> => {
     return new Promise((resolve) => {
-      const img = imgElementRef.current;
+      let img: HTMLImageElement | null = null;
+      if (pdfDoc && pdfTotalPages > 0) {
+        const pageContainer = document.getElementById(`pdf-page-container-${activePdfCropPageRef.current}`);
+        img = pageContainer ? pageContainer.querySelector("img") : null;
+      }
+      if (!img) {
+        img = imgElementRef.current;
+      }
       if (!img) {
         resolve("");
         return;
@@ -1331,23 +2117,73 @@ export default function ExamBuilderPage() {
       const scaleX = img.naturalWidth / img.width;
       const scaleY = img.naturalHeight / img.height;
 
-      canvas.width = Math.max(1, crop.width * scaleX);
-      canvas.height = Math.max(1, crop.height * scaleY);
-      const ctx = canvas.getContext("2d");
+      // When Lasso points exist, apply polygon clipping path
+      if (lassoPoints.length >= 3) {
+        const xs = lassoPoints.map((p) => p.x);
+        const ys = lassoPoints.map((p) => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const width = maxX - minX;
+        const height = maxY - minY;
 
-      if (ctx) {
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(
-          img,
-          crop.x * scaleX,
-          crop.y * scaleY,
-          crop.width * scaleX,
-          crop.height * scaleY,
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        );
+        canvas.width = Math.max(1, width * scaleX);
+        canvas.height = Math.max(1, height * scaleY);
+        const ctx = canvas.getContext("2d");
+
+        if (ctx) {
+          ctx.imageSmoothingQuality = "high";
+          // Crisp white background for optimal OCR extraction
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Clip strictly to the lasso polygon boundary
+          ctx.beginPath();
+          lassoPoints.forEach((pt, i) => {
+            const px = (pt.x - minX) * scaleX;
+            const py = (pt.y - minY) * scaleY;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          });
+          ctx.closePath();
+          ctx.clip();
+
+          // Draw the image within the lasso bounds
+          ctx.drawImage(
+            img,
+            minX * scaleX,
+            minY * scaleY,
+            width * scaleX,
+            height * scaleY,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+        }
+      } else {
+        // Standard rectangle crop
+        canvas.width = Math.max(1, crop.width * scaleX);
+        canvas.height = Math.max(1, crop.height * scaleY);
+        const ctx = canvas.getContext("2d");
+
+        if (ctx) {
+          ctx.imageSmoothingQuality = "high";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(
+            img,
+            crop.x * scaleX,
+            crop.y * scaleY,
+            crop.width * scaleX,
+            crop.height * scaleY,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+        }
       }
 
       resolve(canvas.toDataURL("image/png"));
@@ -1359,11 +2195,25 @@ export default function ExamBuilderPage() {
     if (!completedCrop || isExtracting) return;
 
     setIsExtracting(true);
+    setExtractProgress(12);
     setExtractionFeedback(null);
+
+    if (extractProgressIntervalRef.current) {
+      clearInterval(extractProgressIntervalRef.current);
+    }
+    extractProgressIntervalRef.current = setInterval(() => {
+      setExtractProgress((prev) => {
+        if (prev < 42) return prev + Math.floor(Math.random() * 8) + 6;
+        if (prev < 78) return prev + Math.floor(Math.random() * 5) + 3;
+        if (prev < 94) return prev + Math.floor(Math.random() * 2) + 1;
+        return prev;
+      });
+    }, 150);
 
     try {
       let croppedBase64 = await getCroppedImageBase64(completedCrop);
       if (!croppedBase64) {
+        if (extractProgressIntervalRef.current) clearInterval(extractProgressIntervalRef.current);
         setExtractionFeedback("تعذر قص الصورة المحددة.");
         setIsExtracting(false);
         return;
@@ -1382,10 +2232,12 @@ export default function ExamBuilderPage() {
       });
 
       const data = await res.json();
+      if (extractProgressIntervalRef.current) clearInterval(extractProgressIntervalRef.current);
+      setExtractProgress(100);
 
       if (data.needsApiKey) {
         setIsGeminiModalOpen(true);
-        setExtractionFeedback("يرجى إدخال مفتاح Gemini API لتفعيل القراءة البصرية الفائقة.");
+        setExtractionFeedback("يرجى إدخال مفتاح الـ API لتفعيل الاستخراج.");
         setIsExtracting(false);
         return;
       }
@@ -1419,39 +2271,94 @@ export default function ExamBuilderPage() {
         points: pQ.points || (pQ.type === "choice" ? 2 : pQ.type === "trueFalse" ? 1 : 5),
         isExtractedByOcr: true,
         engineUsed: data.engine || "gemini",
+        optionsLayout: pQ.optionsLayout,
+        answerLinesCount: pQ.answerLinesCount,
+        passageText: pQ.passageText,
+        passageTitle: pQ.passageTitle,
+        subType: pQ.subType,
       }));
 
-      const updated = [...examQuestions, ...newItems];
-      setExamQuestions(updated);
-      pushHistorySnapshot(updated);
+      const isEnglishExam = newItems.some((item) => /[a-zA-Z]{3,}/.test(item.text) || (item.options && item.options.some(o => /[a-zA-Z]{3,}/.test(o))));
+      if (examQuestions.length === 0 && isEnglishExam) {
+        setExamDirection("ltr");
+        setChoiceFormat("english_lower");
+      }
 
-      setQuestionStyles((prev) => {
-        const next = { ...prev };
-        newItems.forEach((_, idx) => {
-          next[startIndex + idx] = {
-            fontSize: globalFontSize,
-            isBold: false,
-            textAlign: examDirection === "ltr" ? "left" : "right",
+      if (isPassageLassoWaiting) {
+        setIsPassageLassoWaiting(false);
+        const extractedPassage = (data.passageText || extractedList.find((q) => q.passageText)?.passageText || data.rawText || "").trim();
+        const extractedTitle = (data.passageTitle || extractedList.find((q) => q.passageTitle)?.passageTitle || "").trim();
+
+        if (extractedPassage) {
+          const isEnglish = /[a-zA-Z]{3,}/.test(extractedPassage);
+          const standalonePassageItem: ExamQuestionItem = {
+            id: `passage-${Date.now()}`,
+            type: "passage",
+            text: "",
+            options: [],
+            points: 0,
+            passageText: extractedPassage,
+            passageTitle: extractedTitle || (isEnglish ? "• Read the following passage, then answer the questions:" : "• اقرأ القطعة التالية ثم أجب عن الأسئلة:"),
+            subType: "passage",
           };
+
+          // In passage mode, strictly extract the passage itself without adding any automated dummy question
+          const updatedWithPassage = [...examQuestions, standalonePassageItem];
+          setExamQuestions(updatedWithPassage);
+          pushHistorySnapshot(updatedWithPassage);
+          setExtractionFeedback("تم استخراج قطعة الفهم كعنصر مستقل بنجاح!");
+          setFocusedQuestionIndex(startIndex);
+        } else {
+          const updated = [...examQuestions, ...newItems];
+          setExamQuestions(updated);
+          pushHistorySnapshot(updated);
+          setExtractionFeedback("تم استخراج المحتوى بنجاح");
+        }
+      } else {
+        // Filter out dummy passage instructions that are not real questions
+        const filteredNewItems = newItems.filter((item) => {
+          if (item.options && item.options.length > 0) return true;
+          const lower = item.text.toLowerCase().trim();
+          if (/^•?\s*read the (?:following )?passage/i.test(lower) || /^•?\s*اقرأ القطعة/i.test(lower)) {
+            return false;
+          }
+          return true;
         });
-        return next;
-      });
+        const updated = [...examQuestions, ...(filteredNewItems.length > 0 ? filteredNewItems : newItems)];
+        setExamQuestions(updated);
+        pushHistorySnapshot(updated);
 
-      setFocusedQuestionIndex(startIndex);
+        setQuestionStyles((prev) => {
+          const next = { ...prev };
+          newItems.forEach((_, idx) => {
+            next[startIndex + idx] = {
+              fontSize: globalFontSize,
+              isBold: false,
+              textAlign: (isEnglishExam || examDirection === "ltr") ? "left" : "right",
+            };
+          });
+          return next;
+        });
 
-      setExtractionFeedback(
-        data.engine === "gemini" ? `تم استخراج ${newItems.length} سؤال بنجاح` : "تم استخراج السؤال"
-      );
+        setFocusedQuestionIndex(startIndex);
+        setExtractionFeedback(
+          data.engine === "gemini" ? `تم استخراج ${newItems.length} سؤال بنجاح` : "تم استخراج السؤال"
+        );
+      }
 
       setTimeout(() => {
         setCompletedCrop(null);
         setCurrentCrop(null);
+        setLassoPoints([]);
         setExtractionFeedback(null);
-      }, 2000);
+        setExtractProgress(0);
+      }, 1600);
     } catch (err) {
       console.error(err);
+      if (extractProgressIntervalRef.current) clearInterval(extractProgressIntervalRef.current);
       setExtractionFeedback("حدث خطأ أثناء استخراج النص.");
     } finally {
+      if (extractProgressIntervalRef.current) clearInterval(extractProgressIntervalRef.current);
       setIsExtracting(false);
     }
   };
@@ -1688,6 +2595,11 @@ export default function ExamBuilderPage() {
     e.dataTransfer.setData("text/plain", index.toString());
   };
 
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
     if (draggedIndex === null || draggedIndex === index) return;
@@ -1723,10 +2635,38 @@ export default function ExamBuilderPage() {
     setDragOverIndex(null);
   };
 
+  // Global listener to ensure pale/faded draggedIndex is NEVER stuck if drag aborts
+  useEffect(() => {
+    const handleGlobalDragEnd = () => {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+    };
+    window.addEventListener("dragend", handleGlobalDragEnd);
+    window.addEventListener("mouseup", handleGlobalDragEnd);
+    return () => {
+      window.removeEventListener("dragend", handleGlobalDragEnd);
+      window.removeEventListener("mouseup", handleGlobalDragEnd);
+    };
+  }, []);
+
+  // Helper to get 1-based sequential display number for questions (excluding standalone passages)
+  const getQuestionDisplayNumber = useCallback(
+    (targetIndex: number, list: ExamQuestionItem[]) => {
+      let count = 0;
+      for (let i = 0; i <= targetIndex; i++) {
+        if (list[i] && list[i].type !== "passage") {
+          count++;
+        }
+      }
+      return count;
+    },
+    []
+  );
+
   // -------------------------------------------------------------
-  // DYNAMIC A4 MULTI-PAGE PAGINATION ALGORITHM
+  // DYNAMIC A4 MULTI-PAGE PAGINATION ALGORITHM (حل جذري للمسافة الذكية واستغلال مساحة الصفحة)
   // "ممنوع تقسيم سوال علي صفحتين" - Each question stays intact!
-  // Prevents questions overflowing page boundaries in both Builder Mode and Preview Mode
+  // Prevents questions overflowing page boundaries while eliminating blank voids at bottom
   // -------------------------------------------------------------
   const computePageSlots = useCallback(
     (questionsList: ExamQuestionItem[]): PageSlot[] => {
@@ -1734,41 +2674,65 @@ export default function ExamBuilderPage() {
         return [{ pageNumber: 1, questionIndices: [] }];
       }
 
-      // Standard A4 physical height budget (962px):
-      // Page 1 budget: ~740px questions area (Exam Header is ~105px, Footer ~35px, Padding ~35px)
-      // Perfectly fits 7 to 8 questions, filling the page evenly down to the footer without gaps or cut-offs
-      const PAGE_1_CAPACITY = 740;
-      // Page N budget: ~830px questions area (Subheader ~35px, Footer ~35px, Padding ~35px)
-      // Fits 8 to 10 questions evenly
-      const PAGE_N_CAPACITY = 830;
+      // Safe unified A4 printable capacity:
+      // Page 1 has exam-header-box (~95px) + paddings -> cleanly holds 7 questions without any cut-off
+      // Subsequent pages have no header -> cleanly holds 8 questions without any cut-off
+      const PAGE_1_CAPACITY = 800;
+      const PAGE_N_CAPACITY = 900;
 
       const slots: PageSlot[] = [{ pageNumber: 1, questionIndices: [] }];
       let currentPageIdx = 0;
       let currentHeight = 0;
 
       questionsList.forEach((q, idx) => {
-        const charLimit = 60;
-        const lines = Math.max(1, Math.ceil((q.text || "").length / charLimit));
-        // Text height includes question label + lines * line-height
-        const textHeight = 16 + lines * (globalFontSize * 1.35);
+        let totalQuestionHeight = 0;
 
-        let optionsHeight = 0;
-        if (q.type === "choice") {
-          const rows = Math.ceil(Math.max(1, q.options.length) / 2);
-          optionsHeight = rows * 26 + 4;
-        } else if (q.type === "trueFalse") {
-          optionsHeight = 26;
-        } else if (q.type === "essay") {
-          optionsHeight = 36;
+        if (q.type === "passage") {
+          // Dedicated passage block
+          const pChars = (q.passageText || "").length;
+          const pLines = Math.max(1, Math.ceil(pChars / 95));
+          const pLineHeight = globalFontSize * 1.35;
+          totalQuestionHeight = 26 + pLines * pLineHeight + 20;
+        } else {
+          // Line count calculation
+          const isArabic = /[\u0600-\u06FF]/.test(q.text || "");
+          const charLimit = isArabic ? 75 : 90;
+          const lines = Math.max(1, Math.ceil((q.text || "").length / charLimit));
+          const textHeight = 8 + lines * (globalFontSize * 1.35);
+
+          const isVertical =
+            q.optionsLayout === "vertical" ||
+            (q.optionsLayout !== "grid" && (
+              q.subType === "translation" ||
+              (q.options && q.options.some((opt) => opt.length > 38)) ||
+              (q.options && q.options.length > 0 && q.options.reduce((sum, o) => sum + o.length, 0) / q.options.length > 28)
+            ));
+
+          let optionsHeight = 0;
+          if (q.type === "choice") {
+            const rows = isVertical ? q.options.length : Math.ceil(Math.max(1, (q.options || []).length) / 2);
+            optionsHeight = rows * 26 + 4;
+          } else if (q.type === "trueFalse") {
+            optionsHeight = 26;
+          } else if (q.type === "essay") {
+            const linesCount = Math.max(1, q.answerLinesCount || 2);
+            optionsHeight = linesCount * 18 + 6;
+          }
+
+          const passageHeight = q.passageText
+            ? 24 + Math.ceil(q.passageText.length / 95) * (globalFontSize * 1.35)
+            : 0;
+
+          const imageHeight = q.imageUrl ? 110 : 0;
+          const cardExtra = 14;
+          totalQuestionHeight = textHeight + optionsHeight + passageHeight + imageHeight + cardExtra;
         }
-
-        const imageHeight = q.imageUrl ? 110 : 0;
-        const questionSpacing = 14;
-        const totalQuestionHeight = textHeight + optionsHeight + imageHeight + questionSpacing;
 
         const capacity = currentPageIdx === 0 ? PAGE_1_CAPACITY : PAGE_N_CAPACITY;
 
-        if (currentHeight + totalQuestionHeight > capacity && slots[currentPageIdx].questionIndices.length > 0) {
+        // 15px cushion ensures full page utilization without overflowing into footer
+        const SOFT_CUSHION = 15;
+        if (currentHeight + totalQuestionHeight > capacity + SOFT_CUSHION && slots[currentPageIdx].questionIndices.length > 0) {
           currentPageIdx++;
           slots.push({ pageNumber: currentPageIdx + 1, questionIndices: [idx] });
           currentHeight = totalQuestionHeight;
@@ -2125,11 +3089,8 @@ export default function ExamBuilderPage() {
                     <div
                       key={f.id}
                       onClick={() => {
-                        setSelectedFile(f.name);
-                        if (f.filepath) setImageSrc(f.filepath);
+                        handleSelectUploadedFile(f);
                         setIsAllFilesModalOpen(false);
-                        setSaveStatus(`تم تحميل المستند: ${f.name}`);
-                        setTimeout(() => setSaveStatus(null), 2500);
                       }}
                       className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-all cursor-pointer ${
                         isCurrent
@@ -2187,6 +3148,438 @@ export default function ExamBuilderPage() {
         </div>
       )}
 
+      {/* Duplicate File Detection & Replacement Modal */}
+      {isDuplicateFileModalOpen && pendingFileToUpload && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in"
+          onClick={() => {
+            setIsDuplicateFileModalOpen(false);
+            setPendingFileToUpload(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl flex flex-col border border-slate-200 overflow-hidden animate-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-amber-100 flex items-center gap-3.5 bg-amber-50/70 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0 shadow-xs">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">الملف موجود بالفعل</h3>
+                <p className="text-xs text-slate-500 mt-0.5">تنبيه تكرار اسم المستند المرفوع</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDuplicateFileModalOpen(false);
+                  setPendingFileToUpload(null);
+                }}
+                className="mr-auto p-1.5 text-slate-400 hover:text-slate-700 hover:bg-amber-100/50 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-slate-600 leading-relaxed">
+                الملف باسم <span className="font-bold text-slate-800 dir-ltr inline-block">&quot;{pendingFileToUpload.name}&quot;</span> تم رفعه وموجود مسبقاً في قائمة ملفاتك.
+              </p>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span className="font-medium truncate max-w-[200px]">{pendingFileToUpload.name}</span>
+                </div>
+                <span className="text-slate-400">
+                  {pendingFileToUpload.size ? `${(pendingFileToUpload.size / (1024 * 1024)).toFixed(2)} MB` : ""}
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                هل ترغب في استبدال الملف الحالي بالملف الجديد، أم التراجع وعدم الرفع؟
+              </p>
+            </div>
+
+            {/* Modal Footer / Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDuplicateFileModalOpen(false);
+                  setPendingFileToUpload(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                عدم الرفع (إلغاء)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fileToUpload = pendingFileToUpload;
+                  setIsDuplicateFileModalOpen(false);
+                  setPendingFileToUpload(null);
+                  if (fileToUpload) {
+                    processDocumentFileUpload(fileToUpload, true);
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                استبدال الملف الحالي
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Circular Upload Progress Modal for Heavy 200MB+ Files */}
+      {uploadProgress && uploadProgress.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div
+            className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center text-center border border-slate-200 animate-in zoom-in-95"
+            dir="rtl"
+          >
+            {/* Circular Progress Ring */}
+            <div className="relative w-32 h-32 flex items-center justify-center mb-4">
+              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  stroke="currentColor"
+                  strokeWidth="8"
+                  className="text-slate-100"
+                  fill="transparent"
+                />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  stroke="currentColor"
+                  strokeWidth="8"
+                  strokeDasharray={2 * Math.PI * 42}
+                  strokeDashoffset={2 * Math.PI * 42 * (1 - uploadProgress.percent / 100)}
+                  strokeLinecap="round"
+                  className={`transition-all duration-200 ${
+                    uploadProgress.status === "error"
+                      ? "text-red-500"
+                      : uploadProgress.percent === 100
+                      ? "text-emerald-500"
+                      : "text-blue-600"
+                  }`}
+                  fill="transparent"
+                />
+              </svg>
+
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                {uploadProgress.status === "error" ? (
+                  <AlertCircle className="w-8 h-8 text-red-500" />
+                ) : uploadProgress.percent === 100 ? (
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 animate-in zoom-in" />
+                ) : (
+                  <>
+                    <span className="text-2xl font-black text-slate-800 font-mono">
+                      {uploadProgress.percent}%
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">مكتمل</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* File Information */}
+            <h3 className="font-bold text-sm text-slate-800 truncate max-w-[260px] mb-1">
+              {uploadProgress.fileName}
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              {uploadProgress.loadedMb} ميجابايت من {uploadProgress.totalMb} ميجابايت
+            </p>
+
+            {/* Speed & Remaining Time */}
+            {uploadProgress.status === "uploading" && (
+              <div className="w-full bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 mb-2 space-y-1.5 text-xs text-slate-600">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-blue-500" />
+                    الوقت المتبقي:
+                  </span>
+                  <span className="font-bold text-slate-800 font-mono">
+                    {uploadProgress.remainingSec > 60
+                      ? `${Math.floor(uploadProgress.remainingSec / 60)} دقيقة و ${uploadProgress.remainingSec % 60} ثانية`
+                      : `${uploadProgress.remainingSec} ثانية`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">سرعة الرفع:</span>
+                  <span className="font-bold text-slate-700 font-mono">
+                    {uploadProgress.speedMb} ميجابايت/ثانية
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {uploadProgress.status === "success" && (
+              <p className="text-xs font-bold text-emerald-600">
+                تم رفع وحفظ المستند بنجاح في قاعدة البيانات المحلية!
+              </p>
+            )}
+
+            {uploadProgress.status === "error" && (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-red-600">
+                  {uploadProgress.errorMessage || "فشل رفع الملف."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setUploadProgress(null)}
+                  className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg cursor-pointer transition-colors"
+                >
+                  إغلاق
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Reading Comprehension Passage Modal */}
+      {isPassageModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in"
+          onClick={() => setIsPassageModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-xl bg-white rounded-2xl shadow-2xl flex flex-col border border-slate-200 overflow-hidden animate-in zoom-in-95 max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-rose-100 flex items-center justify-between bg-gradient-to-r from-rose-50 to-pink-50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shadow-xs">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">إضافة قطعة فهم وقراءة (Passage)</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">اختر طريقة إضافة نص القطعة لورقة الامتحان</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPassageModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-rose-100/50 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {/* Option 1: Lasso / Document Selection */}
+              <div className="p-4 rounded-xl border-2 border-rose-200 bg-rose-50/40 hover:bg-rose-50/70 transition-all">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-rose-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+                    <h4 className="font-bold text-sm text-slate-800">تحديد القطعة بالقلم الحر (Lasso) من المستند</h4>
+                  </div>
+                  <span className="text-[10px] bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded-full">استخراج تلقائي</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed mb-3">
+                  حدد القطعة مباشرة من كتابك أو مستندك المعروض. سيتعرف النظام عليها تلقائياً، وسيتجاوز فواصل الصفحات وهوامش الأوراق، ويستخرج الكلمات التي تحتها خط ويربطها بالأسئلة.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPassageModalOpen(false);
+                    setIsPassageLassoWaiting(true);
+                    setViewerTool("lasso");
+                    setIsSelectionPenActive(true);
+                    setSaveStatus("تم تفعيل وضع تحديد القطعة! حدد حول القطعة الآن في المستند.");
+                    setTimeout(() => setSaveStatus(null), 3000);
+                  }}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <PenTool className="w-3.5 h-3.5" />
+                  <span>تفعيل وضع التحديد الحر الآن</span>
+                </button>
+              </div>
+
+              {/* Option 2: Direct Paste / Manual Typing */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center">2</span>
+                  <h4 className="font-bold text-sm text-slate-800">نسخ ولصق أو كتابة نص القطعة مباشرة</h4>
+                </div>
+
+                {/* Passage Title */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    عنوان أو توجيه القطعة (Instructions):
+                  </label>
+                  <input
+                    type="text"
+                    value={manualPassageTitle}
+                    onChange={(e) => setManualPassageTitle(e.target.value)}
+                    placeholder="• Read the following passage, then answer the questions:"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-rose-500 font-medium text-slate-800"
+                  />
+                </div>
+
+                {/* Passage Body */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      نص القطعة الكامل:
+                    </label>
+                    <span className="text-[10px] text-slate-400">
+                      يمكنك استخدام &lt;u&gt;الكلمة&lt;/u&gt; لتسطير أي كلمة مهمة
+                    </span>
+                  </div>
+                  <textarea
+                    value={manualPassageText}
+                    onChange={(e) => setManualPassageText(e.target.value)}
+                    rows={6}
+                    placeholder="الصق نص القطعة هنا..."
+                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-rose-500 leading-relaxed text-slate-800 font-normal resize-y"
+                  />
+                </div>
+
+                {/* Helper buttons & Target Question */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">إدراج في:</span>
+                    <select
+                      value={passageTargetIndex}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPassageTargetIndex(val === "new" ? "new" : parseInt(val, 10));
+                      }}
+                      className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 outline-none"
+                    >
+                      <option value="new">سؤال جديد مستقل</option>
+                      {examQuestions.map((q, idx) => (
+                        <option key={q.id || idx} value={idx}>
+                          السؤال رقم {idx + 1} ({q.text?.slice(0, 25)}...)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleApplyManualPassage}
+                    disabled={!manualPassageText.trim()}
+                    className="inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>إدراج في الامتحان</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm New Exam & Save Modal */}
+      {isNewExamConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in"
+          onClick={() => setIsNewExamConfirmOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl flex flex-col border border-slate-200 overflow-hidden animate-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-amber-100 flex items-center gap-3.5 bg-amber-50/70 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0 shadow-xs">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-bold text-slate-800">بدء نموذج اختبار جديد</h3>
+                <p className="text-xs text-slate-500 mt-0.5">تأكيد حفظ أو مسح النموذج الحالي</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsNewExamConfirmOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-amber-100/50 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              <p className="text-sm font-semibold text-slate-700 leading-relaxed">
+                متأكد ده هيمسح النموذج الحالي؟ هل ترغب في حفظه أولاً في الاختبارات المنشأة أم بدء نموذج جديد؟
+              </p>
+
+              {/* Title input field for saving */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block text-xs font-bold text-slate-700">
+                  تسمية الاختبار (للحفظ في الاختبارات المنشأة):
+                </label>
+                <input
+                  type="text"
+                  value={newExamSaveTitle}
+                  onChange={(e) => setNewExamSaveTitle(e.target.value)}
+                  placeholder="اكتب اسم الاختبار هنا (مثال: اختبار العلوم - النهائي)..."
+                  className="w-full px-3 py-2 bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-lg text-xs font-bold text-slate-800 outline-none transition-all"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-400">
+                  عند الضغط على &quot;حفظ وبدء جديد&quot;، سيتم تخزين ورقة الاختبار في الاختبارات المنشأة ثم فتح نموذج فارغ.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer / Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setIsNewExamConfirmOpen(false)}
+                className="px-3.5 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsNewExamConfirmOpen(false);
+                    handleResetToNewExam(true);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  بدء نموذج جديد
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const finalTitle = newExamSaveTitle.trim() || archiveExamName.trim() || paperTitle.trim() || "ورقة اختبار";
+                    setArchiveExamName(finalTitle);
+                    await handleSaveExamToDb(finalTitle);
+                    setIsNewExamConfirmOpen(false);
+                    handleResetToNewExam(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>حفظ وبدء جديد</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ======================================================== */}
       {/* TOP HEADER: Preview Mode Switch, API Key, Title */}
       {/* ======================================================== */}
@@ -2209,7 +3602,14 @@ export default function ExamBuilderPage() {
         <div className="flex items-center gap-2">
           {/* New Clean Exam Button */}
           <button
-            onClick={() => handleResetToNewExam(true)}
+            onClick={() => {
+              if (examQuestions.length > 0 || archiveExamName.trim() || paperTitle.trim()) {
+                setNewExamSaveTitle(archiveExamName.trim() || paperTitle.trim() || "ورقة اختبار");
+                setIsNewExamConfirmOpen(true);
+              } else {
+                handleResetToNewExam(true);
+              }
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-blue-600 transition-colors cursor-pointer shadow-xs"
             title="بدء نموذج اختبار جديد وفارغ"
           >
@@ -2256,16 +3656,17 @@ export default function ExamBuilderPage() {
       {/* ======================================================== */}
       {/* Side-by-Side Split Layout (Viewer & Paper) */}
       {/* ======================================================== */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden print:p-0 print:m-0 print:gap-0 print:overflow-visible print:block print:h-auto">
+      <div
+        ref={splitContainerRef}
+        className="flex-1 flex flex-col lg:flex-row gap-2 min-h-0 overflow-hidden print:p-0 print:m-0 print:gap-0 print:overflow-visible print:block print:h-auto select-none"
+      >
         {/* ======================================================== */}
-        {/* 1. RIGHT PANE: Source File Viewer (40% width in RTL) */}
+        {/* 1. RIGHT PANE: Source File Viewer (Draggable width) */}
         {/* ======================================================== */}
         {!isPreviewMode && (
           <section
-            onDragOver={handleViewerDragOver}
-            onDragLeave={handleViewerDragLeave}
-            onDrop={handleViewerDrop}
-            className={`w-full lg:w-[40%] h-full flex flex-col bg-white rounded-2xl shadow-xs overflow-hidden border transition-all no-print ${
+            style={{ width: `${viewerWidthPercent}%` }}
+            className={`w-full h-full flex flex-col bg-white rounded-2xl shadow-xs overflow-hidden border transition-all no-print shrink-0 ${
               isDragOverViewer ? "border-2 border-dashed border-blue-500 bg-blue-50/20" : "border-slate-200/80"
             }`}
           >
@@ -2365,11 +3766,8 @@ export default function ExamBuilderPage() {
                           key={f.id}
                           type="button"
                           onClick={() => {
-                            setSelectedFile(f.name);
-                            if (f.filepath) setImageSrc(f.filepath);
+                            handleSelectUploadedFile(f);
                             setIsFileDropdownOpen(false);
-                            setSaveStatus(`تم تحديد: ${f.name}`);
-                            setTimeout(() => setSaveStatus(null), 2000);
                           }}
                           className={`w-full text-right px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 transition-colors ${
                             selectedFile === f.name ? "bg-blue-50/70 text-blue-700 font-bold" : "text-slate-700"
@@ -2439,67 +3837,259 @@ export default function ExamBuilderPage() {
               </button>
             </div>
 
-            {/* Viewer Toolbar: Selection Pen + Zoom Controls */}
-            <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs shrink-0 select-none">
-              {/* Selection Pen Toggle */}
-              <div className="flex items-center gap-2">
+            {/* Viewer Toolbar: Lasso Tool + Rect Tool + Hand Pan + Zoom Controls */}
+            <div className="px-3 py-2 bg-slate-50/90 border-b border-slate-200/80 flex items-center justify-between text-xs shrink-0 select-none gap-2 flex-wrap">
+              {/* Tool Mode Selectors */}
+              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                {/* 1. Lasso Tool (Photoshop-like freehand selection - Default Main Tool) */}
                 <button
-                  onClick={() => setIsSelectionPenActive(!isSelectionPenActive)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                    isSelectionPenActive
+                  type="button"
+                  onClick={() => {
+                    setViewerTool("lasso");
+                    setIsSelectionPenActive(true);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewerTool === "lasso" && isSelectionPenActive
                       ? "bg-blue-600 text-white shadow-xs"
-                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                      : "text-slate-700 hover:bg-slate-100"
                   }`}
-                  title="تفعيل أو تعطيل أداة التحديد"
+                  title="أداة التحديد الحر (تحديد سؤال) - حدد حول أي سؤال أو رسم بياني بحرية تامة"
                 >
                   <PenTool className="w-3.5 h-3.5" />
-                  <span>قلم التحديد</span>
+                  <span>تحديد سؤال</span>
+                </button>
+
+                {/* 1.5 Passage Lasso Mode Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPassageLassoWaiting(!isPassageLassoWaiting);
+                    setViewerTool("lasso");
+                    setIsSelectionPenActive(true);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    isPassageLassoWaiting
+                      ? "bg-rose-600 text-white shadow-xs animate-pulse"
+                      : "text-rose-700 hover:bg-rose-50"
+                  }`}
+                  title="تحديد قطعة فهم وقراءة من المستند"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>{isPassageLassoWaiting ? "جاري التحديد..." : "تحديد قطعة"}</span>
+                </button>
+
+                {/* 2. Rectangle Crop Tool */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewerTool("rect");
+                    setIsSelectionPenActive(true);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewerTool === "rect" && isSelectionPenActive
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                  title="تحديد مستطيل تقليدي"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="3 3" />
+                  </svg>
+                  <span>مستطيل</span>
+                </button>
+
+                {/* 3. Hand Drag / Pan Tool */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewerTool("hand");
+                    setIsSelectionPenActive(false);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewerTool === "hand"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                  title="أداة اليد والتحريك - اسحب للتنقل بحرية وسلاسة داخل الصفحة"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+                    <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+                    <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+                    <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+                  </svg>
+                  <span>أداة اليد</span>
                 </button>
               </div>
 
-              {/* Zoom & Reset Controls */}
-              <div className="flex items-center gap-1">
-                {completedCrop && (
+              {/* PDF Multi-Page Navigator & Direct Page Jump */}
+              {pdfTotalPages > 1 && (
+                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-slate-200 shadow-2xs text-xs font-bold text-slate-700">
+                  {/* Jump to first page */}
                   <button
+                    type="button"
+                    onClick={() => handleJumpToPdfPage(1)}
+                    disabled={pdfCurrentPage <= 1}
+                    className="p-1 hover:bg-slate-100 disabled:opacity-30 rounded-lg text-slate-600 transition-colors cursor-pointer"
+                    title="الانتقال إلى أول صفحة (صفحة 1)"
+                  >
+                    <ChevronsRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Previous page */}
+                  <button
+                    type="button"
+                    onClick={() => handleJumpToPdfPage(pdfCurrentPage - 1)}
+                    disabled={pdfCurrentPage <= 1}
+                    className="p-1 hover:bg-slate-100 disabled:opacity-30 rounded-lg text-slate-600 transition-colors cursor-pointer"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <div className="flex items-center gap-1 font-semibold text-slate-600">
+                    <span className="text-[11px]">صفحة</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={pdfTotalPages}
+                      value={pdfPageInput}
+                      onChange={(e) => setPdfPageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const p = parseInt(pdfPageInput, 10);
+                          if (!isNaN(p)) handleJumpToPdfPage(p);
+                        }
+                      }}
+                      onBlur={() => {
+                        const p = parseInt(pdfPageInput, 10);
+                        if (!isNaN(p)) handleJumpToPdfPage(p);
+                        else setPdfPageInput(String(pdfCurrentPage));
+                      }}
+                      className="w-11 text-center font-bold text-xs py-0.5 bg-slate-50 border border-slate-300 rounded-md focus:border-blue-500 focus:bg-white outline-none"
+                    />
+                    <span className="text-[11px] text-slate-500">من {pdfTotalPages}</span>
+                  </div>
+
+                  {/* Next page */}
+                  <button
+                    type="button"
+                    onClick={() => handleJumpToPdfPage(pdfCurrentPage + 1)}
+                    disabled={pdfCurrentPage >= pdfTotalPages}
+                    className="p-1 hover:bg-slate-100 disabled:opacity-30 rounded-lg text-slate-600 transition-colors cursor-pointer"
+                    title="الصفحة التالية"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Jump to last page */}
+                  <button
+                    type="button"
+                    onClick={() => handleJumpToPdfPage(pdfTotalPages)}
+                    disabled={pdfCurrentPage >= pdfTotalPages}
+                    className="p-1 hover:bg-slate-100 disabled:opacity-30 rounded-lg text-slate-600 transition-colors cursor-pointer"
+                    title={`الانتقال إلى آخر صفحة (صفحة ${pdfTotalPages})`}
+                  >
+                    <ChevronsLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Quick Scrubber Slider */}
+                  <div className="hidden sm:flex items-center gap-1 px-1">
+                    <input
+                      type="range"
+                      min={1}
+                      max={pdfTotalPages}
+                      value={pdfCurrentPage}
+                      onChange={(e) => handleJumpToPdfPage(Number(e.target.value))}
+                      className="w-20 md:w-28 h-1.5 accent-blue-600 bg-slate-200 rounded-lg cursor-pointer"
+                      title={`انتقال فوري وسريع (الصفحة الحالية: ${pdfCurrentPage} من ${pdfTotalPages})`}
+                    />
+                  </div>
+
+                  <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+                  <span className="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md font-medium">
+                    تمرير متصل
+                  </span>
+                </div>
+              )}
+
+              {/* Zoom & Reset Controls */}
+              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                {(completedCrop || lassoPoints.length > 0) && (
+                  <button
+                    type="button"
                     onClick={() => {
                       setCompletedCrop(null);
                       setCurrentCrop(null);
+                      setLassoPoints([]);
                     }}
-                    className="p-1.5 hover:bg-white text-slate-500 hover:text-red-500 rounded-lg transition-colors cursor-pointer"
-                    title="إلغاء التحديد الحالي"
+                    className="p-1.5 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                    title="إلغاء التحديد الحالي (إلغاء القص)"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
                 )}
+
+                {/* Zoom Out Button */}
                 <button
-                  onClick={() => setFileZoom((prev) => Math.max(prev - 10, 60))}
-                  className="p-1.5 hover:bg-white rounded-lg text-slate-600 transition-colors cursor-pointer"
-                  title="تصغير"
+                  type="button"
+                  onClick={() => setFileZoom((prev) => Math.max(prev - 15, 50))}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700 transition-colors cursor-pointer flex items-center gap-1 font-bold"
+                  title="تصغير المستند (Zoom Out)"
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <span className="px-1 text-[11px] font-medium text-slate-600 min-w-[32px] text-center">
-                  {fileZoom}%
-                </span>
+
+                {/* Zoom Percentage / Reset to 100% */}
                 <button
-                  onClick={() => setFileZoom((prev) => Math.min(prev + 10, 160))}
-                  className="p-1.5 hover:bg-white rounded-lg text-slate-600 transition-colors cursor-pointer"
-                  title="تكبير"
+                  type="button"
+                  onClick={() => setFileZoom(100)}
+                  className="px-2 py-0.5 text-[11px] font-mono font-bold text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                  title="إعادة ضبط التكبير إلى 100%"
+                >
+                  {fileZoom}%
+                </button>
+
+                {/* Zoom In Button */}
+                <button
+                  type="button"
+                  onClick={() => setFileZoom((prev) => Math.min(prev + 15, 250))}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700 transition-colors cursor-pointer flex items-center gap-1 font-bold"
+                  title="تكبير المستند (Zoom In)"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
+            {/* Active Passage Selection Banner */}
+            {isPassageLassoWaiting && (
+              <div className="bg-gradient-to-r from-rose-600 to-pink-600 text-white px-3 py-2 text-xs font-bold flex items-center justify-between shadow-xs shrink-0 select-none">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 animate-bounce shrink-0" />
+                  <span>🎯 وضع تحديد قطعة الفهم نشط: ارسم بالقلم الحر حول القطعة (حتى لو شملت فواصل أو أسئلة) وسيتم استخراجها وتنسيقها فوراً!</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPassageLassoWaiting(false)}
+                  className="bg-white/20 hover:bg-white/30 text-white text-[11px] px-2.5 py-0.5 rounded-lg cursor-pointer transition-colors shrink-0"
+                >
+                  إلغاء الوضع
+                </button>
+              </div>
+            )}
+
             {/* Large Placeholder Box (Image Viewer with Drag & Drop & Crop) */}
             <div
+              onDragEnter={handleViewerDragEnter}
               onDragOver={handleViewerDragOver}
               onDragLeave={handleViewerDragLeave}
               onDrop={handleViewerDrop}
               className="flex-1 m-3 rounded-xl bg-slate-100/70 border border-slate-200 overflow-hidden relative flex flex-col"
             >
               {isDragOverViewer && (
-                <div className="absolute inset-0 z-30 bg-blue-600/90 text-white flex flex-col items-center justify-center gap-2 backdrop-blur-xs">
+                <div className="pointer-events-none absolute inset-0 z-30 bg-blue-600/90 text-white flex flex-col items-center justify-center gap-2 backdrop-blur-xs">
                   <FileUp className="w-10 h-10 animate-bounce" />
                   <p className="font-bold text-sm">أفلت المستند هنا للرفع والاستعراض الفوري</p>
                 </div>
@@ -2544,100 +4134,372 @@ export default function ExamBuilderPage() {
               ) : (
                 <div
                   ref={imageContainerRef}
+                  onScroll={handleViewerScroll}
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
-                  className={`flex-1 overflow-auto p-4 flex justify-center items-start relative select-none ${
-                    isSelectionPenActive ? "cursor-crosshair" : "cursor-default"
+                  style={
+                    viewerTool === "lasso"
+                      ? { cursor: PEN_CURSOR_URL }
+                      : undefined
+                  }
+                  className={`flex-1 overflow-auto p-4 flex flex-col items-center relative select-none scroll-smooth ${
+                    viewerTool === "hand"
+                      ? isPanning
+                        ? "cursor-grabbing"
+                        : "cursor-grab"
+                      : viewerTool === "rect"
+                      ? "cursor-crosshair"
+                      : ""
                   }`}
                 >
-                  {/* Scalable Image Container */}
-                  <div
-                    className="relative transition-transform duration-150 origin-top shadow-md bg-white rounded-lg overflow-hidden shrink-0"
-                    style={{
-                      width: `${(fileZoom / 100) * 620}px`,
-                      minHeight: `${(fileZoom / 100) * 876}px`,
-                    }}
-                  >
-                    {/* Document Image */}
-                    <img
-                      ref={imgElementRef}
-                      src={imageSrc}
-                      alt="صفحة المستند المصدري"
-                      draggable={false}
-                      crossOrigin="anonymous"
-                      className="w-full h-auto object-contain block pointer-events-none select-none"
-                    />
+                  {pdfDoc && pdfTotalPages > 0 ? (() => {
+                    const pageWidth = (fileZoom / 100) * 620;
+                    const pageMinHeight = pageWidth * pdfPageAspectRatio;
+                    const slotHeight = pageMinHeight + 24; // Page height + 24px (gap-6)
+                    const buffer = 3;
+                    let virtualStart = Math.max(1, pdfCurrentPage - buffer);
+                    let virtualEnd = Math.min(pdfTotalPages, pdfCurrentPage + buffer);
 
-                    {/* Marquee Selection Bounding Box Overlay */}
-                    {activeCrop && activeCrop.width > 0 && activeCrop.height > 0 && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: `${activeCrop.x}px`,
-                          top: `${activeCrop.y}px`,
-                          width: `${activeCrop.width}px`,
-                          height: `${activeCrop.height}px`,
-                        }}
-                        className={`border-2 border-dashed border-blue-600 bg-blue-500/15 pointer-events-none z-20 transition-colors ${
-                          extractionFeedback ? "border-emerald-600 bg-emerald-500/20" : ""
-                        }`}
-                      >
-                        {/* Corner Handles */}
-                        <span className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
-                        <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
-                        <span className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
-                        <span className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                    // Keep the page currently being cropped or selected active in the DOM
+                    if (activePdfCropPage >= 1 && activePdfCropPage <= pdfTotalPages) {
+                      virtualStart = Math.min(virtualStart, activePdfCropPage);
+                      virtualEnd = Math.max(virtualEnd, activePdfCropPage);
+                    }
 
-                        {/* Loading Overlay */}
-                        {isExtracting && (
-                          <div className="absolute inset-0 bg-blue-900/40 backdrop-blur-xs flex items-center justify-center">
-                            <div className="bg-white/95 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2 text-xs font-bold text-blue-700">
-                              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                              <span>جاري استخراج السؤال...</span>
-                            </div>
-                          </div>
+                    const topSpacerHeight = Math.max(0, (virtualStart - 1) * slotHeight);
+                    const bottomSpacerHeight = Math.max(0, (pdfTotalPages - virtualEnd) * slotHeight);
+
+                    const pagesToRender: number[] = [];
+                    for (let p = virtualStart; p <= virtualEnd; p++) {
+                      pagesToRender.push(p);
+                    }
+
+                    return (
+                      <div className="flex flex-col items-center gap-6 w-full py-2">
+                        {topSpacerHeight > 0 && (
+                          <div style={{ height: `${topSpacerHeight}px`, width: "100%", flexShrink: 0 }} aria-hidden="true" />
                         )}
 
-                        {/* Feedback Tag */}
-                        {extractionFeedback && (
-                          <div className="absolute inset-0 bg-emerald-600/30 flex items-center justify-center p-2 text-center">
-                            <div className="bg-white/95 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                              <span>{extractionFeedback}</span>
+                        {pagesToRender.map((pageNum) => {
+                          const pageImg = pdfPagesCache[pageNum];
+                          const isActiveCropPage = activePdfCropPage === pageNum;
+
+                          return (
+                            <div
+                              key={pageNum}
+                              id={`pdf-page-container-${pageNum}`}
+                              data-page-number={pageNum}
+                              className={`pdf-page-wrapper relative shadow-md bg-white rounded-lg overflow-visible shrink-0 transition-shadow ${
+                                pdfCurrentPage === pageNum ? "ring-2 ring-blue-500/50 shadow-lg" : ""
+                              }`}
+                              style={{
+                                width: `${pageWidth}px`,
+                                minHeight: `${pageMinHeight}px`,
+                                cursor: viewerTool === "lasso" ? PEN_CURSOR_URL : undefined,
+                              }}
+                            >
+                              {/* Inner clipped page content to maintain rounded corners while allowing overlays to overflow */}
+                              <div className="w-full h-full rounded-lg overflow-hidden relative">
+                                {/* Top Page Header Badge */}
+                                <div className="absolute top-2 right-2 z-15 bg-slate-900/60 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md pointer-events-none select-none flex items-center gap-1 shadow-sm">
+                                  <span>صفحة {pageNum}</span>
+                                  <span className="text-slate-400">/ {pdfTotalPages}</span>
+                                </div>
+
+                                {/* Document Image or Loading Skeleton */}
+                                {pageImg ? (
+                                  <img
+                                    src={pageImg}
+                                    alt={`صفحة ${pageNum}`}
+                                    draggable={false}
+                                    crossOrigin="anonymous"
+                                    style={{ cursor: viewerTool === "lasso" ? PEN_CURSOR_URL : undefined }}
+                                    className="w-full h-auto object-contain block pointer-events-none select-none transition-opacity duration-200"
+                                  />
+                                ) : (
+                                  <div
+                                    className="w-full flex flex-col items-center justify-center bg-slate-50 text-slate-400 gap-3 select-none relative overflow-hidden transition-all duration-200"
+                                    style={{ height: `${pageMinHeight}px` }}
+                                  >
+                                    <span className="text-5xl font-black text-slate-200/80 select-none">
+                                      {pageNum}
+                                    </span>
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 bg-white px-3.5 py-1.5 rounded-full shadow-2xs border border-slate-200">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                      <span>جاري تجهيز صفحة {pageNum}...</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Overlays for active crop page */}
+                              {isActiveCropPage && (
+                                <>
+                                  {/* While actively drawing: 100% freehand open polyline (NO auto-close, NO fill) */}
+                                  {isDrawingLasso && lassoPoints.length > 1 && (
+                                    <svg
+                                      className="absolute inset-0 w-full h-full pointer-events-none z-20"
+                                      style={{ width: "100%", height: "100%", overflow: "visible" }}
+                                    >
+                                      <polyline
+                                        points={lassoPoints.map((p) => `${p.x},${p.y}`).join(" ")}
+                                        fill="none"
+                                        stroke="#2563eb"
+                                        strokeWidth="2.5"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeDasharray="4 4"
+                                      />
+                                      <circle cx={lassoPoints[0].x} cy={lassoPoints[0].y} r="3.5" fill="#2563eb" stroke="#ffffff" strokeWidth="1.5" />
+                                    </svg>
+                                  )}
+
+                                  {/* After releasing mouse: completed closed polygon with selection highlight */}
+                                  {!isDrawingLasso && lassoPoints.length >= 3 && completedCrop && (
+                                    <svg
+                                      className="absolute inset-0 w-full h-full pointer-events-none z-20"
+                                      style={{ width: "100%", height: "100%", overflow: "visible" }}
+                                    >
+                                      <polygon
+                                        points={lassoPoints.map((p) => `${p.x},${p.y}`).join(" ")}
+                                        fill={
+                                          extractionFeedback
+                                            ? "rgba(16, 185, 129, 0.22)"
+                                            : "rgba(37, 99, 235, 0.18)"
+                                        }
+                                        stroke={extractionFeedback ? "#10b981" : "#2563eb"}
+                                        strokeWidth="2.5"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeDasharray="5 5"
+                                      />
+                                    </svg>
+                                  )}
+
+                                  {/* Rectangle Marquee Selection Overlay */}
+                                  {viewerTool === "rect" && activeCrop && activeCrop.width > 0 && activeCrop.height > 0 && (
+                                    <div
+                                      style={{
+                                        position: "absolute",
+                                        left: `${activeCrop.x}px`,
+                                        top: `${activeCrop.y}px`,
+                                        width: `${activeCrop.width}px`,
+                                        height: `${activeCrop.height}px`,
+                                      }}
+                                      className={`border-2 border-dashed border-blue-600 bg-blue-500/15 pointer-events-none z-20 transition-colors ${
+                                        extractionFeedback ? "border-emerald-600 bg-emerald-500/20" : ""
+                                      }`}
+                                    >
+                                      <span className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                                      <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                                      <span className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                                      <span className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                                    </div>
+                                  )}
+
+                                  {/* Floating Extract Action & Loading Percentage Indicator directly adjacent to selection */}
+                                  {completedCrop && (
+                                    <div
+                                      style={{
+                                        position: "absolute",
+                                        left: `${Math.max(8, Math.min(completedCrop.x + (completedCrop.width - 150) / 2, pageWidth - 165))}px`,
+                                        top: `${
+                                          completedCrop.y + completedCrop.height + 46 > pageMinHeight
+                                            ? Math.max(8, completedCrop.y - 40)
+                                            : completedCrop.y + completedCrop.height + 8
+                                        }px`,
+                                      }}
+                                      className="floating-extract-btn z-40 pointer-events-auto"
+                                    >
+                                      {isExtracting ? (
+                                        <div className="inline-flex flex-col gap-1 bg-white/95 backdrop-blur-xs text-blue-700 border border-blue-200 px-3 py-1.5 rounded-xl shadow-lg animate-in fade-in zoom-in-95">
+                                          <div className="flex items-center gap-2 text-xs font-bold whitespace-nowrap">
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0" />
+                                            <span>{isPassageLassoWaiting ? "جاري استخراج القطعة..." : "جاري استخراج السؤال..."}</span>
+                                            <span className="font-mono text-blue-600 font-extrabold mr-1">{extractProgress}%</span>
+                                          </div>
+                                          <div className="w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
+                                            <div
+                                              className="bg-blue-600 h-full rounded-full transition-all duration-150 ease-out"
+                                              style={{ width: `${Math.min(100, Math.max(8, extractProgress))}%` }}
+                                            />
+                                          </div>
+                                        </div>
+                                      ) : extractionFeedback ? (
+                                        <div className="inline-flex items-center gap-1.5 bg-white/95 backdrop-blur-xs text-emerald-700 border border-emerald-200 px-3.5 py-1.5 rounded-xl shadow-lg text-xs font-bold animate-in fade-in zoom-in-95 whitespace-nowrap">
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                          <span>{extractionFeedback}</span>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={handleExtractAndDrag}
+                                          className={`inline-flex items-center gap-1.5 ${
+                                            isPassageLassoWaiting
+                                              ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/30"
+                                              : "bg-blue-600 hover:bg-blue-700 shadow-blue-600/30"
+                                          } active:scale-95 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer whitespace-nowrap`}
+                                        >
+                                          {isPassageLassoWaiting ? (
+                                            <BookOpen className="w-3.5 h-3.5 text-pink-200" />
+                                          ) : (
+                                            <FileText className="w-3.5 h-3.5 text-blue-200" />
+                                          )}
+                                          <span>{isPassageLassoWaiting ? "استخراج القطعة" : "استخراج السؤال"}</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              )}
                             </div>
-                          </div>
+                          );
+                        })}
+
+                        {bottomSpacerHeight > 0 && (
+                          <div style={{ height: `${bottomSpacerHeight}px`, width: "100%", flexShrink: 0 }} aria-hidden="true" />
                         )}
                       </div>
-                    )}
+                    );
+                  })() : (
+                    /* Scalable Single Image Container for PNG/JPG */
+                    <div
+                      style={{
+                        width: `${(fileZoom / 100) * 620}px`,
+                        minHeight: `${(fileZoom / 100) * 876}px`,
+                        cursor: viewerTool === "lasso" ? PEN_CURSOR_URL : undefined,
+                      }}
+                      className="relative transition-transform duration-150 origin-top shadow-md bg-white rounded-lg overflow-hidden shrink-0"
+                    >
+                      {/* Document Image */}
+                      <img
+                        ref={imgElementRef}
+                        src={imageSrc || ""}
+                        alt="صفحة المستند المصدري"
+                        draggable={false}
+                        crossOrigin="anonymous"
+                        style={{ cursor: viewerTool === "lasso" ? PEN_CURSOR_URL : undefined }}
+                        className="w-full h-auto object-contain block pointer-events-none select-none"
+                      />
 
-                    {/* Floating Extract Button */}
-                    {completedCrop && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: `${Math.max(10, Math.min(activeCrop?.x || 0, 480))}px`,
-                          top: `${Math.max(8, completedCrop.y + completedCrop.height + 10)}px`,
-                        }}
-                        className="floating-extract-btn z-30 pointer-events-auto"
-                      >
-                        <button
-                          onClick={handleExtractAndDrag}
-                          disabled={isExtracting}
-                          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-600/30 transition-all cursor-pointer whitespace-nowrap disabled:opacity-80"
+                      {/* While actively drawing: 100% freehand open polyline (NO auto-close, NO fill) */}
+                      {isDrawingLasso && lassoPoints.length > 1 && (
+                        <svg
+                          className="absolute inset-0 w-full h-full pointer-events-none z-20"
+                          style={{ width: "100%", height: "100%", overflow: "visible" }}
+                        >
+                          <polyline
+                            points={lassoPoints.map((p) => `${p.x},${p.y}`).join(" ")}
+                            fill="none"
+                            stroke="#2563eb"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray="4 4"
+                          />
+                          <circle cx={lassoPoints[0].x} cy={lassoPoints[0].y} r="3.5" fill="#2563eb" stroke="#ffffff" strokeWidth="1.5" />
+                        </svg>
+                      )}
+
+                      {/* After releasing mouse: completed closed polygon with selection highlight */}
+                      {!isDrawingLasso && lassoPoints.length >= 3 && completedCrop && (
+                        <svg
+                          className="absolute inset-0 w-full h-full pointer-events-none z-20"
+                          style={{ width: "100%", height: "100%", overflow: "visible" }}
+                        >
+                          <polygon
+                            points={lassoPoints.map((p) => `${p.x},${p.y}`).join(" ")}
+                            fill={
+                              extractionFeedback
+                                ? "rgba(16, 185, 129, 0.22)"
+                                : "rgba(37, 99, 235, 0.18)"
+                            }
+                            stroke={extractionFeedback ? "#10b981" : "#2563eb"}
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray="5 5"
+                          />
+                        </svg>
+                      )}
+
+                      {/* Rectangle Marquee Selection Overlay */}
+                      {viewerTool === "rect" && activeCrop && activeCrop.width > 0 && activeCrop.height > 0 && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: `${activeCrop.x}px`,
+                            top: `${activeCrop.y}px`,
+                            width: `${activeCrop.width}px`,
+                            height: `${activeCrop.height}px`,
+                          }}
+                          className={`border-2 border-dashed border-blue-600 bg-blue-500/15 pointer-events-none z-20 transition-colors ${
+                            extractionFeedback ? "border-emerald-600 bg-emerald-500/20" : ""
+                          }`}
+                        >
+                          <span className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                          <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                          <span className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                          <span className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-[2px]" />
+                        </div>
+                      )}
+
+                      {/* Floating Extract Action & Loading Percentage Indicator directly adjacent to selection */}
+                      {completedCrop && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: `${Math.max(8, Math.min(completedCrop.x + (completedCrop.width - 150) / 2, (fileZoom / 100) * 620 - 165))}px`,
+                            top: `${
+                              completedCrop.y + completedCrop.height + 46 > (fileZoom / 100) * 876
+                                ? Math.max(8, completedCrop.y - 40)
+                                : completedCrop.y + completedCrop.height + 8
+                            }px`,
+                          }}
+                          className="floating-extract-btn z-40 pointer-events-auto"
                         >
                           {isExtracting ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>جاري الاستخراج...</span>
-                            </>
+                            <div className="inline-flex flex-col gap-1 bg-white/95 backdrop-blur-xs text-blue-700 border border-blue-200 px-3 py-1.5 rounded-xl shadow-lg animate-in fade-in zoom-in-95">
+                              <div className="flex items-center gap-2 text-xs font-bold whitespace-nowrap">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0" />
+                                <span>{isPassageLassoWaiting ? "جاري استخراج القطعة..." : "جاري استخراج السؤال..."}</span>
+                                <span className="font-mono text-blue-600 font-extrabold mr-1">{extractProgress}%</span>
+                              </div>
+                              <div className="w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-blue-600 h-full rounded-full transition-all duration-150 ease-out"
+                                  style={{ width: `${Math.min(100, Math.max(8, extractProgress))}%` }}
+                                />
+                              </div>
+                            </div>
+                          ) : extractionFeedback ? (
+                            <div className="inline-flex items-center gap-1.5 bg-white/95 backdrop-blur-xs text-emerald-700 border border-emerald-200 px-3.5 py-1.5 rounded-xl shadow-lg text-xs font-bold animate-in fade-in zoom-in-95 whitespace-nowrap">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>{extractionFeedback}</span>
+                            </div>
                           ) : (
-                            <span>استخراج السؤال</span>
+                            <button
+                              type="button"
+                              onClick={handleExtractAndDrag}
+                              className={`inline-flex items-center gap-1.5 ${
+                                isPassageLassoWaiting
+                                  ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/30"
+                                  : "bg-blue-600 hover:bg-blue-700 shadow-blue-600/30"
+                              } active:scale-95 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer whitespace-nowrap`}
+                            >
+                              {isPassageLassoWaiting ? (
+                                <BookOpen className="w-3.5 h-3.5 text-pink-200" />
+                              ) : (
+                                <FileText className="w-3.5 h-3.5 text-blue-200" />
+                              )}
+                              <span>{isPassageLassoWaiting ? "استخراج القطعة" : "استخراج السؤال"}</span>
+                            </button>
                           )}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2646,17 +4508,65 @@ export default function ExamBuilderPage() {
                 <span className="font-medium text-slate-600">
                   {selectedFile ? `المستند: ${selectedFile}` : "لا يوجد مستند مفتوح حالياً"}
                 </span>
+                {pdfTotalPages > 1 && (
+                  <span className="font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md text-[11px]">
+                    صفحة {pdfCurrentPage} من {pdfTotalPages}
+                  </span>
+                )}
               </div>
             </div>
           </section>
         )}
 
         {/* ======================================================== */}
-        {/* 2. LEFT PANE: Physical A4 Exam Canvas (60% or 100% in Preview) */}
+        {/* Draggable Vertical Splitter / Extend Side View Handle */}
+        {/* ======================================================== */}
+        {!isPreviewMode && (
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsResizingPanes(true);
+            }}
+            onTouchStart={() => setIsResizingPanes(true)}
+            className={`hidden lg:flex flex-col items-center justify-center relative z-20 w-4 -mx-1 hover:w-5 transition-all cursor-col-resize group select-none shrink-0 ${
+              isResizingPanes ? "w-5" : ""
+            }`}
+            title="اسحب لتوسيع أو تضييق حجم المعاينة الجانبية للمستند"
+          >
+            {/* Dividing vertical guide line */}
+            <div
+              className={`w-1 h-full rounded-full transition-colors ${
+                isResizingPanes ? "bg-blue-600 ring-4 ring-blue-500/20" : "bg-slate-300 group-hover:bg-blue-500"
+              }`}
+            />
+
+            {/* Floating Handle Pill with Red/Blue Double Arrows matching user screenshot */}
+            <div
+              className={`absolute top-1/2 -translate-y-1/2 flex items-center justify-center gap-0.5 px-1 py-3 rounded-full bg-white border shadow-md transition-transform ${
+                isResizingPanes
+                  ? "border-blue-600 text-blue-600 scale-110 shadow-lg ring-2 ring-blue-400"
+                  : "border-slate-300 text-slate-600 group-hover:border-blue-500 group-hover:text-blue-600"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+                <polyline points="9 18 3 12 9 6" />
+              </svg>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+                <polyline points="15 18 21 12 15 6" />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* 2. LEFT PANE: Physical A4 Exam Canvas */}
         {/* ======================================================== */}
         <section
-          className={`h-full flex flex-col bg-slate-200/60 rounded-2xl shadow-xs overflow-hidden border-none print:p-0 print:m-0 print:w-full print:bg-transparent print:overflow-visible print:block print:h-auto ${
-            isPreviewMode ? "w-full" : "w-full lg:w-[60%]"
+          style={!isPreviewMode ? { width: `${100 - viewerWidthPercent}%` } : undefined}
+          className={`h-full flex flex-col bg-slate-200/60 rounded-2xl shadow-xs overflow-hidden border-none print:p-0 print:m-0 print:w-full print:bg-transparent print:overflow-visible print:block print:h-auto flex-1 min-w-0 ${
+            isPreviewMode ? "w-full" : ""
           }`}
         >
           {/* ====================================================== */}
@@ -2766,6 +4676,16 @@ export default function ExamBuilderPage() {
                   >
                     <PlusCircle className="w-3.5 h-3.5" />
                     <span>إضافة سؤال</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsPassageModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100 text-rose-700 border border-rose-200/80 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95"
+                    title="إضافة قطعة قراءة (Passage) سواء بالتحديد أو بالنسخ"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-rose-600" />
+                    <span>إضافة قطعة</span>
                   </button>
 
                   <button
@@ -2988,7 +4908,7 @@ export default function ExamBuilderPage() {
           {/* ======================================================== */}
           {/* Scrollable Canvas Viewport Rendering PHYSICAL A4 SHEETS */}
           {/* ======================================================== */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex flex-col items-center gap-8 a4-print-container print:p-0 print:m-0 print:gap-0 print:overflow-visible print:block print:w-full">
+          <div className="flex-1 overflow-y-auto overflow-x-auto p-4 sm:p-8 flex flex-col items-center-safe gap-8 a4-print-container print:p-0 print:m-0 print:gap-0 print:overflow-visible print:block print:w-full [scrollbar-width:thin] print:[scrollbar-width:none] print:[&::-webkit-scrollbar]:hidden">
             {/* Sleek Tab Switcher right above the A4 paper: [ نموذج (أ) | نموذج (ب) | نموذج (ج) | عرض الكل للطباعة ] */}
             {examModels && examModels.modelCount > 1 && (
               <div className="w-full max-w-[680px] bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-sm p-2 flex flex-wrap items-center justify-between gap-2 shrink-0 no-print transition-all">
@@ -3140,9 +5060,9 @@ export default function ExamBuilderPage() {
                     }
                   }
                 }}
-                className="a4-page-sheet w-full max-w-[680px] min-h-[962px] bg-white rounded-sm shadow-xl p-4 sm:p-5 relative flex flex-col justify-between transition-all border border-slate-200 select-text overflow-hidden print:p-[8mm_12mm] print:m-0 print:border-none print:shadow-none print:w-[210mm] print:max-w-[210mm] print:h-[296.5mm] print:max-h-[296.5mm] print:break-after-page print:[break-after:page] print:[page-break-after:always]"
+                className="a4-page-sheet shrink-0 w-[794px] max-w-none min-h-[1123px] bg-white rounded-sm shadow-xl p-[8mm_12mm_10mm_12mm] relative flex flex-col justify-between transition-all border border-slate-200 select-text print:p-[8mm_12mm_10mm_12mm] print:m-0 print:border-none print:shadow-none print:w-[210mm] print:max-w-[210mm] print:h-[297mm] print:max-h-[297mm] print:overflow-hidden print:break-after-page print:[break-after:page] print:[page-break-after:always]"
                 style={{
-                  aspectRatio: "1 / 1.4142",
+                  minHeight: "1123px",
                   breakAfter: "page",
                   pageBreakAfter: "always",
                 }}
@@ -3260,7 +5180,7 @@ export default function ExamBuilderPage() {
                 )}
 
                 {/* Main Paper Content Container */}
-                <div className="flex-1 flex flex-col relative z-10 min-w-0 main-paper-content h-full">
+                <div className="flex-1 flex flex-col relative z-10 min-w-0 main-paper-content">
                   {/* Page 1 Exam Header Box */}
                   {page.pageNumber === 1 ? (
                     <div
@@ -3298,8 +5218,8 @@ export default function ExamBuilderPage() {
                           </div>
                         </div>
 
-                        {/* Left Column: Model Badge (Top-Left) & Exam Code & Exam Grade */}
-                        <div className="shrink-0 flex flex-col justify-between items-end gap-1.5 min-w-[140px] sm:min-w-[155px]">
+                        {/* Left Column: Model Badge (Top-Left) & Exam Grade */}
+                        <div className="shrink-0 flex flex-col justify-between items-end gap-1.5 min-w-[120px] sm:min-w-[140px]">
                           {/* Top-Left Model Name Badge */}
                           {currentModelBadge && (
                             <div className="w-full flex items-center justify-center bg-slate-900 text-white rounded-lg py-1 px-2.5 shadow-2xs border-2 border-slate-900 print:bg-white print:text-black print:border-2 print:border-black">
@@ -3308,28 +5228,6 @@ export default function ExamBuilderPage() {
                               </span>
                             </div>
                           )}
-
-                          {/* Top: Exam Code */}
-                          <div className="w-full flex items-center justify-between gap-2 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-300">
-                            <span className="text-[10px] font-bold text-slate-700 whitespace-nowrap">
-                              {examDirection === "ltr" ? "Code:" : "كود الامتحان :"}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <span className="font-mono font-extrabold text-xs tracking-wider text-slate-900">
-                                {examCode}
-                              </span>
-                              {!isPreviewMode && (
-                                <button
-                                  type="button"
-                                  onClick={generateNewExamCode}
-                                  className="p-0.5 text-slate-500 hover:text-blue-600 rounded transition-colors no-print cursor-pointer"
-                                  title="توليد كود جديد"
-                                >
-                                  <RotateCw className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
 
                           {/* Bottom: Exam Grade (Bigger & positioned directly underneath Exam Code) */}
                           <div className="w-full flex items-center justify-between gap-1.5 bg-white border-2 border-slate-800 rounded-lg px-2 py-0.5 shadow-2xs">
@@ -3359,28 +5257,10 @@ export default function ExamBuilderPage() {
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-between border-b border-slate-300 pb-1 mb-2 text-xs text-slate-600 font-bold select-none" dir={examDirection}>
-                      <span className="truncate">تتمة: {paperTitle || "ورقة الامتحان"}</span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {currentModelBadge && (
-                          <span className="border-2 border-slate-900 bg-slate-100 text-slate-950 font-black text-[11px] px-2.5 py-0.5 rounded-md print:bg-white print:text-black">
-                            {currentModelBadge}
-                          </span>
-                        )}
-                        <span className="text-[10px] text-slate-500 font-mono">صفحة {page.pageNumber}</span>
-                      </div>
-                    </div>
-                  )}
+                  ) : null}
 
                   {/* List of intact questions allocated to this A4 page */}
-                  <div
-                    className={`questions-container flex-1 flex flex-col min-h-0 w-full max-w-full ${
-                      page.questionIndices.length >= 5
-                        ? "justify-between"
-                        : "justify-start space-y-4 sm:space-y-5"
-                    }`}
-                  >
+                  <div className="questions-container w-full max-w-full flex flex-col justify-start gap-[3mm]">
                     {examQuestions.length === 0 && !isPreviewMode && (
                       <div className="flex-1 flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/60 my-6 text-center">
                         <FileText className="w-12 h-12 text-slate-300 mb-3" />
@@ -3410,12 +5290,119 @@ export default function ExamBuilderPage() {
                       const isBeingDragged = draggedIndex === index;
                       const isDragTarget = dragOverIndex === index;
                       const isItemRefining = refiningIndex === index;
+                      const qNum = getQuestionDisplayNumber(index, isAllSequentialView ? currentSheetQuestions : examQuestions);
+
+                      // Dedicated Standalone Passage Card
+                      if (q.type === "passage") {
+                        return (
+                          <div
+                            key={q.id || index}
+                            onDragOver={(e) => handleDragOver(e, index)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => {
+                              handleDrop(e, index);
+                              handleDragEnd();
+                            }}
+                            onMouseEnter={() => setHoveredQuestionIndex(index)}
+                            onMouseLeave={() => setHoveredQuestionIndex(null)}
+                            onClick={() => setFocusedQuestionIndex(index)}
+                            className={`passage-card group relative shrink-0 transition-all rounded-xl border w-full max-w-full min-w-0 overflow-hidden ${
+                              isPreviewMode
+                                ? "border-transparent bg-transparent py-1 px-0 shadow-none"
+                                : isFocused
+                                ? "bg-rose-50/20 border-rose-400 shadow-xs ring-1 ring-rose-400/20 p-2 sm:p-2.5"
+                                : "border-slate-200/80 hover:border-slate-300 p-2 bg-slate-50/30"
+                            } ${isBeingDragged ? "opacity-30 border-dashed border-rose-600" : ""} ${
+                              isDragTarget ? "border-t-2 border-t-rose-600 bg-rose-50/40" : ""
+                            }`}
+                          >
+                            <div className="w-full bg-slate-50/70 border border-slate-200/90 rounded-lg p-2.5 print:bg-transparent print:border-slate-400/80">
+                              {/* Passage Header Row with Reorder Grip & Delete Trash */}
+                              <div className="flex items-center justify-between mb-1.5 border-b border-slate-200/80 pb-1.5" dir={examDirection}>
+                                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 flex-1 min-w-0">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shrink-0" />
+                                  {isPreviewMode ? (
+                                    <span className="text-slate-900 font-bold text-xs sm:text-sm">
+                                      {q.passageTitle || (examDirection === "ltr" ? "• Read the following passage, then choose the correct answer from a, b, c or d:" : "• اقرأ القطعة التالية ثم أجب عن الأسئلة:")}
+                                    </span>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={q.passageTitle || ""}
+                                      onChange={(e) => {
+                                        const updated = [...examQuestions];
+                                        updated[index].passageTitle = e.target.value;
+                                        setExamQuestions(updated);
+                                      }}
+                                      onBlur={() => pushHistorySnapshot(examQuestions)}
+                                      className="w-full bg-transparent font-bold text-xs text-slate-800 border-none outline-none focus:ring-0 p-0"
+                                      placeholder="عنوان أو توجيه القطعة (مثلاً: • Read the following passage...)"
+                                    />
+                                  )}
+                                </div>
+
+                                {!isPreviewMode && (
+                                  <div className="flex items-center gap-1.5 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity no-print">
+                                    <div
+                                      draggable={!isPreviewMode}
+                                      onDragStart={(e) => handleDragStart(e, index)}
+                                      onDragEnd={handleDragEnd}
+                                      className="p-1 text-slate-400 hover:text-blue-600 cursor-grab active:cursor-grabbing rounded"
+                                      title="اسحب لتغيير موضع وترتيب القطعة"
+                                    >
+                                      <GripVertical className="w-3.5 h-3.5" />
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveQuestion(index);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer z-30 pointer-events-auto"
+                                      title="حذف هذه القطعة"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Passage Text Body */}
+                              {isPreviewMode ? (
+                                <div
+                                  className="text-slate-800 text-xs sm:text-[13px] leading-relaxed whitespace-pre-line text-justify"
+                                  dangerouslySetInnerHTML={{
+                                    __html: sanitizePassageHtml(q.passageText),
+                                  }}
+                                />
+                              ) : (
+                                <div className="space-y-1">
+                                  <textarea
+                                    value={q.passageText || ""}
+                                    onChange={(e) => {
+                                      const updated = [...examQuestions];
+                                      updated[index].passageText = e.target.value;
+                                      setExamQuestions(updated);
+                                    }}
+                                    onBlur={() => pushHistorySnapshot(examQuestions)}
+                                    rows={5}
+                                    placeholder="نص القطعة القرائية... يمكنك كتابة <u>الكلمة</u> لتسطير أي كلمة مهمة أو **كلمة** للخط العريض."
+                                    className="w-full text-xs text-slate-800 bg-white border border-slate-200 rounded p-2 focus:border-rose-400 focus:outline-none leading-relaxed resize-y font-normal"
+                                  />
+                                  <div className="text-[10px] text-slate-400 flex items-center justify-between no-print select-none">
+                                    <span>ملاحظة: الكلمات داخل &lt;u&gt;كلمة&lt;/u&gt; ستظهر تحتها خط واضح كما في ورقة الامتحان الأصلية.</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
 
                       return (
                         <div
                           key={q.id || index}
-                          draggable={!isPreviewMode}
-                          onDragStart={(e) => handleDragStart(e, index)}
                           onDragOver={(e) => handleDragOver(e, index)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => {
@@ -3424,14 +5411,15 @@ export default function ExamBuilderPage() {
                             } else {
                               handleDrop(e, index);
                             }
+                            handleDragEnd();
                           }}
                           onMouseEnter={() => setHoveredQuestionIndex(index)}
                           onMouseLeave={() => setHoveredQuestionIndex(null)}
                           onFocusCapture={() => setHoveredQuestionIndex(index)}
                           onClick={() => setFocusedQuestionIndex(index)}
-                          className={`question-card group relative transition-all rounded-lg border w-full max-w-full min-w-0 overflow-hidden ${
+                          className={`question-card group relative shrink-0 transition-all rounded-lg border w-full max-w-full min-w-0 overflow-hidden ${
                             isPreviewMode
-                              ? "border-transparent bg-transparent py-2.5 px-1 shadow-none"
+                              ? "border-transparent bg-transparent py-[1.5mm] px-0 shadow-none"
                               : isFocused
                               ? "bg-blue-50/20 border-blue-400 shadow-xs ring-1 ring-blue-400/20 p-2 sm:p-2.5"
                               : "border-slate-200/60 hover:border-slate-300 p-2"
@@ -3439,11 +5427,86 @@ export default function ExamBuilderPage() {
                             isDragTarget ? "border-t-2 border-t-blue-600 bg-blue-50/40" : ""
                           }`}
                         >
+                          {/* Reading Comprehension Passage Section (for backwards-compatibility if attached to question) */}
+                          {q.passageText && (
+                            <div className="mb-3 w-full bg-slate-50/70 border border-slate-200/90 rounded-lg p-2.5 print:bg-transparent print:border-slate-400/80">
+                              <div className="flex items-center justify-between mb-1.5 border-b border-slate-200/80 pb-1">
+                                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 flex-1 min-w-0">
+                                  <span className="w-2 h-2 rounded-full bg-rose-500 inline-block shrink-0" />
+                                  {isPreviewMode ? (
+                                    <span className="text-slate-900 font-bold">
+                                      {q.passageTitle || (examDirection === "ltr" ? "• Read the following passage, then choose the correct answer:" : "• اقرأ القطعة التالية ثم أجب عن الأسئلة:")}
+                                    </span>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={q.passageTitle || (examDirection === "ltr" ? "• Read the following passage, then choose the correct answer:" : "• اقرأ القطعة التالية ثم أجب عن الأسئلة:")}
+                                      onChange={(e) => {
+                                        const updated = [...examQuestions];
+                                        updated[index].passageTitle = e.target.value;
+                                        setExamQuestions(updated);
+                                      }}
+                                      onBlur={() => pushHistorySnapshot(examQuestions)}
+                                      className="w-full bg-transparent font-bold text-xs text-slate-800 border-none outline-none focus:ring-0 p-0"
+                                      placeholder="عنوان أو توجيه القطعة..."
+                                    />
+                                  )}
+                                </div>
+
+                                {!isPreviewMode && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...examQuestions];
+                                      delete updated[index].passageText;
+                                      delete updated[index].passageTitle;
+                                      setExamQuestions(updated);
+                                      pushHistorySnapshot(updated);
+                                    }}
+                                    className="text-slate-400 hover:text-red-500 text-[10px] flex items-center gap-0.5 no-print shrink-0 cursor-pointer"
+                                    title="حذف القطعة"
+                                  >
+                                    <Trash2 className="w-2.5 h-2.5" />
+                                    <span>حذف القطعة</span>
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Passage Text Body with Underlined Words */}
+                              {isPreviewMode ? (
+                                <div
+                                  className="text-slate-800 text-xs sm:text-[13px] leading-relaxed whitespace-pre-line text-justify"
+                                  dangerouslySetInnerHTML={{
+                                    __html: sanitizePassageHtml(q.passageText),
+                                  }}
+                                />
+                              ) : (
+                                <div className="space-y-1">
+                                  <textarea
+                                    value={q.passageText}
+                                    onChange={(e) => {
+                                      const updated = [...examQuestions];
+                                      updated[index].passageText = e.target.value;
+                                      setExamQuestions(updated);
+                                    }}
+                                    onBlur={() => pushHistorySnapshot(examQuestions)}
+                                    rows={5}
+                                    placeholder="نص القطعة القرائية... يمكنك كتابة <u>الكلمة</u> لتسطير أي كلمة مهمة أو **كلمة** للخط العريض."
+                                    className="w-full text-xs text-slate-800 bg-white border border-slate-200 rounded p-1.5 focus:border-blue-400 focus:outline-none leading-relaxed resize-y font-normal"
+                                  />
+                                  <div className="text-[10px] text-slate-400 flex items-center justify-between no-print select-none">
+                                    <span>ملاحظة: الكلمات داخل &lt;u&gt;كلمة&lt;/u&gt; ستظهر تحتها خط واضح كما في ورقة الامتحان الأصلية.</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {/* Question Top Row: Label + Stem + Sleek Controls */}
                           <div className="flex items-start justify-between gap-2 w-full max-w-full min-w-0 overflow-hidden" dir={examDirection}>
                             <div className="flex items-start gap-1.5 flex-1 min-w-0 max-w-full overflow-hidden">
                               <span className="font-extrabold text-blue-950 text-xs sm:text-sm select-none shrink-0 pt-0.5">
-                                {examDirection === "ltr" ? `Q${index + 1}:` : `س${index + 1}:`}
+                                {examDirection === "ltr" ? `Q${qNum}:` : `س${qNum}:`}
                               </span>
                               {isPreviewMode ? (
                                 <p
@@ -3455,41 +5518,61 @@ export default function ExamBuilderPage() {
                                     wordBreak: "break-word",
                                     overflowWrap: "anywhere",
                                   }}
-                                >
-                                  {cleanStem(q.text)}
-                                </p>
-                              ) : (
-                                <textarea
-                                  value={q.text}
-                                  onChange={(e) => {
-                                    handleUpdateQuestionText(index, e.target.value);
-                                    e.target.style.height = "auto";
-                                    e.target.style.height = `${e.target.scrollHeight}px`;
-                                  }}
-                                  onInput={(e) => {
-                                    const target = e.currentTarget;
-                                    target.style.height = "auto";
-                                    target.style.height = `${target.scrollHeight}px`;
-                                  }}
-                                  ref={(el) => {
-                                    if (el) {
-                                      el.style.height = "auto";
-                                      el.style.height = `${el.scrollHeight}px`;
-                                    }
-                                  }}
-                                  onBlur={() => pushHistorySnapshot(examQuestions)}
-                                  onFocus={() => setFocusedQuestionIndex(index)}
-                                  rows={1}
-                                  placeholder="اكتب أو عدل نص السؤال هنا..."
-                                  className="w-full min-w-0 max-w-full resize-none bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 text-slate-800 leading-snug cursor-text font-bold break-words [overflow-wrap:anywhere]"
-                                  style={{
-                                    fontSize: `${globalFontSize}px`,
-                                    fontWeight: style.isBold ? 700 : 600,
-                                    textAlign: style.textAlign,
-                                    wordBreak: "break-word",
-                                    overflowWrap: "anywhere",
+                                  dangerouslySetInnerHTML={{
+                                    __html: sanitizeFormattedText(cleanStem(q.text)),
                                   }}
                                 />
+                              ) : (
+                                <div className="flex-1 min-w-0 max-w-full">
+                                  {focusedQuestionIndex !== index && /<\/?u>/i.test(q.text) ? (
+                                    <p
+                                      onClick={() => setFocusedQuestionIndex(index)}
+                                      className="w-full text-slate-800 leading-snug font-bold break-words [overflow-wrap:anywhere] cursor-text"
+                                      style={{
+                                        fontSize: `${globalFontSize}px`,
+                                        fontWeight: style.isBold ? 700 : 600,
+                                        textAlign: style.textAlign,
+                                        wordBreak: "break-word",
+                                        overflowWrap: "anywhere",
+                                      }}
+                                      dangerouslySetInnerHTML={{
+                                        __html: sanitizeFormattedText(cleanStem(q.text)),
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={q.text}
+                                      onChange={(e) => {
+                                        handleUpdateQuestionText(index, e.target.value);
+                                        e.target.style.height = "auto";
+                                        e.target.style.height = `${e.target.scrollHeight}px`;
+                                      }}
+                                      onInput={(e) => {
+                                        const target = e.currentTarget;
+                                        target.style.height = "auto";
+                                        target.style.height = `${target.scrollHeight}px`;
+                                      }}
+                                      ref={(el) => {
+                                        if (el) {
+                                          el.style.height = "auto";
+                                          el.style.height = `${el.scrollHeight}px`;
+                                        }
+                                      }}
+                                      onBlur={() => pushHistorySnapshot(examQuestions)}
+                                      onFocus={() => setFocusedQuestionIndex(index)}
+                                      rows={1}
+                                      placeholder="اكتب أو عدل نص السؤال هنا..."
+                                      className="w-full min-w-0 max-w-full resize-none bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 text-slate-800 leading-snug cursor-text font-bold break-words [overflow-wrap:anywhere]"
+                                      style={{
+                                        fontSize: `${globalFontSize}px`,
+                                        fontWeight: style.isBold ? 700 : 600,
+                                        textAlign: style.textAlign,
+                                        wordBreak: "break-word",
+                                        overflowWrap: "anywhere",
+                                      }}
+                                    />
+                                  )}
+                                </div>
                               )}
                             </div>
 
@@ -3511,6 +5594,108 @@ export default function ExamBuilderPage() {
                                   <option value="essay">سؤال مقالي</option>
                                 </select>
 
+                                {/* Multiple Choice: Toggle Vertical / Grid Layout */}
+                                {q.type === "choice" && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const updated = [...examQuestions];
+                                      const isCurrentlyVertical =
+                                        updated[index].optionsLayout === "vertical" ||
+                                        (updated[index].optionsLayout !== "grid" && (
+                                          updated[index].subType === "translation" ||
+                                          updated[index].options.some((opt) => opt.length > 38)
+                                        ));
+                                      updated[index].optionsLayout = isCurrentlyVertical ? "grid" : "vertical";
+                                      setExamQuestions(updated);
+                                      pushHistorySnapshot(updated);
+                                    }}
+                                    className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-1.5 py-0.5 rounded cursor-pointer"
+                                    title="تبديل محاذاة الخيارات (عمودي / شبكي)"
+                                  >
+                                    <span>
+                                      {(q.optionsLayout === "vertical" ||
+                                        (q.optionsLayout !== "grid" && (
+                                          q.subType === "translation" ||
+                                          q.options.some((opt) => opt.length > 38)
+                                        )))
+                                        ? "☰ عمودي"
+                                        : "☷ شبكي"}
+                                    </span>
+                                  </button>
+                                )}
+
+                                {/* Essay: Answer Dotted Lines Count (+ / -) */}
+                                {q.type === "essay" && (
+                                  <div className="inline-flex items-center gap-0.5 bg-slate-100 border border-slate-200 rounded px-1 py-0.5 text-[10px] font-semibold text-slate-700">
+                                    <button
+                                      type="button"
+                                      disabled={(q.answerLinesCount || 2) <= 1}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const updated = [...examQuestions];
+                                        const current = updated[index].answerLinesCount || 2;
+                                        updated[index].answerLinesCount = Math.max(1, current - 1);
+                                        setExamQuestions(updated);
+                                        pushHistorySnapshot(updated);
+                                      }}
+                                      className="p-0.5 hover:text-red-600 disabled:opacity-30 cursor-pointer"
+                                      title="تقليل أسطر الإجابة"
+                                    >
+                                      <Minus className="w-2.5 h-2.5" />
+                                    </button>
+                                    <span className="px-1 text-[10px]">{q.answerLinesCount || 2} سطر</span>
+                                    <button
+                                      type="button"
+                                      disabled={(q.answerLinesCount || 2) >= 20}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const updated = [...examQuestions];
+                                        const current = updated[index].answerLinesCount || 2;
+                                        updated[index].answerLinesCount = Math.min(20, current + 1);
+                                        setExamQuestions(updated);
+                                        pushHistorySnapshot(updated);
+                                      }}
+                                      className="p-0.5 hover:text-blue-600 cursor-pointer"
+                                      title="زيادة أسطر الإجابة"
+                                    >
+                                      <Plus className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Passage Section Toggle Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const updated = [...examQuestions];
+                                    if (updated[index].passageText !== undefined) {
+                                      delete updated[index].passageText;
+                                      delete updated[index].passageTitle;
+                                    } else {
+                                      updated[index].passageTitle =
+                                        examDirection === "ltr"
+                                          ? "• Read the following passage, then choose the correct answer from a, b, c or d:"
+                                          : "• اقرأ القطعة التالية ثم أجب عن الأسئلة:";
+                                      updated[index].passageText =
+                                        "The internet has become an important part of our daily lives. It allows people to connect, learn, and explore new ideas...";
+                                    }
+                                    setExamQuestions(updated);
+                                    pushHistorySnapshot(updated);
+                                  }}
+                                  className={`inline-flex items-center gap-0.5 text-[10px] font-semibold border px-1.5 py-0.5 rounded cursor-pointer ${
+                                    q.passageText !== undefined
+                                      ? "bg-amber-100 text-amber-900 border-amber-300"
+                                      : "bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"
+                                  }`}
+                                  title="إضافة أو إزالة قطعة قراءة (Passage)"
+                                >
+                                  <FileText className="w-2.5 h-2.5 text-amber-600" />
+                                  <span>{q.passageText !== undefined ? "القطعة ✓" : "+ قطعة"}</span>
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -3525,10 +5710,13 @@ export default function ExamBuilderPage() {
                                 </button>
 
                                 <div
+                                  draggable={!isPreviewMode}
+                                  onDragStart={(e) => handleDragStart(e, index)}
+                                  onDragEnd={handleDragEnd}
                                   className="p-1 text-slate-400 hover:text-blue-600 cursor-grab active:cursor-grabbing rounded"
                                   title="اسحب لتغيير ترتيب السؤال"
                                 >
-                                  <GripVertical className="w-3 h-3" />
+                                  <GripVertical className="w-3.5 h-3.5" />
                                 </div>
 
                                 <button
@@ -3537,10 +5725,10 @@ export default function ExamBuilderPage() {
                                     e.stopPropagation();
                                     handleRemoveQuestion(index);
                                   }}
-                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer z-30 pointer-events-auto"
                                   title="حذف هذا السؤال"
                                 >
-                                  <Trash2 className="w-3 h-3" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             )}
@@ -3623,85 +5811,106 @@ export default function ExamBuilderPage() {
                           {/* Divided Answers Section according to Type */}
 
                           {/* Type 1: Multiple Choice Options */}
-                          {q.type === "choice" && (
-                            <div className="mt-2 space-y-1 w-full max-w-full min-w-0">
-                              <div className="grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-2 w-full max-w-full min-w-0">
-                                {q.options.map((opt, optIdx) => {
-                                  const isCorrect = q.correctOptionIndex === optIdx;
-                                  const label = getOptionLabel(optIdx);
+                          {q.type === "choice" && (() => {
+                            const isVertical =
+                              q.optionsLayout === "vertical" ||
+                              (q.optionsLayout !== "grid" && (
+                                q.subType === "translation" ||
+                                q.options.some((opt) => opt.length > 38) ||
+                                (q.options.length > 0 && q.options.reduce((sum, o) => sum + o.length, 0) / q.options.length > 28)
+                              ));
 
-                                  return (
-                                    <div
-                                      key={optIdx}
-                                      className={`flex items-center gap-2 rounded px-2 py-1 min-w-0 max-w-full transition-colors ${
-                                        isPreviewMode
-                                          ? "bg-transparent border-none p-0"
-                                          : isCorrect
-                                          ? "bg-blue-50/70 border border-blue-300 ring-1 ring-blue-400"
-                                          : "bg-slate-50/60 hover:bg-slate-100/70 border border-slate-200/80"
-                                      }`}
-                                    >
-                                      {/* Correct Answer Indicator / Option Bubble */}
-                                      {isPreviewMode ? (
-                                        <span className="w-5 h-5 rounded-full border border-slate-700 text-slate-900 flex items-center justify-center text-xs font-bold shrink-0">
-                                          {label}
-                                        </span>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleToggleCorrectOption(index, optIdx)}
-                                          className={`w-5 h-5 rounded-full border flex items-center justify-center text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
-                                            isCorrect
-                                              ? "bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-300"
-                                              : "border-slate-300 text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white hover:bg-blue-50/50"
-                                          }`}
-                                          title="انقر لتحديد هذه الإجابة كإجابة صحيحة"
-                                        >
-                                          {label}
-                                        </button>
-                                      )}
-
-                                      {/* Option Text */}
-                                      {isPreviewMode ? (
-                                        <span className="flex-1 text-slate-900 font-semibold text-xs sm:text-sm min-w-0 break-words [overflow-wrap:anywhere]">{opt}</span>
-                                      ) : (
-                                        <input
-                                          type="text"
-                                          value={opt}
-                                          onChange={(e) => handleUpdateOptionText(index, optIdx, e.target.value)}
-                                          onBlur={() => pushHistorySnapshot(examQuestions)}
-                                          className="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 p-0 text-slate-800 font-medium text-xs sm:text-sm break-words [overflow-wrap:anywhere]"
-                                        />
-                                      )}
-
-                                      {!isPreviewMode && isFocused && q.options.length > 2 && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemoveOption(index, optIdx)}
-                                          className="text-slate-300 hover:text-red-500 p-0.5 rounded no-print cursor-pointer"
-                                          title="حذف هذا الخيار"
-                                        >
-                                          <X className="w-2.5 h-2.5" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-
-                              {/* Add Option Button (only shown on focused card and if < 4 options) */}
-                              {!isPreviewMode && isFocused && q.options.length < 4 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddOption(index)}
-                                  className="text-[10px] text-blue-600 hover:underline font-semibold inline-flex items-center gap-0.5 mt-0.5 no-print cursor-pointer"
+                            return (
+                              <div className="mt-2 space-y-1 w-full max-w-full min-w-0">
+                                <div
+                                  className={`w-full max-w-full min-w-0 ${
+                                    isVertical
+                                      ? "grid grid-cols-1 gap-y-2"
+                                      : "grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-2"
+                                  }`}
                                 >
-                                  <Plus className="w-2.5 h-2.5" />
-                                  <span>إضافة خيار</span>
-                                </button>
-                              )}
-                            </div>
-                          )}
+                                  {q.options.map((opt, optIdx) => {
+                                    const isCorrect = q.correctOptionIndex === optIdx;
+                                    const label = getOptionLabel(optIdx);
+
+                                    return (
+                                      <div
+                                        key={optIdx}
+                                        className={`flex items-start gap-2 rounded px-2 py-1 min-w-0 max-w-full transition-colors ${
+                                          isPreviewMode
+                                            ? "bg-transparent border-none p-0"
+                                            : isCorrect
+                                            ? "bg-blue-50/70 border border-blue-300 ring-1 ring-blue-400"
+                                            : "bg-slate-50/60 hover:bg-slate-100/70 border border-slate-200/80"
+                                        }`}
+                                      >
+                                        {/* Correct Answer Indicator / Option Bubble */}
+                                        {isPreviewMode ? (
+                                          <span className="w-5 h-5 rounded-full border border-slate-700 text-slate-900 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                                            {label}
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleCorrectOption(index, optIdx)}
+                                            className={`w-5 h-5 rounded-full border flex items-center justify-center text-[11px] font-bold shrink-0 transition-all cursor-pointer mt-0.5 ${
+                                              isCorrect
+                                                ? "bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-300"
+                                                : "border-slate-300 text-slate-600 hover:border-blue-500 hover:text-blue-600 bg-white hover:bg-blue-50/50"
+                                            }`}
+                                            title="انقر لتحديد هذه الإجابة كإجابة صحيحة"
+                                          >
+                                            {label}
+                                          </button>
+                                        )}
+
+                                        {/* Option Text */}
+                                        {isPreviewMode ? (
+                                          <span
+                                            className="flex-1 text-slate-900 font-semibold text-xs sm:text-sm min-w-0 break-words [overflow-wrap:anywhere] leading-snug"
+                                            dangerouslySetInnerHTML={{
+                                              __html: sanitizeFormattedText(opt),
+                                            }}
+                                          />
+                                        ) : (
+                                          <textarea
+                                            value={opt}
+                                            rows={isVertical && opt.length > 55 ? 2 : 1}
+                                            onChange={(e) => handleUpdateOptionText(index, optIdx, e.target.value)}
+                                            onBlur={() => pushHistorySnapshot(examQuestions)}
+                                            className="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 p-0 text-slate-800 font-medium text-xs sm:text-sm break-words [overflow-wrap:anywhere] resize-none leading-snug"
+                                          />
+                                        )}
+
+                                        {!isPreviewMode && isFocused && q.options.length > 2 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveOption(index, optIdx)}
+                                            className="text-slate-300 hover:text-red-500 p-0.5 rounded no-print cursor-pointer shrink-0 mt-0.5"
+                                            title="حذف هذا الخيار"
+                                          >
+                                            <X className="w-2.5 h-2.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Add Option Button (only shown on focused card and if < 4 options) */}
+                                {!isPreviewMode && isFocused && q.options.length < 4 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddOption(index)}
+                                    className="text-[10px] text-blue-600 hover:underline font-semibold inline-flex items-center gap-0.5 mt-0.5 no-print cursor-pointer"
+                                  >
+                                    <Plus className="w-2.5 h-2.5" />
+                                    <span>إضافة خيار</span>
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {/* Type 2: True / False */}
                           {q.type === "trueFalse" && (
@@ -3753,33 +5962,92 @@ export default function ExamBuilderPage() {
                             </div>
                           )}
 
-                          {/* Type 3: Essay Lines */}
-                          {q.type === "essay" && (
-                            <div className="mt-2 space-y-1.5 pointer-events-none select-none">
-                              <div className="border-b border-dashed border-slate-300 h-2.5"></div>
-                              <div className="border-b border-dashed border-slate-300 h-2.5"></div>
-                            </div>
-                          )}
+                          {/* Type 3: Essay & Writing Dotted Answer Lines */}
+                          {q.type === "essay" && (() => {
+                            const linesCount = Math.max(1, q.answerLinesCount || 2);
+                            return (
+                              <div className="mt-2.5 w-full select-none">
+                                {/* Visual authentic dotted lines for student answers */}
+                                <div className="space-y-3 w-full">
+                                  {Array.from({ length: linesCount }).map((_, lIdx) => (
+                                    <div
+                                      key={lIdx}
+                                      className="w-full border-b-2 border-dotted border-slate-400/90 print:border-slate-600 h-3.5"
+                                    />
+                                  ))}
+                                </div>
+
+                                {/* Editor Line-Count Controls */}
+                                {!isPreviewMode && isFocused && (
+                                  <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500 bg-slate-50/80 border border-slate-200/80 rounded px-2 py-1 no-print">
+                                    <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                      <span>أسطر الإجابة المنقطة:</span>
+                                      <span className="text-blue-600 font-bold">{linesCount}</span>
+                                    </span>
+
+                                    <div className="flex items-center gap-1 bg-white border border-slate-200 rounded px-1 py-0.5">
+                                      <button
+                                        type="button"
+                                        disabled={linesCount <= 1}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const updated = [...examQuestions];
+                                          updated[index].answerLinesCount = Math.max(1, linesCount - 1);
+                                          setExamQuestions(updated);
+                                          pushHistorySnapshot(updated);
+                                        }}
+                                        className="p-1 hover:bg-slate-100 hover:text-red-600 disabled:opacity-25 rounded text-slate-700 cursor-pointer"
+                                        title="تقليل سطر إجابة"
+                                      >
+                                        <Minus className="w-3 h-3" />
+                                      </button>
+
+                                      <span className="text-xs font-bold text-slate-800 px-1.5">{linesCount}</span>
+
+                                      <button
+                                        type="button"
+                                        disabled={linesCount >= 20}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const updated = [...examQuestions];
+                                          updated[index].answerLinesCount = Math.min(20, linesCount + 1);
+                                          setExamQuestions(updated);
+                                          pushHistorySnapshot(updated);
+                                        }}
+                                        className="p-1 hover:bg-slate-100 hover:text-blue-600 disabled:opacity-25 rounded text-slate-700 cursor-pointer"
+                                        title="زيادة سطر إجابة"
+                                      >
+                                        <Plus className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* Physical A4 Footer: Page Number Centered */}
-                <div className="border-t border-slate-200 pt-2.5 mt-auto shrink-0 flex items-center justify-between text-xs font-bold text-slate-500 select-none page-footer">
-                  {/* Clean Page Stamping Options when drawing */}
-                  {!isPreviewMode && strokes.some((s) => s.pageNumber === page.pageNumber) && (
-                    <button
-                      type="button"
-                      onClick={() => handleClearPageStrokes(page.pageNumber)}
-                      className="text-[10px] text-rose-600 hover:underline no-print"
-                    >
-                      مسح رسومات الصفحة
-                    </button>
-                  )}
-                  <span className="mx-auto">- {page.pageNumber} -</span>
+                {/* Page Number: absolute top-left corner (takes no vertical space) */}
+                <div
+                  className="absolute top-[2.5mm] left-[4mm] z-30 text-[10px] font-bold text-slate-500 select-none page-number-corner"
+                  dir="ltr"
+                >
+                  {page.pageNumber}
                 </div>
+                {!isPreviewMode && strokes.some((s) => s.pageNumber === page.pageNumber) && (
+                  <button
+                    type="button"
+                    onClick={() => handleClearPageStrokes(page.pageNumber)}
+                    className="absolute bottom-2 left-4 z-30 text-[10px] text-rose-600 hover:underline no-print"
+                  >
+                    مسح رسومات الصفحة
+                  </button>
+                )}
               </div>
             );
           })}

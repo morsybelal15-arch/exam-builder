@@ -32,6 +32,8 @@ import {
   Printer,
   ChevronDown,
   Scan,
+  ShieldCheck,
+  UserPlus,
 } from "lucide-react";
 import {
   Group,
@@ -45,6 +47,8 @@ import StudentProfileModal from "@/components/students/StudentProfileModal";
 import CameraQrScannerModal from "@/components/students/CameraQrScannerModal";
 import CameraAiGradeModal from "@/components/students/CameraAiGradeModal";
 import ContinuousPaymentQrScannerModal from "@/components/students/ContinuousPaymentQrScannerModal";
+import ExternalAttendanceModal from "@/components/students/ExternalAttendanceModal";
+import WhatsAppBulkDispatcherModal from "@/components/students/WhatsAppBulkDispatcherModal";
 
 const months2026_2027 = [
   { value: "2026-01", label: "يناير ٢٠٢٦" },
@@ -100,17 +104,24 @@ function StudentsPageContent() {
   // Financials State
   const [financialMonth, setFinancialMonth] = useState<string>(initialMonth);
   const [financialRecords, setFinancialRecords] = useState<any[]>([]);
+  const [financialFilterSearch, setFinancialFilterSearch] = useState<string>("");
   const [partialAmountInput, setPartialAmountInput] = useState<string>("");
   const [showPartialModal, setShowPartialModal] = useState<boolean>(false);
   const [partialStudentId, setPartialStudentId] = useState<string | null>(null);
   const [isContinuousPaymentOpen, setIsContinuousPaymentOpen] = useState<boolean>(false);
 
   // Attendance State
+  const [attendanceMonth, setAttendanceMonth] = useState<string>(initialMonth);
   const [attendanceDate, setAttendanceDate] = useState<string>(initialDate);
   const [classSessions, setClassSessions] = useState<GroupClassSession[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [isCameraAttendanceOpen, setIsCameraAttendanceOpen] = useState(false);
+  const [isExternalAttendanceModalOpen, setIsExternalAttendanceModalOpen] = useState(false);
   const [attendanceFilterSearch, setAttendanceFilterSearch] = useState("");
+
+  // WhatsApp Bulk Dispatcher State
+  const [isBulkWhatsAppModalOpen, setIsBulkWhatsAppModalOpen] = useState(false);
+  const [bulkWhatsAppAction, setBulkWhatsAppAction] = useState<"qr" | "report" | "parent_check">("qr");
 
   // Exam Grades State
   const [examRecords, setExamRecords] = useState<ExamRecord[]>([]);
@@ -343,33 +354,20 @@ function StudentsPageContent() {
 
   const handleBulkSendQrWhatsApp = () => {
     if (selectedStudentIds.length === 0) return;
-    const targetStudents = students.filter((s) => selectedStudentIds.includes(s.id));
-    const firstWithPhone = targetStudents.find((s) => s.parentPhone);
-    if (!firstWithPhone) {
-      alert("لا يوجد أرقام هواتف مسجلة للطلاب المحددين");
-      return;
-    }
-    const cleanPhone = firstWithPhone.parentPhone.startsWith("0") ? "2" + firstWithPhone.parentPhone : firstWithPhone.parentPhone;
-    const msg = `مرحباً ولي أمر الطالب: *${firstWithPhone.name}*
-كود QR الخاص بحضور الطالب في مجموعة ${selectedGroup?.name}:
-*${firstWithPhone.code}*`;
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+    setBulkWhatsAppAction("qr");
+    setIsBulkWhatsAppModalOpen(true);
   };
 
   const handleBulkSendReportWhatsApp = () => {
     if (selectedStudentIds.length === 0) return;
-    const targetStudents = students.filter((s) => selectedStudentIds.includes(s.id));
-    const firstWithPhone = targetStudents.find((s) => s.parentPhone);
-    if (!firstWithPhone) {
-      alert("لا يوجد أرقام هواتف مسجلة للطلاب المحددين");
-      return;
-    }
-    const cleanPhone = firstWithPhone.parentPhone.startsWith("0") ? "2" + firstWithPhone.parentPhone : firstWithPhone.parentPhone;
-    const msg = `تقرير متابعة الطالب: *${firstWithPhone.name}*
-الصف: ${firstWithPhone.academicYear}
-المجموعة: ${selectedGroup?.name}
-كود الطالب: ${firstWithPhone.code}`;
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+    setBulkWhatsAppAction("report");
+    setIsBulkWhatsAppModalOpen(true);
+  };
+
+  const handleBulkCheckParentWhatsApp = () => {
+    if (selectedStudentIds.length === 0) return;
+    setBulkWhatsAppAction("parent_check");
+    setIsBulkWhatsAppModalOpen(true);
   };
 
   // ==========================================
@@ -432,6 +430,31 @@ function StudentsPageContent() {
       const dataFin = await resFin.json();
       if (dataFin.success) setFinancialRecords(dataFin.financials || []);
       setSelectedStudentIds([]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteFinancialRecord = async (studentId: string) => {
+    if (!selectedGroupId || !studentId) return;
+    if (!confirm("هل أنت متأكد من حذف هذا السجل المالي لهذا الشهر؟")) return;
+    try {
+      const res = await fetch("/api/financials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          groupId: selectedGroupId,
+          studentId,
+          month: financialMonth,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const resFin = await fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`);
+        const dataFin = await resFin.json();
+        if (dataFin.success) setFinancialRecords(dataFin.financials || []);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -708,22 +731,27 @@ function StudentsPageContent() {
   // Calendar Days generator for the month (e.g. October 2026: 31 days)
   const calendarDays = useMemo(() => {
     const days = [];
-    const [yearStr, monthStr] = financialMonth.split("-");
+    const [yearStr, monthStr] = (attendanceMonth || "2026-10").split("-");
     const year = parseInt(yearStr || "2026", 10);
     const month = parseInt(monthStr || "10", 10);
     const totalDays = new Date(year, month, 0).getDate();
 
+    const arabicDayNames = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+
     for (let d = 1; d <= totalDays; d++) {
+      const dateObj = new Date(year, month - 1, d);
       const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const dayName = arabicDayNames[dateObj.getDay()];
       const hasClass = classSessions.some((s) => s.date === dateStr);
       days.push({
         dayNumber: d,
         date: dateStr,
+        dayName,
         hasClass,
       });
     }
     return days;
-  }, [financialMonth, classSessions]);
+  }, [attendanceMonth, classSessions]);
 
   // =========================================================================
   // VIEW 1: GROUPS LIST VIEW (Initial View Requested by User)
@@ -1013,6 +1041,15 @@ function StudentsPageContent() {
                   </button>
 
                   <button
+                    onClick={handleBulkCheckParentWhatsApp}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-xl font-semibold transition-colors cursor-pointer text-sky-300"
+                    title="التحقق من صحة أرقام أولياء الأمور عبر رسالة واتساب"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                    <span>فحص رقم ولي الأمر</span>
+                  </button>
+
+                  <button
                     onClick={() => handleOpenTransferModal(false)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-xl font-semibold transition-colors cursor-pointer"
                   >
@@ -1218,20 +1255,50 @@ function StudentsPageContent() {
                   <span>مسح الباركود والسداد السريع</span>
                 </button>
 
-                {/* Month Selector Filter (2026-2027 Compact) */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-500">الشهر المالي:</span>
-                  <select
-                    value={financialMonth}
-                    onChange={(e) => setFinancialMonth(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer max-w-[170px]"
-                  >
-                    {months2026_2027.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
+                {/* Search Bar for Financials */}
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={financialFilterSearch}
+                    onChange={(e) => setFinancialFilterSearch(e.target.value)}
+                    placeholder="البحث باسم الطالب أو الكود..."
+                    className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Month Selector Filter with Arrows (2026-2027) */}
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-1.5 shadow-2xs">
+                  <span className="text-xs font-bold text-slate-500">الشهر المالي:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const idx = months2026_2027.findIndex((m) => m.value === financialMonth);
+                        if (idx > 0) setFinancialMonth(months2026_2027[idx - 1].value);
+                      }}
+                      disabled={months2026_2027.findIndex((m) => m.value === financialMonth) === 0}
+                      className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                      title="الشهر السابق"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-black text-slate-800 min-w-[95px] text-center">
+                      {months2026_2027.find((m) => m.value === financialMonth)?.label || financialMonth}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const idx = months2026_2027.findIndex((m) => m.value === financialMonth);
+                        if (idx < months2026_2027.length - 1) setFinancialMonth(months2026_2027[idx + 1].value);
+                      }}
+                      disabled={months2026_2027.findIndex((m) => m.value === financialMonth) === months2026_2027.length - 1}
+                      className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                      title="الشهر القادم"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1293,147 +1360,140 @@ function StudentsPageContent() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {financialRecords.map((fin) => {
-                      const isPaid = fin.status === "paid" && fin.paidAmount >= fin.totalAmount;
-                      const isPartial = fin.status === "paid" && fin.paidAmount > 0 && fin.paidAmount < fin.totalAmount;
-                      const isReturned = fin.status === "returned";
-                      const isUnpaid = fin.status === "unpaid" || (!isPaid && !isPartial && !isReturned);
-                      const isSelected = selectedStudentIds.includes(fin.studentId);
-                      const remaining = Math.max(0, fin.totalAmount - fin.paidAmount);
+                    {financialRecords
+                      .filter((fin) => {
+                        if (!financialFilterSearch.trim()) return true;
+                        const q = financialFilterSearch.toLowerCase();
+                        return (
+                          (fin.studentName || "").toLowerCase().includes(q) ||
+                          (fin.studentCode || "").toLowerCase().includes(q)
+                        );
+                      })
+                      .map((fin) => {
+                        const isPaid = fin.status === "paid" && fin.paidAmount >= fin.totalAmount;
+                        const isPartial = fin.status === "paid" && fin.paidAmount > 0 && fin.paidAmount < fin.totalAmount;
+                        const isReturned = fin.status === "returned";
+                        const isUnpaid = fin.status === "unpaid" || (!isPaid && !isPartial && !isReturned);
+                        const isSelected = selectedStudentIds.includes(fin.studentId);
+                        const remaining = Math.max(0, fin.totalAmount - fin.paidAmount);
 
-                      const rowColorClass = isPaid
-                        ? "bg-emerald-50/70 hover:bg-emerald-50 text-emerald-950"
-                        : isPartial
-                        ? "bg-[#faf0e6] hover:bg-[#f5e6d3] text-amber-950"
-                        : isReturned
-                        ? "bg-slate-100/80 hover:bg-slate-100 text-slate-700"
-                        : "bg-red-50/70 hover:bg-red-50 text-red-950";
+                        const rowColorClass = isPaid
+                          ? "bg-emerald-50/70 hover:bg-emerald-50 text-emerald-950"
+                          : isPartial
+                          ? "bg-[#faf0e6] hover:bg-[#f5e6d3] text-amber-950"
+                          : isReturned
+                          ? "bg-slate-100/80 hover:bg-slate-100 text-slate-700"
+                          : "bg-red-50/70 hover:bg-red-50 text-red-950";
 
-                      return (
-                        <tr
-                          key={fin.id || fin.studentId}
-                          className={`transition-colors cursor-pointer border-b border-slate-100/60 ${rowColorClass} ${
-                            isSelected ? "ring-2 ring-blue-500/50" : ""
-                          }`}
-                          onClick={() => router.push(`/students/${fin.studentId}`)}
-                        >
-                          <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => handleToggleSelectStudent(fin.studentId)}
-                              className="rounded border-slate-300 cursor-pointer"
-                            />
-                          </td>
+                        return (
+                          <tr
+                            key={fin.id || fin.studentId}
+                            className={`transition-colors cursor-pointer border-b border-slate-100/60 ${rowColorClass} ${
+                              isSelected ? "ring-2 ring-blue-500/50" : ""
+                            }`}
+                            onClick={() => router.push(`/students/${fin.studentId}`)}
+                          >
+                            <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectStudent(fin.studentId)}
+                                className="rounded border-slate-300 cursor-pointer"
+                              />
+                            </td>
 
-                          <td className="p-4 font-bold">
-                            <div className="flex items-center gap-2">
-                              <span>{fin.studentName}</span>
-                              {isPartial && (
-                                <span className="text-[10px] font-black bg-amber-200/90 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300/80">
-                                  سداد جزئي: {fin.paidAmount} ج.م
-                                </span>
-                              )}
-                            </div>
-                          </td>
+                            <td className="p-4 font-bold">
+                              <div className="flex items-center gap-2">
+                                <span>{fin.studentName}</span>
+                                {isPartial && (
+                                  <span className="text-[10px] font-black bg-amber-200/90 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300/80">
+                                    سداد جزئي: {fin.paidAmount} ج.م
+                                  </span>
+                                )}
+                              </div>
+                            </td>
 
-                          {/* Two check status buttons beside name (paid & unpaid for the selected month) */}
-                          <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center gap-1.5">
+                            {/* Two check status buttons beside name (paid & unpaid for the selected month) */}
+                            <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateFinancialStatus(fin.studentId, "paid")}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                                    isPaid
+                                      ? "bg-emerald-600 text-white shadow-xs"
+                                      : "bg-white/80 hover:bg-white text-emerald-700 border border-emerald-200"
+                                  }`}
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>مدفوع</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateFinancialStatus(fin.studentId, "unpaid")}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                                    isUnpaid
+                                      ? "bg-red-600 text-white shadow-xs"
+                                      : "bg-white/80 hover:bg-white text-red-700 border border-red-200"
+                                  }`}
+                                >
+                                  <X className="w-3 h-3" />
+                                  <span>غير مدفوع</span>
+                                </button>
+                              </div>
+                            </td>
+
+                            <td className="p-4 font-mono font-bold">
+                              {fin.totalAmount} ج.م
+                            </td>
+
+                            <td className="p-4 font-mono font-bold">
+                              {fin.paidAmount} ج.م
+                            </td>
+
+                            <td className="p-4 font-mono font-bold text-slate-700">
+                              {remaining > 0 ? `${remaining} ج.م` : "٠ ج.م"}
+                            </td>
+
+                            {/* Action Menu (paid, unpaid, returned, partial) */}
+                            <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-1 text-[11px]">
+                                <button
+                                  onClick={() => {
+                                    setPartialStudentId(fin.studentId);
+                                    setPartialAmountInput(String(fin.paidAmount || "150"));
+                                    setShowPartialModal(true);
+                                  }}
+                                  className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg font-bold transition-colors cursor-pointer"
+                                  title="تسجيل مبلغ جزئي"
+                                >
+                                  دفع جزئي
+                                </button>
+
+                                <button
+                                  onClick={() => handleUpdateFinancialStatus(fin.studentId, "returned")}
+                                  className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-semibold transition-colors cursor-pointer"
+                                >
+                                  مسترجع
+                                </button>
+                              </div>
+                            </td>
+
+                            {/* Delete Action */}
+                            <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
-                                onClick={() => handleUpdateFinancialStatus(fin.studentId, "paid")}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                                  isPaid
-                                    ? "bg-emerald-600 text-white shadow-xs"
-                                    : "bg-white/80 hover:bg-white text-emerald-700 border border-emerald-200"
-                                }`}
+                                onClick={() => handleDeleteFinancialRecord(fin.studentId)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                title="حذف السجل المالي لهذا الشهر"
                               >
-                                <Check className="w-3 h-3" />
-                                <span>مدفوع</span>
+                                <Trash2 className="w-4 h-4" />
                               </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateFinancialStatus(fin.studentId, "unpaid")}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                                  isUnpaid
-                                    ? "bg-red-600 text-white shadow-xs"
-                                    : "bg-white/80 hover:bg-white text-red-700 border border-red-200"
-                                }`}
-                              >
-                                <X className="w-3 h-3" />
-                                <span>غير مدفوع</span>
-                              </button>
-                            </div>
-                          </td>
-
-                          <td className="p-4 font-mono font-bold">
-                            {fin.totalAmount} ج.م
-                          </td>
-
-                          <td className="p-4 font-mono font-bold">
-                            {fin.paidAmount} ج.م
-                          </td>
-
-                          <td className="p-4 font-mono font-bold text-slate-700">
-                            {remaining > 0 ? `${remaining} ج.م` : "٠ ج.م"}
-                          </td>
-
-                          {/* Action Menu (paid, unpaid, returned, partial) */}
-                          <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-center gap-1 text-[11px]">
-                              <button
-                                onClick={() => {
-                                  setPartialStudentId(fin.studentId);
-                                  setPartialAmountInput(String(fin.paidAmount || "150"));
-                                  setShowPartialModal(true);
-                                }}
-                                className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg font-bold transition-colors cursor-pointer"
-                                title="تسجيل مبلغ جزئي"
-                              >
-                                دفع جزئي
-                              </button>
-
-                              <button
-                                onClick={() => handleUpdateFinancialStatus(fin.studentId, "returned")}
-                                className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-semibold transition-colors cursor-pointer"
-                              >
-                                مسترجع
-                              </button>
-                            </div>
-                          </td>
-
-                          {/* Delete row */}
-                          <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                if (confirm(`هل أنت متأكد من حذف السجل المالي للطالب ${fin.studentName} لشهر ${financialMonth}؟`)) {
-                                  await fetch("/api/financials", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      action: "delete",
-                                      groupId: selectedGroupId,
-                                      studentId: fin.studentId,
-                                      month: financialMonth,
-                                    }),
-                                  });
-                                  fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`)
-                                    .then((r) => r.json())
-                                    .then((d) => d.success && setFinancialRecords(d.financials || []));
-                                }
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                              title="حذف السجل المالي"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
@@ -1456,7 +1516,7 @@ function StudentsPageContent() {
                   <CalendarIcon className="w-5 h-5 text-indigo-600" />
                   <div>
                     <h3 className="text-sm sm:text-base font-bold text-slate-800">
-                      تقويم الحصص والحضور الشهري ({financialMonth})
+                      تقويم الحصص والحضور الشهري
                     </h3>
                     <p className="text-xs text-slate-400">
                       الأيام الملونة بالأخضر توضح أيام الحصص الدراسية المنشأة. انقر على أي يوم لعرض وتعديل قائمة الطلاب.
@@ -1464,14 +1524,58 @@ function StudentsPageContent() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 text-xs font-semibold">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
-                    <span>يوم حصة منشأة</span>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Month Selector for Attendance with Arrows */}
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-1.5 shadow-2xs">
+                    <span className="text-xs font-bold text-slate-500">الشهر:</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const idx = months2026_2027.findIndex((m) => m.value === attendanceMonth);
+                          if (idx > 0) {
+                            const newM = months2026_2027[idx - 1].value;
+                            setAttendanceMonth(newM);
+                            setAttendanceDate(`${newM}-01`);
+                          }
+                        }}
+                        disabled={months2026_2027.findIndex((m) => m.value === attendanceMonth) === 0}
+                        className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                        title="الشهر السابق"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                      <span className="text-xs font-black text-slate-800 min-w-[95px] text-center">
+                        {months2026_2027.find((m) => m.value === attendanceMonth)?.label || attendanceMonth}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const idx = months2026_2027.findIndex((m) => m.value === attendanceMonth);
+                          if (idx < months2026_2027.length - 1) {
+                            const newM = months2026_2027[idx + 1].value;
+                            setAttendanceMonth(newM);
+                            setAttendanceDate(`${newM}-01`);
+                          }
+                        }}
+                        disabled={months2026_2027.findIndex((m) => m.value === attendanceMonth) === months2026_2027.length - 1}
+                        className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                        title="الشهر القادم"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 text-slate-400">
-                    <span className="w-3 h-3 rounded-full bg-slate-200 inline-block" />
-                    <span>أيام أخرى</span>
+
+                  <div className="flex items-center gap-3 text-xs font-semibold">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
+                      <span>يوم حصة</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <span className="w-3 h-3 rounded-full bg-slate-200 inline-block" />
+                      <span>أيام أخرى</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1485,7 +1589,7 @@ function StudentsPageContent() {
                       key={d.date}
                       type="button"
                       onClick={() => setAttendanceDate(d.date)}
-                      className={`p-2.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer relative ${
+                      className={`p-2 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer relative ${
                         isSelectedDay
                           ? "ring-2 ring-indigo-600 shadow-sm"
                           : ""
@@ -1494,9 +1598,12 @@ function StudentsPageContent() {
                           ? "bg-emerald-500 hover:bg-emerald-600 text-white font-black"
                           : "bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
                       }`}
-                      title={d.hasClass ? `يوم حصة: ${d.date}` : d.date}
+                      title={d.hasClass ? `يوم حصة (${d.dayName}): ${d.date}` : `${d.dayName}: ${d.date}`}
                     >
-                      <span className="text-xs sm:text-sm font-mono">{d.dayNumber}</span>
+                      <span className={`text-[10px] leading-tight font-medium ${d.hasClass ? "text-emerald-100" : "text-slate-500"}`}>
+                        {d.dayName}
+                      </span>
+                      <span className="text-xs sm:text-sm font-mono font-bold">{d.dayNumber}</span>
                       {d.hasClass && (
                         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                       )}
@@ -1515,6 +1622,16 @@ function StudentsPageContent() {
                 >
                   <Camera className="w-4 h-4" />
                   <span>تسجيل الحضور بالكاميرا و QR</span>
+                </button>
+
+                {/* External Student Attendance Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsExternalAttendanceModalOpen(true)}
+                  className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-2xl text-xs font-bold shadow-md shadow-purple-600/20 active:scale-95 transition-all cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>تسجيل حضور لطالب خارج المجموعة</span>
                 </button>
 
                 {/* Create / Confirm Session Button */}
@@ -1576,87 +1693,144 @@ function StudentsPageContent() {
               </div>
             </div>
 
-            {/* Bulk Attendance Bar */}
-            {selectedStudentIds.length > 0 && (
-              <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-xl flex items-center justify-between text-xs">
-                <span>تعديل حالة الحضور لـ <strong>{selectedStudentIds.length}</strong> طالب محدد:</span>
-                <div className="flex items-center gap-2">
+            {/* Waiting State: If session does not exist / records empty */}
+            {attendanceRecords.length === 0 ? (
+              <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-8 sm:p-12 text-center space-y-4">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                  <CalendarIcon className="w-7 h-7" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1.5">
+                  <h4 className="text-base font-bold text-slate-800">
+                    لم يتم تثبيت جلسة حضور لتاريخ ({attendanceDate})
+                  </h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    الجدول فارغ بانتظار اتخاذ الإجراء. اضغط على زر &quot;تثبيت حصة اليوم&quot; لإنشاء الجلسة وتعبئة قائمة طلاب المجموعة فوراً لتسجيل الحضور.
+                  </p>
+                </div>
+                <div className="pt-2 flex items-center justify-center gap-3 flex-wrap">
                   <button
-                    onClick={() => handleBulkAttendanceUpdate("attended")}
-                    className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 font-bold transition-all cursor-pointer"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await fetch("/api/attendance", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            action: "createSession",
+                            groupId: selectedGroupId,
+                            date: attendanceDate,
+                            title: "حصة دراسية",
+                          }),
+                        });
+                        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                          .then((r) => r.json())
+                          .then((d) => {
+                            if (d.success) {
+                              setAttendanceRecords(d.attendance || []);
+                              setClassSessions(d.sessions || []);
+                            }
+                          });
+                      } catch (err) {
+                        console.error(err);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
                   >
-                    تحديد كحاضر
-                  </button>
-                  <button
-                    onClick={() => handleBulkAttendanceUpdate("absent")}
-                    className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 font-bold transition-all cursor-pointer"
-                  >
-                    تحديد كغائب
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>تثبيت حصة اليوم ({attendanceDate})</span>
                   </button>
                 </div>
               </div>
-            )}
+            ) : (
+              <>
+                {/* Bulk Attendance Bar */}
+                {selectedStudentIds.length > 0 && (
+                  <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-xl flex items-center justify-between text-xs">
+                    <span>تعديل حالة الحضور لـ <strong>{selectedStudentIds.length}</strong> طالب محدد:</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleBulkAttendanceUpdate("attended")}
+                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 font-bold transition-all cursor-pointer"
+                      >
+                        تحديد كحاضر
+                      </button>
+                      <button
+                        onClick={() => handleBulkAttendanceUpdate("absent")}
+                        className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 font-bold transition-all cursor-pointer"
+                      >
+                        تحديد كغائب
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-            {/* Day Students Attendance Table */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
-                    <tr>
-                      <th className="p-4 w-10">
-                        <input
-                          type="checkbox"
-                          checked={selectedStudentIds.length === attendanceRecords.length && attendanceRecords.length > 0}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedStudentIds(attendanceRecords.map((a) => a.studentId));
-                            } else {
-                              setSelectedStudentIds([]);
-                            }
-                          }}
-                          className="rounded border-slate-300 cursor-pointer"
-                        />
-                      </th>
-                      <th className="p-4">اسم الطالب</th>
-                      <th className="p-4">كود الطالب</th>
-                      <th className="p-4">الحالة المسجلة</th>
-                      <th className="p-4">وقت التسجيل</th>
-                      <th className="p-4">طريقة التسجيل</th>
-                      <th className="p-4 text-center">تغيير الحالة (حاضر / غائب)</th>
-                      <th className="p-4 text-center">حذف</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {attendanceRecords
-                      .filter(
-                        (a) =>
-                          a.studentName.toLowerCase().includes(attendanceFilterSearch.toLowerCase()) ||
-                          a.code.toLowerCase().includes(attendanceFilterSearch.toLowerCase())
-                      )
-                      .map((att) => {
-                        const isAttended = att.status === "attended";
-                        const isSelected = selectedStudentIds.includes(att.studentId);
+                {/* Day Students Attendance Table */}
+                <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-xs">
+                      <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                        <tr>
+                          <th className="p-4 w-10">
+                            <input
+                              type="checkbox"
+                              checked={selectedStudentIds.length === attendanceRecords.length && attendanceRecords.length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedStudentIds(attendanceRecords.map((a) => a.studentId));
+                                } else {
+                                  setSelectedStudentIds([]);
+                                }
+                              }}
+                              className="rounded border-slate-300 cursor-pointer"
+                            />
+                          </th>
+                          <th className="p-4">اسم الطالب</th>
+                          <th className="p-4">كود الطالب</th>
+                          <th className="p-4">الحالة المسجلة</th>
+                          <th className="p-4">وقت التسجيل</th>
+                          <th className="p-4">طريقة التسجيل</th>
+                          <th className="p-4 text-center">تغيير الحالة (حاضر / غائب)</th>
+                          <th className="p-4 text-center">حذف</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {attendanceRecords
+                          .filter(
+                            (a) =>
+                              a.studentName.toLowerCase().includes(attendanceFilterSearch.toLowerCase()) ||
+                              a.code.toLowerCase().includes(attendanceFilterSearch.toLowerCase())
+                          )
+                          .map((att) => {
+                            const isAttended = att.status === "attended";
+                            const isSelected = selectedStudentIds.includes(att.studentId);
 
-                        return (
-                          <tr
-                            key={att.studentId}
-                            className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
-                              isAttended ? "bg-emerald-50/30" : "bg-red-50/20"
-                            } ${isSelected ? "ring-2 ring-indigo-500/50" : ""}`}
-                            onClick={() => router.push(`/students/${att.studentId}`)}
-                          >
-                            <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => handleToggleSelectStudent(att.studentId)}
-                                className="rounded border-slate-300 cursor-pointer"
-                              />
-                            </td>
+                            return (
+                              <tr
+                                key={att.studentId}
+                                className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
+                                  isAttended ? "bg-emerald-50/30" : "bg-red-50/20"
+                                } ${isSelected ? "ring-2 ring-indigo-500/50" : ""}`}
+                                onClick={() => router.push(`/students/${att.studentId}`)}
+                              >
+                                <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleToggleSelectStudent(att.studentId)}
+                                    className="rounded border-slate-300 cursor-pointer"
+                                  />
+                                </td>
 
-                            <td className="p-4 font-bold text-slate-900">
-                              {att.studentName}
-                            </td>
+                                <td className="p-4 font-bold text-slate-900">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span>{att.studentName}</span>
+                                    {att.isExternal && (
+                                      <span className="text-[10px] font-black bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full border border-purple-200">
+                                        من مجموعة أخرى {att.originGroupName ? `(${att.originGroupName})` : ""}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
 
                             <td className="p-4 font-mono font-bold text-slate-600">
                               {att.code}
@@ -1759,8 +1933,10 @@ function StudentsPageContent() {
                 </table>
               </div>
             </div>
-          </div>
+          </>
         )}
+      </div>
+    )}
 
         {/* =========================================================================
             TOGGLE 4: EXAM GRADES VIEW
@@ -2178,7 +2354,7 @@ function StudentsPageContent() {
           </div>
         )}
 
-        {/* 5. Enhanced Large Transfer Modal */}
+        {/* 5. Enhanced Simplified Transfer Modal: Search by Student Name & Multi-Select */}
         {isTransferModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-xs">
             <div className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-7 shadow-2xl space-y-5 border border-slate-100 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
@@ -2193,7 +2369,7 @@ function StudentsPageContent() {
                       نقل الطلاب بين المجموعات الدراسية
                     </h3>
                     <p className="text-xs text-slate-400">
-                      اختر الطلاب المراد نقلهم إما بالبحث الفردي أو بتحديد مجموعة كاملة
+                      ابحث عن الطلاب بالاسم وحدد من تريد نقلهم ثم اختر المجموعة الهدف
                     </p>
                   </div>
                 </div>
@@ -2207,125 +2383,108 @@ function StudentsPageContent() {
 
               {/* Modal Body */}
               <div className="space-y-4 overflow-y-auto flex-1 pr-1 text-xs">
-                {/* 1. Search by Student Name / Code */}
-                <div className="space-y-1.5 relative">
+                {/* Search Bar */}
+                <div className="space-y-1.5">
                   <label className="font-bold text-slate-700 block">
-                    ١. ابحث عن طالب بالاسم أو الكود لإضافته للنقل:
+                    البحث عن طالب بالاسم أو الكود لتحديده:
                   </label>
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                    <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       value={transferSearchQuery}
-                      onChange={(e) => {
-                        setTransferSearchQuery(e.target.value);
-                        setTransferDropdownOpen(true);
-                      }}
-                      onFocus={() => setTransferDropdownOpen(true)}
-                      placeholder="اكتب اسم أو كود الطالب..."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onChange={(e) => setTransferSearchQuery(e.target.value)}
+                      placeholder="اكتب اسم الطالب للبحث..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-10 pl-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                      autoFocus
                     />
                   </div>
-
-                  {/* Dropdown with Student Name, Academic Year, and Group */}
-                  {transferDropdownOpen && transferSearchQuery.trim() && (
-                    <div className="absolute z-50 top-full mt-1 w-full bg-white border border-slate-200 rounded-2xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
-                      {(allAvailableStudents.length > 0 ? allAvailableStudents : students)
-                        .filter(
-                          (s) =>
-                            s.name.toLowerCase().includes(transferSearchQuery.toLowerCase()) ||
-                            s.code.toLowerCase().includes(transferSearchQuery.toLowerCase())
-                        )
-                        .map((s) => {
-                          const isAlreadyInPool = transferPoolStudents.some((p) => p.id === s.id);
-                          return (
-                            <div
-                              key={s.id}
-                              onClick={() => {
-                                if (!isAlreadyInPool) {
-                                  setTransferPoolStudents((prev) => [...prev, s]);
-                                }
-                                setTransferSearchQuery("");
-                                setTransferDropdownOpen(false);
-                              }}
-                              className={`p-3 text-xs flex items-center justify-between cursor-pointer hover:bg-blue-50 transition-colors ${
-                                isAlreadyInPool ? "opacity-50 bg-slate-50 cursor-not-allowed" : ""
-                              }`}
-                            >
-                              <div className="flex flex-col">
-                                <span className="font-bold text-slate-900">{s.name}</span>
-                                <span className="text-[11px] text-slate-500 mt-0.5">
-                                  {s.academicYear} {s.groupName ? `• ${s.groupName}` : ""}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-bold">
-                                  {s.code}
-                                </span>
-                                {isAlreadyInPool ? (
-                                  <span className="text-[10px] text-emerald-600 font-bold">محدد ✓</span>
-                                ) : (
-                                  <span className="text-[10px] text-blue-600 font-bold">+ إضافة</span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
                 </div>
 
-                {/* 2. Or Select Entire Group */}
-                <div className="space-y-1.5 pt-1">
-                  <label className="font-bold text-slate-700 block">
-                    ٢. أو إضافة كل طلاب مجموعة معينة إلى قائمة النقل:
-                  </label>
-                  <div className="flex gap-2">
-                    <select
-                      value={transferSourceGroupId}
-                      onChange={(e) => setTransferSourceGroupId(e.target.value)}
-                      className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
-                    >
-                      <option value="">اختر المجموعة لإضافة طلابها...</option>
-                      {groups.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.name} ({g.academicYear})
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={!transferSourceGroupId}
-                      onClick={() => {
-                        const targetList = allAvailableStudents.length > 0 ? allAvailableStudents : students;
-                        const groupStudents = targetList.filter((s) => s.groupId === transferSourceGroupId);
-                        // Add unique
-                        setTransferPoolStudents((prev) => {
-                          const existingIds = new Set(prev.map((p) => p.id));
-                          const newToAdd = groupStudents.filter((s) => !existingIds.has(s.id));
-                          return [...prev, ...newToAdd];
-                        });
-                        setTransferSourceGroupId("");
-                      }}
-                      className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      إضافة طلابها
-                    </button>
+                {/* Available Students Results List with Details & Multi-Select Checkboxes */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-slate-500 font-bold">
+                    <span>نتائج الطلاب المتاحين:</span>
+                    <span>
+                      انقر على الطالب لتحديده أو إلغاء تحديده
+                    </span>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-2xl max-h-56 overflow-y-auto divide-y divide-slate-100 bg-white">
+                    {(allAvailableStudents.length > 0 ? allAvailableStudents : students)
+                      .filter((s) => {
+                        if (!transferSearchQuery.trim()) return true;
+                        const q = transferSearchQuery.toLowerCase();
+                        return (
+                          s.name.toLowerCase().includes(q) ||
+                          s.code.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((s) => {
+                        const isSelected = transferPoolStudents.some((p) => p.id === s.id);
+                        return (
+                          <div
+                            key={s.id}
+                            onClick={() => {
+                              if (isSelected) {
+                                setTransferPoolStudents((prev) => prev.filter((p) => p.id !== s.id));
+                              } else {
+                                setTransferPoolStudents((prev) => [...prev, s]);
+                              }
+                            }}
+                            className={`p-3 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
+                              isSelected ? "bg-blue-50/70" : "hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}} // handled by parent div
+                                className="rounded border-slate-300 pointer-events-none"
+                              />
+                              <div className="flex flex-col">
+                                <span className="font-bold text-slate-900 text-xs">{s.name}</span>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                  <span className="font-semibold text-blue-600">{s.academicYear}</span>
+                                  <span>•</span>
+                                  <span>المجموعة الحالية: <strong className="text-slate-700">{s.groupName || "غير محدد"}</strong></span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-bold">
+                                {s.code}
+                              </span>
+                              {isSelected ? (
+                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  محدد للنقل ✓
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-400">
+                                  اختر
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
 
-                {/* 3. Selected Students Pool */}
-                <div className="space-y-1.5 pt-2">
+                {/* Selected Students Pool Count & Chips */}
+                <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-slate-700">
                       الطلاب المختارون للنقل (
-                      <strong className="text-blue-600">{transferPoolStudents.length}</strong> طالب):
+                      <strong className="text-blue-600 font-mono">{transferPoolStudents.length}</strong> طالب):
                     </label>
                     {transferPoolStudents.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setTransferPoolStudents([])}
-                        className="text-[11px] text-red-600 hover:underline font-bold"
+                        className="text-[11px] text-red-600 hover:underline font-bold cursor-pointer"
                       >
                         مسح الكل
                       </button>
@@ -2333,7 +2492,7 @@ function StudentsPageContent() {
                   </div>
 
                   {transferPoolStudents.length > 0 ? (
-                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 max-h-36 overflow-y-auto">
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 max-h-32 overflow-y-auto">
                       {transferPoolStudents.map((s) => (
                         <div
                           key={s.id}
@@ -2347,10 +2506,11 @@ function StudentsPageContent() {
                           </div>
                           <button
                             type="button"
-                            onClick={() =>
-                              setTransferPoolStudents((prev) => prev.filter((p) => p.id !== s.id))
-                            }
-                            className="text-slate-400 hover:text-red-600 p-0.5"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTransferPoolStudents((prev) => prev.filter((p) => p.id !== s.id));
+                            }}
+                            className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
@@ -2358,21 +2518,21 @@ function StudentsPageContent() {
                       ))}
                     </div>
                   ) : (
-                    <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center text-slate-400 text-xs">
-                      لم يتم اختيار أي طالب بعد. ابحث عن اسم الطالب أعلاه أو اختر مجموعة لإضافتها.
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center text-slate-400 text-xs">
+                      لم يتم اختيار أي طالب بعد. ابحث عن اسم الطالب وحدده من القائمة أعلاه.
                     </div>
                   )}
                 </div>
 
-                {/* 4. Target Group Selection */}
+                {/* Target Group Selection */}
                 <div className="space-y-1.5 pt-2 border-t border-slate-100">
                   <label className="font-bold text-slate-700 block">
-                    ٣. المجموعة المنقول إليها (الهدف) *:
+                    المجموعة المنقول إليها (الهدف) *:
                   </label>
                   <select
                     value={transferTargetGroupId}
                     onChange={(e) => setTransferTargetGroupId(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold focus:ring-2 focus:ring-blue-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold focus:ring-2 focus:ring-blue-500 cursor-pointer"
                   >
                     <option value="">اختر المجموعة المنقول إليها...</option>
                     {groups.map((g) => (
@@ -2402,7 +2562,7 @@ function StudentsPageContent() {
                     type="button"
                     disabled={transferPoolStudents.length === 0 || !transferTargetGroupId}
                     onClick={handleTransferSubmit}
-                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer font-bold"
                   >
                     تأكيد نقل الطلاب ({transferPoolStudents.length})
                   </button>
@@ -2520,6 +2680,51 @@ function StudentsPageContent() {
               </form>
             </div>
           </div>
+        )}
+
+        {/* 8. External Attendance Modal (for registering attendance for a student from outside the group) */}
+        {isExternalAttendanceModalOpen && selectedGroupId && (
+          <ExternalAttendanceModal
+            isOpen={isExternalAttendanceModalOpen}
+            onClose={() => setIsExternalAttendanceModalOpen(false)}
+            targetGroupId={selectedGroupId}
+            currentGroupId={selectedGroupId}
+            targetGroupName={selectedGroup?.name || ""}
+            currentGroupName={selectedGroup?.name || ""}
+            attendanceDate={attendanceDate}
+            date={attendanceDate}
+            onAttendanceMarked={() => {
+              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.success) {
+                    setAttendanceRecords(d.attendance || []);
+                    setClassSessions(d.sessions || []);
+                  }
+                });
+            }}
+            onSuccess={() => {
+              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.success) {
+                    setAttendanceRecords(d.attendance || []);
+                    setClassSessions(d.sessions || []);
+                  }
+                });
+            }}
+          />
+        )}
+
+        {/* 9. WhatsApp Sequential Bulk Dispatcher Modal (prevents multitab opening clutter) */}
+        {isBulkWhatsAppModalOpen && (
+          <WhatsAppBulkDispatcherModal
+            isOpen={isBulkWhatsAppModalOpen}
+            onClose={() => setIsBulkWhatsAppModalOpen(false)}
+            students={students.filter((s) => selectedStudentIds.includes(s.id))}
+            groupName={selectedGroup?.name || ""}
+            actionType={bulkWhatsAppAction}
+          />
         )}
       </div>
     </div>

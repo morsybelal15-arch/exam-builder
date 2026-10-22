@@ -80,11 +80,12 @@ export async function POST(req: NextRequest) {
   if (apiKey) {
     try {
       const result = await extractQuestionsFromImage(imageBase64, apiKey);
-      if (result.questions.length === 0) {
+      const hasPassage = Boolean(result.passageText || (result.rawText && result.rawText.trim().length > 30));
+      if (result.questions.length === 0 && !hasPassage) {
         return NextResponse.json(
           {
             success: false,
-            error: "لم يتم العثور على أسئلة في المنطقة المحددة. جرّب تحديد منطقة أوضح تشمل السؤال كاملاً.",
+            error: "لم يتم العثور على أسئلة أو نصوص في المنطقة المحددة. جرّب تحديد منطقة أوضح تشمل السؤال أو القطعة كاملة.",
             rawText: result.rawText,
           },
           { status: 422 }

@@ -19,6 +19,17 @@ body {
 }
 
 @media print {
+  @supports (scrollbar-width: none) {
+    * {
+      scrollbar-width: none !important;
+    }
+  }
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
   @page {
     size: A4 portrait;
     margin: 0 !important;
@@ -85,9 +96,9 @@ body {
     padding: 8mm 12mm !important;
     width: 210mm !important;
     max-width: 210mm !important;
-    height: 296.5mm !important;
-    min-height: 296.5mm !important;
-    max-height: 296.5mm !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+    max-height: 297mm !important;
     box-sizing: border-box !important;
     page-break-before: auto !important;
     break-before: auto !important;
@@ -129,7 +140,8 @@ body {
     flex-direction: column !important;
     flex: 1 1 0% !important;
     min-height: 0 !important;
-    justify-content: space-between !important;
+    justify-content: flex-start !important;
+    gap: 3mm !important;
   }
 
   .question-card,
@@ -159,7 +171,7 @@ body {
   .question-card,
   .questions-container {
     max-width: 100% !important;
-    overflow-x: hidden !important;
+    overflow: visible !important;
   }
 
   .question-card p,

@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { ArrowRight, AlertCircle } from "lucide-react";
 import { getSessionUser } from "@/lib/auth";
-import { getFullStudentProfile } from "@/lib/management-db";
+import { getFullStudentProfile, getGroups } from "@/lib/management-db";
 import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
 import StudentProfileClient from "./StudentProfileClient";
 
@@ -54,8 +55,22 @@ export default async function StudentProfilePage({
     );
   }
 
+  const allGroups = getGroups();
+
+  let baseUrl: string | undefined = undefined;
+  try {
+    const headerList = await headers();
+    const host = headerList.get("host");
+    const proto = headerList.get("x-forwarded-proto") || (host?.includes("localhost") ? "http" : "https");
+    if (host) {
+      baseUrl = `${proto}://${host}`;
+    }
+  } catch {
+    // fallback to default
+  }
+
   // Generate Smart QR Code Data URL
-  const portalUrl = getStudentQrUrl(profile.student.code || profile.student.id);
+  const portalUrl = getStudentQrUrl(profile.student.code || profile.student.id, baseUrl);
   const qrDataUrl = await generateQrDataUrl(portalUrl, 260);
 
   return (
@@ -64,6 +79,7 @@ export default async function StudentProfilePage({
         ...profile,
         group: profile.group || null,
       }}
+      allGroups={allGroups}
       qrDataUrl={qrDataUrl}
       portalUrl={portalUrl}
     />

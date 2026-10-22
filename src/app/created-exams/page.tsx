@@ -19,6 +19,21 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+function sanitizeFormattedText(raw?: string): string {
+  if (!raw) return "";
+  let s = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  s = s.replace(/&lt;u&gt;(.*?)&lt;\/u&gt;/gi, '<u class="underline underline-offset-2 decoration-1.5 decoration-slate-900 font-bold">$1</u>');
+  s = s.replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/gi, '<strong class="font-bold">$1</strong>');
+  s = s.replace(/&lt;strong&gt;(.*?)&lt;\/strong&gt;/gi, '<strong class="font-bold">$1</strong>');
+  s = s.replace(/&lt;i&gt;(.*?)&lt;\/i&gt;/gi, '<em class="italic">$1</em>');
+  s = s.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold">$1</strong>');
+  s = s.replace(/\b_([^_]+)_\b/g, '<u class="underline underline-offset-2 decoration-1.5 decoration-slate-900 font-bold">$1</u>');
+  return s;
+}
+
 interface ExamCardItem {
   id: string;
   title: string;
@@ -576,9 +591,12 @@ export default function CreatedExamsPage() {
                     <div key={q.id || qIdx} className="question-card">
                       <div className="flex items-start gap-1.5 font-bold text-slate-900 text-xs">
                         <span className="font-extrabold text-blue-950 shrink-0">س{qIdx + 1}:</span>
-                        <p className="flex-1 leading-relaxed">
-                          {q.text?.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim() || q.text}
-                        </p>
+                        <p
+                          className="flex-1 leading-relaxed"
+                          dangerouslySetInnerHTML={{
+                            __html: sanitizeFormattedText(q.text?.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim() || q.text),
+                          }}
+                        />
                       </div>
                       {Array.isArray(q.options) && q.options.length > 0 && (
                         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-1.5 text-xs text-slate-800">
@@ -589,7 +607,11 @@ export default function CreatedExamsPage() {
                                 <span className="w-4 h-4 rounded-full border border-slate-700 flex items-center justify-center text-[10px] font-bold shrink-0">
                                   {letters[optIdx] || optIdx + 1}
                                 </span>
-                                <span>{opt}</span>
+                                <span
+                                  dangerouslySetInnerHTML={{
+                                    __html: sanitizeFormattedText(opt),
+                                  }}
+                                />
                               </div>
                             );
                           })}

@@ -79,7 +79,7 @@ export function cloneQuestion<T extends { options?: any[]; id?: string; text?: s
     options: Array.isArray(q.options) ? [...q.options] : [],
   };
 
-  if (typeof q.text === "string" && newIndex !== undefined) {
+  if (typeof q.text === "string" && newIndex !== undefined && (q as any).type !== "passage" && q.text.trim()) {
     cloned.text = updateQuestionNumberPrefix(q.text, newIndex);
   }
 

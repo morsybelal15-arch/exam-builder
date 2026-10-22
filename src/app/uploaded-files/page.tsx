@@ -15,6 +15,8 @@ import {
   HardDrive,
   Plus,
   Database,
+  AlertCircle,
+  Clock,
 } from "lucide-react";
 
 interface UploadedFileItem {
@@ -66,6 +68,19 @@ export default function UploadedFilesPage() {
     }
   };
 
+  // Large file upload progress tracking
+  interface UploadProgressState {
+    isOpen: boolean;
+    fileName: string;
+    percent: number;
+    speedMb: string;
+    remainingSec: number;
+    loadedMb: string;
+    totalMb: string;
+    status: "uploading" | "success" | "error";
+  }
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+
   const handleFilesAdded = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
 
@@ -76,7 +91,7 @@ export default function UploadedFilesPage() {
       else if (f.type.startsWith("image/")) fType = "image";
 
       const mbSize = (f.size / (1024 * 1024)).toFixed(1);
-      const newFileItem = {
+      const newFileItem: UploadedFileItem = {
         id: `f-${Date.now()}-${i}`,
         name: f.name,
         type: fType,
@@ -84,18 +99,75 @@ export default function UploadedFilesPage() {
         date: "اليوم",
       };
 
-      setFiles((prev) => [newFileItem, ...prev]);
+      const startTime = Date.now();
+      setUploadProgress({
+        isOpen: true,
+        fileName: f.name,
+        percent: 0,
+        speedMb: "0.0",
+        remainingSec: 0,
+        loadedMb: "0.0",
+        totalMb: mbSize,
+        status: "uploading",
+      });
 
-      // Save to local SQLite database
-      try {
-        await fetch("/api/files", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newFileItem),
-        });
-      } catch (err) {
-        console.error(err);
-      }
+      await new Promise<void>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/files", true);
+        xhr.setRequestHeader("x-upload-mode", "stream");
+        xhr.setRequestHeader("x-file-name", encodeURIComponent(f.name));
+        xhr.setRequestHeader("x-file-size", String(f.size));
+        xhr.setRequestHeader("Content-Type", f.type || "application/octet-stream");
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && event.total > 0) {
+            const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
+            const now = Date.now();
+            const elapsedSec = (now - startTime) / 1000;
+            const bytesPerSec = elapsedSec > 0 ? event.loaded / elapsedSec : 0;
+            const remainingBytes = event.total - event.loaded;
+            const remainingSec = bytesPerSec > 0 ? Math.ceil(remainingBytes / bytesPerSec) : 0;
+
+            setUploadProgress({
+              isOpen: true,
+              fileName: f.name,
+              percent,
+              speedMb: (bytesPerSec / (1024 * 1024)).toFixed(1),
+              remainingSec,
+              loadedMb: (event.loaded / (1024 * 1024)).toFixed(1),
+              totalMb: mbSize,
+              status: "uploading",
+            });
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress((prev) => (prev ? { ...prev, percent: 100, remainingSec: 0, status: "success" } : null));
+            setFiles((prev) => [newFileItem, ...prev]);
+            setTimeout(() => {
+              setUploadProgress(null);
+              resolve();
+            }, 800);
+          } else {
+            setUploadProgress((prev) => (prev ? { ...prev, status: "error" } : null));
+            setTimeout(() => {
+              setUploadProgress(null);
+              resolve();
+            }, 1500);
+          }
+        };
+
+        xhr.onerror = () => {
+          setUploadProgress((prev) => (prev ? { ...prev, status: "error" } : null));
+          setTimeout(() => {
+            setUploadProgress(null);
+            resolve();
+          }, 1500);
+        };
+
+        xhr.send(f);
+      });
     }
 
     setSuccessMessage(`تم حفظ ${fileList.length} ملف بنجاح في قاعدة البيانات المحلية (SQLite).`);
@@ -309,6 +381,107 @@ export default function UploadedFilesPage() {
           </div>
         </div>
       </div>
+
+      {/* Circular Upload Progress Modal */}
+      {uploadProgress && uploadProgress.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div
+            className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center text-center border border-slate-200 animate-in zoom-in-95"
+            dir="rtl"
+          >
+            {/* Circular Progress Ring */}
+            <div className="relative w-32 h-32 flex items-center justify-center mb-4">
+              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  stroke="currentColor"
+                  strokeWidth="8"
+                  className="text-slate-100"
+                  fill="transparent"
+                />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  stroke="currentColor"
+                  strokeWidth="8"
+                  strokeDasharray={2 * Math.PI * 42}
+                  strokeDashoffset={2 * Math.PI * 42 * (1 - uploadProgress.percent / 100)}
+                  strokeLinecap="round"
+                  className={`transition-all duration-200 ${
+                    uploadProgress.status === "error"
+                      ? "text-red-500"
+                      : uploadProgress.percent === 100
+                      ? "text-emerald-500"
+                      : "text-blue-600"
+                  }`}
+                  fill="transparent"
+                />
+              </svg>
+
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                {uploadProgress.status === "error" ? (
+                  <AlertCircle className="w-8 h-8 text-red-500" />
+                ) : uploadProgress.percent === 100 ? (
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 animate-in zoom-in" />
+                ) : (
+                  <>
+                    <span className="text-2xl font-black text-slate-800 font-mono">
+                      {uploadProgress.percent}%
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">مكتمل</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* File Information */}
+            <h3 className="font-bold text-sm text-slate-800 truncate max-w-[260px] mb-1">
+              {uploadProgress.fileName}
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              {uploadProgress.loadedMb} ميجابايت من {uploadProgress.totalMb} ميجابايت
+            </p>
+
+            {/* Speed & Remaining Time */}
+            {uploadProgress.status === "uploading" && (
+              <div className="w-full bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 mb-2 space-y-1.5 text-xs text-slate-600">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-blue-500" />
+                    الوقت المتبقي:
+                  </span>
+                  <span className="font-bold text-slate-800 font-mono">
+                    {uploadProgress.remainingSec > 60
+                      ? `${Math.floor(uploadProgress.remainingSec / 60)} دقيقة و ${uploadProgress.remainingSec % 60} ثانية`
+                      : `${uploadProgress.remainingSec} ثانية`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">سرعة الرفع:</span>
+                  <span className="font-bold text-slate-700 font-mono">
+                    {uploadProgress.speedMb} ميجابايت/ثانية
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {uploadProgress.status === "success" && (
+              <p className="text-xs font-bold text-emerald-600">
+                تم رفع وحفظ المستند بنجاح!
+              </p>
+            )}
+
+            {uploadProgress.status === "error" && (
+              <p className="text-xs font-bold text-red-600">
+                فشل رفع أو حفظ المستند.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

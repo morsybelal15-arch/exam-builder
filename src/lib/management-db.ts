@@ -13,6 +13,8 @@ import {
   StudentGradeRecord,
   SavedQrPdf,
 } from "./types/management";
+import { generateUniqueStudentCode } from "./student-code";
+export { generateUniqueStudentCode };
 
 const dataDir = path.join(os.homedir(), ".exam_builder");
 if (!fs.existsSync(dataDir)) {
@@ -455,9 +457,11 @@ export function saveStudent(student: Partial<Student> & { name: string; groupId:
   if (student.id) {
     const idx = store.students.findIndex((s) => s.id === student.id);
     if (idx >= 0) {
+      const existingCode = store.students[idx].code;
       store.students[idx] = {
         ...store.students[idx],
         ...student,
+        code: existingCode, // Code is immutable once generated
         groupName: grp ? grp.name : store.students[idx].groupName,
         updatedAt: now,
       };
@@ -466,11 +470,15 @@ export function saveStudent(student: Partial<Student> & { name: string; groupId:
     }
   }
 
-  // Generate unique code e.g. ST-XXXX
-  const nextNum = 1000 + store.students.length + 1;
+  // Generate unique code (max 8 chars, high-entropy shuffled alphanumeric: digits + letters)
+  const existingCodes = new Set(store.students.map((s) => s.code));
+  const assignedCode = student.code?.trim()
+    ? student.code.trim().toUpperCase()
+    : generateUniqueStudentCode(existingCodes);
+
   const newStudent: Student = {
     id: student.id || `std-${Date.now()}`,
-    code: student.code || `ST-${nextNum}`,
+    code: assignedCode,
     name: student.name,
     academicYear: student.academicYear || grp?.academicYear || "الصف الأول الثانوي",
     groupId: student.groupId,
@@ -554,6 +562,8 @@ export function getFinancials(groupId: string, month: string) {
       return {
         ...existing,
         studentName: std.name,
+        studentCode: std.code,
+        studentStatus: std.status,
         parentPhone: std.parentPhone,
         monthlyFee: std.monthlyFee,
       };
@@ -564,6 +574,8 @@ export function getFinancials(groupId: string, month: string) {
       id: `fin-${std.id}-${month}`,
       studentId: std.id,
       studentName: std.name,
+      studentCode: std.code,
+      studentStatus: std.status,
       parentPhone: std.parentPhone,
       monthlyFee: std.monthlyFee,
       groupId,
@@ -698,13 +710,21 @@ export function createClassSession(groupId: string, date: string, title?: string
 
 export function getAttendance(groupId: string, date: string) {
   const store = getManagementStore();
-  const students = store.students.filter((s) => s.groupId === groupId);
 
-  return students.map((std) => {
-    const record = store.attendance.find(
-      (a) => a.studentId === std.id && a.date === date
-    );
+  // Empty calendar always waiting for action of the buttons (تثبيت حصة يوم)
+  const sessionExists = store.sessions.some((s) => s.groupId === groupId && s.date === date);
+  if (!sessionExists) {
+    return [];
+  }
 
+  const groupStudents = store.students.filter((s) => s.groupId === groupId);
+  const attendanceForGroupAndDate = store.attendance.filter(
+    (a) => a.groupId === groupId && a.date === date
+  );
+
+  // Group members
+  const result: any[] = groupStudents.map((std) => {
+    const record = attendanceForGroupAndDate.find((a) => a.studentId === std.id);
     return {
       studentId: std.id,
       code: std.code,
@@ -713,8 +733,35 @@ export function getAttendance(groupId: string, date: string) {
       time: record?.time,
       method: record?.method,
       studentStatus: std.status,
+      isExternal: false,
+      originGroupName: undefined,
     };
   });
+
+  // Students from outside this group who attended this session
+  const externalRecords = attendanceForGroupAndDate.filter(
+    (a) => !groupStudents.some((s) => s.id === a.studentId)
+  );
+
+  externalRecords.forEach((extRec) => {
+    const extStudent = store.students.find((s) => s.id === extRec.studentId);
+    if (extStudent) {
+      const originGroup = store.groups.find((g) => g.id === extStudent.groupId);
+      result.push({
+        studentId: extStudent.id,
+        code: extStudent.code,
+        studentName: extStudent.name,
+        status: extRec.status,
+        time: extRec.time,
+        method: extRec.method,
+        studentStatus: extStudent.status,
+        isExternal: true,
+        originGroupName: originGroup?.name || "مجموعة أخرى",
+      });
+    }
+  });
+
+  return result;
 }
 
 export function markAttendance(
@@ -840,6 +887,23 @@ export function bulkMarkAttendance(
   return true;
 }
 
+export function deleteClassSession(groupId: string, date: string): boolean {
+  const store = getManagementStore();
+  store.sessions = store.sessions.filter((s) => !(s.groupId === groupId && s.date === date));
+  store.attendance = store.attendance.filter((a) => !(a.groupId === groupId && a.date === date));
+  saveManagementStore(store);
+  return true;
+}
+
+export function deleteStudentAttendance(groupId: string, studentId: string, date: string): boolean {
+  const store = getManagementStore();
+  store.attendance = store.attendance.filter(
+    (a) => !(a.groupId === groupId && a.studentId === studentId && a.date === date)
+  );
+  saveManagementStore(store);
+  return true;
+}
+
 // ==========================================
 // EXAM RECORDS & GRADES API
 // ==========================================
@@ -954,23 +1018,6 @@ export function deleteFinancialRecord(groupId: string, studentId: string, month:
   const store = getManagementStore();
   store.financials = store.financials.filter(
     (f) => !(f.groupId === groupId && f.studentId === studentId && f.month === month)
-  );
-  saveManagementStore(store);
-  return true;
-}
-
-export function deleteClassSession(groupId: string, date: string): boolean {
-  const store = getManagementStore();
-  store.sessions = store.sessions.filter((s) => !(s.groupId === groupId && s.date === date));
-  store.attendance = store.attendance.filter((a) => !(a.groupId === groupId && a.date === date));
-  saveManagementStore(store);
-  return true;
-}
-
-export function deleteStudentAttendance(groupId: string, studentId: string, date: string): boolean {
-  const store = getManagementStore();
-  store.attendance = store.attendance.filter(
-    (a) => !(a.groupId === groupId && a.studentId === studentId && a.date === date)
   );
   saveManagementStore(store);
   return true;

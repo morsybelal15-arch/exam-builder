@@ -20,12 +20,20 @@ export interface ExtractedQuestion {
   table: { headers: string[]; rows: string[][] } | null;
   confidence: number;
   notes: string;
+  // Enhanced subject, passage & layout properties
+  optionsLayout?: "grid" | "vertical";
+  answerLinesCount?: number;
+  passageText?: string;
+  passageTitle?: string;
+  subType?: "passage" | "translation" | "writing" | "story" | "regular";
 }
 
 export interface ExtractionResult {
   questions: ExtractedQuestion[];
   rawText: string;
   engine: "gemini" | "local";
+  passageText?: string;
+  passageTitle?: string;
 }
 
 /** Resolves the API key: request-supplied key (from the settings dialog or header) wins, then env. */
@@ -83,22 +91,54 @@ function cleanOptionText(raw: string): string {
   return s.trim();
 }
 
+function extractAnswerLinesCount(text: string): number {
+  if (!text) return 2;
+  const wordToNumber: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    واحد: 1, اثنان: 2, سطرين: 2, ثلاثة: 3, ثلاث: 3, أربعة: 4, أربع: 4, خمسة: 5, خمس: 5,
+    ستة: 6, ست: 6, سبعة: 7, سبع: 7, ثمانية: 8, ثمان: 8, تسعة: 9, تسع: 9, عشرة: 10, عشر: 10,
+  };
+
+  const lineMatch = text.match(/(?:about|of|بواقع|حوالي)?\s*([a-zA-Z\u0600-\u06FF]+|\d+)?\s*(?:\((\d+)\))?\s*(?:lines|line|سطور|سطر|أسطر)/i);
+  if (lineMatch) {
+    if (lineMatch[2]) {
+      const num = parseInt(lineMatch[2], 10);
+      if (!isNaN(num) && num > 0) return Math.min(num, 20);
+    }
+    const token = (lineMatch[1] || "").toLowerCase().trim();
+    if (/^\d+$/.test(token)) {
+      const num = parseInt(token, 10);
+      if (!isNaN(num) && num > 0) return Math.min(num, 20);
+    }
+    if (wordToNumber[token]) {
+      return wordToNumber[token];
+    }
+  }
+
+  // Paragraph or essay prompts default to 6 lines
+  if (/write a (?:body\s+)?paragraph|write an essay|اكتب مقال|اكتب موضوع تعبير/i.test(text)) {
+    return 6;
+  }
+
+  return 2;
+}
+
 function detectQuestionType(text: string, options: string[], rawType?: string): QuestionType {
   const cleanText = text.trim();
 
   // 1. True / False signals
-  const isTfText = /صح\s*أو\s*خطأ|صواب\s*أو\s*خطأ|ضع\s*علامة\s*\(?[✓✔]/i.test(cleanText);
+  const isTfText = /صح\s*أو\s*خطأ|صواب\s*أو\s*خطأ|ضع\s*علامة\s*\(?[✓✔]|true\s*or\s*false/i.test(cleanText);
   const isTfOptions =
     options.length === 2 &&
-    options.some((o) => /^(صح|صواب|نعم|صحيحة|true)$/i.test(o.trim())) &&
-    options.some((o) => /^(خطأ|لا|خاطئة|false)$/i.test(o.trim()));
+    options.some((o) => /^(صح|صواب|نعم|صحيحة|true|t)$/i.test(o.trim())) &&
+    options.some((o) => /^(خطأ|لا|خاطئة|false|f)$/i.test(o.trim()));
 
   if (isTfText || isTfOptions || rawType === "trueFalse") {
     return "trueFalse";
   }
 
-  // 2. Essay keywords
-  const isEssayKeyword = /^(علل|فسر|وضح|اشرح|قارن|اذكر|ما\s*المقصود|ما\s*دور|ما\s*أهمية|ما\s*وظيفة|ماذا\s*يحدث|ما\s*النتائج|اكتب\s*المصطلح|أثبت\s*أن|احسب|مسألة)/.test(
+  // 2. Essay keywords (Arabic & English)
+  const isEssayKeyword = /^(علل|فسر|وضح|اشرح|قارن|اذكر|ما\s*المقصود|ما\s*دور|ما\s*أهمية|ما\s*وظيفة|ماذا\s*يحدث|ما\s*النتائج|اكتب|أثبت|احسب|مسألة|answer\s+the|write\s+a|explain|discuss|why|do\s+you\s+think|imagine\s+you|describe|translate)/i.test(
     cleanText
   );
   if ((options.length < 2 && isEssayKeyword) || (options.length === 0 && rawType !== "choice") || rawType === "essay") {
@@ -132,6 +172,32 @@ function normalizeQuestion(q: Partial<ExtractedQuestion>): ExtractedQuestion {
       ? q.correctOptionIndex
       : null;
 
+  // Translation detection
+  const isTranslation = /translation|ترجمة|ترجم/i.test(rawText);
+  const hasLongOptions = options.some((opt) => opt.length > 38);
+  const avgOptLen = options.length > 0 ? options.reduce((sum, o) => sum + o.length, 0) / options.length : 0;
+
+  // Options layout (vertical for long answers, reported speech, translations)
+  const optionsLayout: "grid" | "vertical" = q.optionsLayout || (
+    isTranslation || hasLongOptions || avgOptLen > 28 ? "vertical" : "grid"
+  );
+
+  // Subtype determination
+  let subType: "passage" | "translation" | "writing" | "story" | "regular" = q.subType || "regular";
+  if (isTranslation) {
+    subType = "translation";
+  } else if (/paragraph|essay|تعبير/i.test(rawText)) {
+    subType = "writing";
+  } else if (/\(sb\)|\(wb\)|story|قصة|novel/i.test(rawText)) {
+    subType = "story";
+  } else if (q.passageText) {
+    subType = "passage";
+  }
+
+  // Answer lines count for essay/writing questions
+  const detectedLines = extractAnswerLinesCount(rawText);
+  const answerLinesCount = type === "essay" ? (q.answerLinesCount ? Math.max(1, q.answerLinesCount) : detectedLines) : undefined;
+
   return {
     type,
     number: String(q.number || "").trim(),
@@ -145,42 +211,71 @@ function normalizeQuestion(q: Partial<ExtractedQuestion>): ExtractedQuestion {
         : null,
     confidence: typeof q.confidence === "number" ? q.confidence : 0.95,
     notes: String(q.notes || "").trim(),
+    optionsLayout,
+    answerLinesCount,
+    passageText: q.passageText ? String(q.passageText).trim() : undefined,
+    passageTitle: q.passageTitle ? String(q.passageTitle).trim() : undefined,
+    subType,
   };
 }
 
-const EXTRACTION_INSTRUCTION = `أنت خبير محترف ومتقدم جداً في التعرف البصري على النصوص (Vision OCR) للامتحانات والمناهج التعليمية المكتوبة باللغة العربية (خاصة مناهج الكيمياء والفيزياء والرياضيات).
-مهمتك: قراءة الصورة المحددة بدقة 100% وتحويلها إلى أسئلة منظمة بنظام JSON مع إدراك ذكي ودقيق لنوع كل سؤال.
+const EXTRACTION_INSTRUCTION = `أنت خبير محترف واستثنائي في التعرف البصري على النصوص (Vision OCR) واستخراج أسئلة الامتحانات لكافة المناهج الدراسية، وبشكل خاص:
+
+1. التعامل الذكي مع فواصل الصفحات والأسئلة المنقسمة (Page Breaks, Dividers & Seamless Stitching):
+   - في كثير من الأحيان قد يحدد المستخدم منطقة تشمل نهاية صفحة (مثل نهاية صفحة 3) وبداية صفحة تالية (بداية صفحة 4) في ملف الـ PDF.
+   - قد يوجد بينهما خط فاصل أفقي، أو رقم صفحة (مثل: Page 3, Page 4, صفحة ٣, صفحة ٤)، أو ترويسة متكررة (مثل: "تابع امتحان الشهادة...", "Ministry of Education", "وزارة التربية والتعليم").
+   - **قاعدة حاسمة**: تجاهل تماماً هذه الفواصل والترويسات وهوامش الصفحات وأرقام الصفحات وكأنها غير موجودة إطلاقاً في الصورة.
+   - **دمج الأسئلة المنقسمة (Seamless Question Stitching)**:
+     • إذا بدأ السؤال أو نصه في الصفحة السابقة واستكمل بعد الفاصل في بداية الصفحة التالية: ادمج نص السؤال بسلاسة تامة في جملة واحدة متصلة دون أي فقدان أو تقطيع.
+     • إذا كانت خيارات السؤال مقسومة (مثلاً خياران قبل الفاصل وخياران بعد الفاصل): اجمع جميع الخيارات الأربعة كاملة لنفس السؤال في مصفوفة "options" بترتيبها السليم.
+
+2. استيعاب القطعة القرائية والأسئلة معاً (Passage & Reading Comprehension):
+   - **إذا احتوى التحديد على قطعة القراءة وأسئلتها معاً**:
+     • استخرج نص القطعة كاملاً دون أي نقصان في الحقل "passageText".
+     • استخرج عنوان أو توجيه القطعة (مثل "• Read the following passage, then choose the correct answer from a, b, c or d:") في الحقل "passageTitle".
+     • هام جداً - الكلمات التي تحتها خط (Underlined Words): إذا احتوت القطعة على كلمات تحتها خط (مثل <u>they</u>, <u>balance</u>, <u>disadvantages</u>)، ضعها داخل وسم <u>الكلمة</u> بدقة شديدة لأن أسئلة القطعة تختبر معانيها وإشاراتها!
+     • استخرج كل سؤال من أسئلة القطعة في مصفوفة "questions"، وضع "subType": "passage"، وأرفق "passageText" و "passageTitle" مع السؤال الأول التابع لها لربطها بالامتحان.
+   - **إذا حدد المستخدم نص القطعة فقط (بدون أسئلة)**:
+     • ضع نص القطعة كاملاً في "passageText" وفي "rawText"، مع الحفاظ على الكلمات التي تحتها خط <u>...</u>.
+     • قاعدة حاسمة: لا تقم إطلاقاً باختراع أو توليد أي سؤال وهمي أو سؤال مقالي إضافي إذا لم يكن هناك أسئلة تابعة محددة بالصورة. اجعل مصفوفة "questions" فارغة [] أو اتركها فقط للأسئلة الحقيقية.
+   - **أسئلة الاختيار ذات الإجابات والجمل الطويلة (Long Answer Choices)**:
+     • إذا كانت خيارات السؤال عبارة عن جمل كاملة أو طويلة (مثل Reported Speech، جمل القواعد، الأسئلة ذات الخيارات الطويلة):
+     • اجعل "optionsLayout": "vertical".
+   - **أسئلة الترجمة (Translation Questions)**:
+     • إذا كان السؤال ترجمة (مثل "Choose the correct Arabic translation...", "Choose the correct English translation...", "ترجم ما يأتي"):
+     • ضع نص الجملة المراد ترجمتها في "text"، واجعل "subType": "translation"، واجعل الخيارات عمودية دائماً "optionsLayout": "vertical".
+   - **أسئلة المقال والكتابة والتفكير النقدي وأسئلة القصة (Writing, Critical Thinking, Story/Novel)**:
+     • مثل أسئلة القصة: "(SB) Do you think Edmond should have noticed Fernand's jealousy earlier? Why or why not?" -> اجعل "type": "essay"، "subType": "story"، وضع عدد أسطر الإجابة "answerLinesCount": 2.
+     • مثل كتابة فقرة: "Write a body paragraph of about SIX (6) lines on the following topic : 'The power of machines'" -> اجعل "type": "essay"، "subType": "writing"، واستخرج عدد السطور المطلوبة بدقة في "answerLinesCount": 6.
+
+3. المواد العلمية واللغة العربية (Chemistry, Physics, Math, Arabic):
+   - الحفاظ التام على الأرقام العشرية (0.315 F بدقة وليس 315، واكتب 0.675 وليس 675).
+   - كتابة المعادلات الكيميائية والفيزيائية كاملة بدون أي بتر (A⁺² + 2e⁻ ────> A).
+   - المحافظة على الجداول والرموز والأسس.
 
 أنواع الأسئلة (الحقل "type"):
-- "choice": سؤال اختيار من متعدد (يحتوي على اختيارات مثل أ، ب، ج، د أو A, B, C, D).
-- "trueFalse": سؤال صح أو خطأ أو ضع علامة (✓) أو (✗)، أو السؤال الذي يحتمل فقط إجابتين (صح/خطأ أو صواب/خطأ).
-- "essay": سؤال مقالي (مثل: علل لما يأتي، وضح، اذكر، اشرح، قارن بين، ما المقصود، احسب، اكتب المعادلة، أو أي سؤال لا يتضمن اختيارات).
+- "choice": سؤال اختيار من متعدد (يحتوي على اختيارات).
+- "trueFalse": سؤال صح أو خطأ أو ضع علامة (✓) أو (✗).
+- "essay": سؤال مقالي أو كتابة أو قصة أو تفكير نقدي (يحتوي على أسطر منقطة للإجابة).
 
-قواعد الاستخراج الصارمة جداً:
-1. نص السؤال الكامل والمعادلات:
-   - اقرأ نص السؤال كاملاً من اليمين لليسار.
-   - في الامتحانات العربية، غالباً ما تبدأ العبارة على اليمين والمعادلة الكيميائية أو الرياضية تكون على يسار نفس السطر (مثل: عند ترسيب 10 جرام من العنصر A تبعاً للمعادلة (A=63.5) A⁺² + 2e⁻ ────> A). المعادلة جزء أساسي من نص السؤال ويجب كتابتها بالكامل دون أي بتر!
-   - إذا كان هناك تكملة للسؤال في السطر التالي (مثل: "يلزم كمية كهربية قدرها") قبل الاختيارات، فضمها فوراً لنهاية نص السؤال في الحقل "text".
-2. الحفاظ التام على الأرقام العشرية والفواصل:
-   - إياك أن تحذف الصفر أو الفاصلة العشرية من الأرقام! (مثال: اكتب 0.315 بدقة وليس 315، واكتب 0.675 وليس 675).
-   - اكتب الرقم أولاً ثم الوحدة كما في الأصل بالضبط (مثال: 0.315 F، 30393 F، 0.675 C، 15196 C).
-3. فصل الاختيارات:
-   - ضع الخيارات في مصفوفة "options" مرتبة كما هي.
-   - احذف حرف الترقيم (أ، ب، ج، د) من بداية نص الخيار واحتفظ بالقيمة الكاملة والوحدة.
-   - إذا كان السؤال مقالياً ("essay")، فاجعل "options" مصفوفة فارغة [].
-4. المعادلات والرموز العلمية:
-   - حافظ على الأسس والشحنات والأسهم بدقة: (A⁺² + 2e⁻ → A).
-5. أرجع النتيجة حصراً ككائن JSON بالصيغة التالية:
+صيغة JSON المطلوبة:
 {
   "rawText": "النص الكامل الظاهر في الصورة",
+  "passageTitle": "عنوان أو توجيه القطعة إن وجد",
+  "passageText": "نص القطعة الكامل شاملاً الكلمات المسطرة <u>word</u> إن وجدت",
   "questions": [
     {
-      "number": "65",
+      "number": "41",
       "type": "choice",
-      "text": "عند ترسيب 10 جرام من العنصر A تبعاً للمعادلة (A=63.5) A⁺² + 2e⁻ ────> A يلزم كمية كهربية قدرها",
-      "options": ["0.315 F", "30393 F", "0.675 C", "15196 C"],
+      "text": "نص السؤال المنقح",
+      "options": ["أ", "ب", "ج", "د"],
+      "optionsLayout": "vertical",
       "correctOptionIndex": 0,
       "points": 2,
+      "passageTitle": null,
+      "passageText": null,
+      "answerLinesCount": null,
+      "subType": "passage",
       "notes": "..."
     }
   ]
@@ -264,7 +359,12 @@ export async function extractQuestionsFromImage(
     inlineImage: { mimeType, data },
   });
 
-  const parsed = parseJson<{ rawText?: string; questions?: Partial<ExtractedQuestion>[] }>(rawJson);
+  const parsed = parseJson<{
+    rawText?: string;
+    passageText?: string;
+    passageTitle?: string;
+    questions?: Partial<ExtractedQuestion>[];
+  }>(rawJson);
 
   let rawQuestions: Partial<ExtractedQuestion>[] = [];
   if (Array.isArray(parsed.questions)) {
@@ -275,13 +375,27 @@ export async function extractQuestionsFromImage(
     rawQuestions = [parsed as Partial<ExtractedQuestion>];
   }
 
+  // If top-level passageText exists, associate it with the first question if not already set
+  const topPassageText = parsed.passageText || rawQuestions.find((q) => q.passageText)?.passageText;
+  const topPassageTitle = parsed.passageTitle || rawQuestions.find((q) => q.passageTitle)?.passageTitle;
+
+  if (topPassageText && rawQuestions.length > 0 && !rawQuestions[0].passageText) {
+    rawQuestions[0].passageText = topPassageText;
+    rawQuestions[0].passageTitle = topPassageTitle;
+    rawQuestions[0].subType = "passage";
+  }
+
+  // If user selected ONLY a passage without questions, topPassageText is returned directly without injecting fake questions
+
   const questions = rawQuestions
     .map(normalizeQuestion)
-    .filter((q) => q.text.length > 0 || q.options.length > 0);
+    .filter((q) => q.text.length > 0 || q.options.length > 0 || q.passageText);
 
   return {
     questions,
-    rawText: parsed.rawText || "",
+    rawText: parsed.rawText || topPassageText || "",
+    passageText: topPassageText,
+    passageTitle: topPassageTitle,
     engine: "gemini",
   };
 }

@@ -18,10 +18,12 @@ import {
   FileCheck,
 } from "lucide-react";
 import { getFullStudentProfile } from "@/lib/management-db";
-import AttendanceCalendarClient from "./AttendanceCalendarClient";
+import ParentSectionsClient from "./ParentSectionsClient";
 import ParentShareButton from "./ParentShareButton";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 interface PageProps {
   params: Promise<{ token: string }>;
@@ -32,9 +34,16 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const decoded = decodeURIComponent(token).trim();
   const profile = getFullStudentProfile(decoded);
 
-  if (!profile || profile.student.status !== "active") {
+  if (!profile) {
     return {
-      title: "بطاقة متابعة الطالب | غير مفعلة",
+      title: "ملف الطالب غير موجود",
+      robots: "noindex, nofollow",
+    };
+  }
+
+  if (profile.student.status === "inactive" || (profile.student.status as string) === "disabled") {
+    return {
+      title: "بطاقة متابعة الطالب | الحساب معطل",
       robots: "noindex, nofollow",
     };
   }
@@ -52,29 +61,58 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
   const decodedToken = decodeURIComponent(token).trim();
   const profile = getFullStudentProfile(decodedToken);
 
-  // 1. Invalid or Inactive Student State
-  if (!profile || profile.student.status !== "active") {
+  // 1. Student removed / Not Found State
+  if (!profile) {
     return (
       <div
-        className="min-h-screen bg-slate-50 flex items-center justify-center p-4"
+        className="flex-1 w-full h-full min-h-0 overflow-y-auto bg-slate-50 flex items-center justify-center p-4"
         dir="rtl"
       >
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 sm:p-10 shadow-xl border border-slate-200/80 text-center space-y-6 animate-in fade-in zoom-in-95">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 sm:p-10 shadow-xl border border-slate-200/80 text-center space-y-6 animate-in fade-in zoom-in-95 my-auto">
+          <div className="w-16 h-16 bg-slate-100 text-slate-500 rounded-3xl flex items-center justify-center mx-auto border border-slate-200 shadow-sm">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="text-lg sm:text-xl font-black text-slate-900">
+              لم يتم العثور على ملف الطالب
+            </h1>
+            <p className="text-sm font-semibold text-slate-600 leading-relaxed">
+              عفواً، لم يتم العثور على طالب بهذا الرمز، قد يكون تم حذف الحساب أو أن الرابط غير صحيح.
+            </p>
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/70 text-xs text-slate-500 font-medium">
+            يرجى التأكد من مسح رمز QR الأحدث من بطاقة الطالب، أو مراجعة إدارة المركز للتأكد من تسجيل الطالب.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Student Status Disabled / Inactive State
+  if (profile.student.status === "inactive" || (profile.student.status as string) === "disabled") {
+    return (
+      <div
+        className="flex-1 w-full h-full min-h-0 overflow-y-auto bg-slate-50 flex items-center justify-center p-4"
+        dir="rtl"
+      >
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 sm:p-10 shadow-xl border border-slate-200/80 text-center space-y-6 animate-in fade-in zoom-in-95 my-auto">
           <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center mx-auto border border-rose-100 shadow-sm">
             <ShieldAlert className="w-8 h-8" />
           </div>
 
           <div className="space-y-2">
             <h1 className="text-lg sm:text-xl font-black text-slate-900">
-              بطاقة المتابعة غير مفعلة
+              حساب الطالب معطل حالياً
             </h1>
             <p className="text-sm font-semibold text-slate-600 leading-relaxed">
-              عفواً، هذه البطاقة غير مفعلة حالياً. يرجى مراجعة إدارة المركز.
+              عفواً، تم إيقاف بطاقة المتابعة مؤقتاً نظراً لتعطيل حساب الطالب.
             </p>
           </div>
 
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/70 text-xs text-slate-500 font-medium">
-            تأكد من مسح رمز QR الأحدث المطبوع على بطاقة الطالب، أو تواصل مع معلم المادة لتفعيل الحساب.
+            يرجى مراجعة إدارة المركز أو معلم المادة لإعادة تفعيل الحساب واستئناف المتابعة.
           </div>
         </div>
       </div>
@@ -131,47 +169,33 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
   const currentMonthBadge = getFinancialBadge(currentMonthFinancial);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 py-6 sm:py-10 px-4 sm:px-6" dir="rtl">
-      <div className="max-w-3xl mx-auto space-y-6">
+    <div
+      className="flex-1 w-full h-full min-h-0 overflow-y-auto overflow-x-hidden bg-slate-50 text-slate-800 py-6 sm:py-10 px-4 sm:px-6 select-text scroll-smooth"
+      dir="rtl"
+    >
+      <div className="max-w-3xl mx-auto space-y-6 pb-32 sm:pb-40">
         {/* Top Header Card */}
         <header className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/80 relative overflow-hidden">
           {/* Subtle decorative background gradient */}
           <div className="absolute top-0 right-0 left-0 h-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500" />
 
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200/70 text-[11px] font-bold">
-                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                <span>بطاقة متابعة ولي الأمر المباشرة</span>
-              </div>
+          <div className="space-y-3">
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              {student.name}
+            </h1>
 
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                {student.name}
-              </h1>
-
-              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs font-bold">
-                <span className="px-3 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100">
-                  {student.academicYear || group?.academicYear || "المرحلة الدراسية"}
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-xs font-bold">
+              <span className="px-3 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100">
+                {student.academicYear || group?.academicYear || "المرحلة الدراسية"}
+              </span>
+              <span className="px-3 py-1 rounded-xl bg-slate-100 text-slate-700 font-mono">
+                كود: {student.code}
+              </span>
+              {(group?.name || student.groupName) && (
+                <span className="px-3 py-1 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 font-bold">
+                  {group?.name || student.groupName}
                 </span>
-                <span className="px-3 py-1 rounded-xl bg-slate-100 text-slate-700 font-mono">
-                  كود: {student.code}
-                </span>
-              </div>
-            </div>
-
-            {/* Teacher and Subject Badge */}
-            <div className="sm:text-left bg-slate-50 sm:bg-transparent p-4 sm:p-0 rounded-2xl border border-slate-200/60 sm:border-none space-y-1">
-              <div className="text-xs font-bold text-slate-400">المجموعة والمعلم</div>
-              <div className="text-sm font-black text-blue-600">
-                {group?.name || student.groupName || "المجموعة"}
-              </div>
-              <div className="text-xs font-bold text-slate-700 flex items-center gap-1.5 sm:justify-end">
-                <GraduationCap className="w-3.5 h-3.5 text-slate-400" />
-                <span>{group?.teacher || "معلم المادة"}</span>
-                {group?.subject && (
-                  <span className="text-slate-400">({group.subject})</span>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </header>
@@ -231,167 +255,15 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
           </div>
         </section>
 
-        {/* Section 1: سجل الحضور والغياب (Attendance Calendar) */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
-              <CalendarCheck className="w-5 h-5 text-blue-600" />
-              <span>سجل الحضور والغياب</span>
-            </h2>
-            <span className="text-xs font-semibold text-slate-500">محدث فورياً عبر QR</span>
-          </div>
-
-          <AttendanceCalendarClient
-            attendance={attendance}
-            sessions={sessions}
-          />
-        </section>
-
-        {/* Section 2: درجات الاختبارات (Exam Grades) */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
-              <Award className="w-5 h-5 text-blue-600" />
-              <span>درجات الاختبارات والتقييمات</span>
-            </h2>
-            <span className="text-xs font-semibold text-slate-500">
-              {grades.length} اختبار مسجل
-            </span>
-          </div>
-
-          <div className="bg-white rounded-3xl p-5 sm:p-7 shadow-xs border border-slate-200/80">
-            {grades.length > 0 ? (
-              <div className="divide-y divide-slate-100">
-                {grades.map((grd) => {
-                  const hasScore = grd.score !== null && grd.score !== undefined;
-                  const ratio = hasScore && grd.totalScore > 0 ? grd.score / grd.totalScore : 0;
-                  const isExcellent = ratio >= 0.85;
-                  const isGood = ratio >= 0.65 && ratio < 0.85;
-
-                  return (
-                    <div
-                      key={grd.id}
-                      className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-4"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm sm:text-base text-slate-900">
-                            {grd.examName}
-                          </h4>
-                          {isExcellent && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                              ممتاز
-                            </span>
-                          )}
-                          {isGood && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                              جيد جداً
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="text-xs text-slate-400 font-medium flex items-center gap-3">
-                          {grd.date && <span>تاريخ الامتحان: {grd.date}</span>}
-                          {grd.notes && <span className="text-slate-500">• {grd.notes}</span>}
-                        </div>
-                      </div>
-
-                      <div className="shrink-0">
-                        {hasScore ? (
-                          <div
-                            className={`px-3.5 py-1.5 rounded-2xl font-black text-sm sm:text-base border font-mono flex items-baseline gap-1 ${
-                              isExcellent
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                : isGood
-                                ? "bg-blue-50 text-blue-700 border-blue-200"
-                                : "bg-amber-50 text-amber-800 border-amber-200"
-                            }`}
-                          >
-                            <span>{grd.score}</span>
-                            <span className="text-xs text-slate-400 font-bold">
-                              / {grd.totalScore}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="px-3 py-1 rounded-xl bg-slate-100 text-slate-500 text-xs font-bold">
-                            قيد الرصد
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-slate-400 space-y-2">
-                <FileCheck className="w-8 h-8 mx-auto text-slate-300" />
-                <p className="text-xs font-bold">لا توجد اختبارات مسجلة بعد لهذا الطالب.</p>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Section 3: حالة المصروفات الشهرية (Financial Status) */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-blue-600" />
-              <span>حالة المصروفات الشهرية</span>
-            </h2>
-            <span className="text-xs font-semibold text-slate-500">
-              قيمة الاشتراك: {student.monthlyFee || 250} ج.م شهرياً
-            </span>
-          </div>
-
-          <div className="bg-white rounded-3xl p-5 sm:p-7 shadow-xs border border-slate-200/80">
-            {financials.length > 0 ? (
-              <div className="divide-y divide-slate-100">
-                {financials.map((fin) => {
-                  const isPaid = fin.status === "paid" || fin.paidAmount >= fin.totalAmount;
-                  const isPartial = !isPaid && fin.paidAmount > 0;
-
-                  return (
-                    <div
-                      key={fin.id}
-                      className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
-                    >
-                      <div className="space-y-0.5">
-                        <div className="text-sm font-bold text-slate-900 font-mono">
-                          شهر {fin.month}
-                        </div>
-                        {fin.notes && (
-                          <p className="text-xs text-slate-500 font-medium">{fin.notes}</p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-mono font-bold text-slate-600">
-                          {fin.paidAmount} / {fin.totalAmount} ج.م
-                        </span>
-
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                            isPaid
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : isPartial
-                              ? "bg-amber-50 text-amber-800 border-amber-200"
-                              : "bg-rose-50 text-rose-700 border-rose-200"
-                          }`}
-                        >
-                          {isPaid ? "مدفوع" : isPartial ? "مدفوع جزئياً" : "غير مدفوع"}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-slate-400 space-y-1">
-                <p className="text-xs font-bold">لا توجد سجلات مصروفات مسجلة بعد.</p>
-              </div>
-            )}
-          </div>
-        </section>
+        {/* Interactive Sections Client: Tabs for Attendance, Exams, and Financials */}
+        <ParentSectionsClient
+          attendance={attendance}
+          sessions={sessions}
+          grades={grades}
+          financials={financials}
+          student={student}
+          group={group || null}
+        />
 
         {/* Footer & Share / Bookmark Action */}
         <footer className="pt-4 pb-12 text-center space-y-6">

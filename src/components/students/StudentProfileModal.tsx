@@ -20,6 +20,7 @@ import {
   AlertCircle,
   CheckCircle2,
   XCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { Student } from "@/lib/types/management";
 import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
@@ -155,6 +156,32 @@ ${portalUrl}
     window.open(url, "_blank");
   };
 
+  const handleCheckParentWhatsApp = () => {
+    if (!profileData) return;
+    const s = profileData.student;
+    const g = profileData.group;
+    const phone = s.parentPhone?.replace(/\D/g, "");
+    if (!phone) {
+      alert("رقم هاتف ولي الأمر غير مسجل لهذا الطالب");
+      return;
+    }
+
+    const groupName = g?.name || s.groupName || "المجموعة";
+    const teacherName = g?.teacher ? `للأستاذ / ${g.teacher}` : "";
+
+    const msg = `السلام عليكم ورحمة الله وبركاته،
+تحية طيبة لحضرتك من إدارة السنتر ${teacherName}.
+
+نود التأكد والتحقق من أن هذا الرقم المسجل لدينا يخص بالفعل ولي أمر الطالب/ة: *${s.name}* (كود الطالب: ${s.code}) المقيد لدينا في: ${groupName}.
+
+نرجو من سيادتكم التكرم بالرد وتأكيد الاستلام، للتأكد من صحة بيانات الاتصال والاطمئنان لعدم تسجيل رقم غير صحيح أو وهمي، حتى تصلكم تقارير الحضور والغياب ودرجات الاختبارات والمصروفات أولاً بأول.
+
+شاكرين لحضرتكم حسن التعاون ونسعد دائماً بتواصلكم!`;
+
+    const cleanPhone = phone.startsWith("0") ? "2" + phone : phone;
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
   if (isLoading || !profileData) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
@@ -261,6 +288,15 @@ ${portalUrl}
             >
               <MessageCircle className="w-3.5 h-3.5" />
               <span>إرسال تقرير لولي الأمر (واتساب)</span>
+            </button>
+
+            <button
+              onClick={handleCheckParentWhatsApp}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-xs cursor-pointer border border-amber-600/30"
+              title="إرسال رسالة تحقق عبر واتساب للتأكد من أن الرقم يخص ولي الأمر وليس رقماً وهمياً"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>فحص رقم ولي الأمر (واتساب)</span>
             </button>
 
             <button
