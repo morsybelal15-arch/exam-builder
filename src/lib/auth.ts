@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 import { adminEnabled, getAppMode, getSessionCookieName } from "@/lib/app-mode";
 import { signSessionToken, verifySessionToken } from "@/lib/session-token";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 
 export interface SessionUser {
   id: string;
@@ -83,6 +84,10 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     const payload = verifySessionToken(cookieStore.get(getSessionCookieName())?.value);
     if (!payload || !isRoleAllowedHere(payload.role)) return null;
 
+    if (payload.id) {
+      setCurrentTenantId(payload.id);
+    }
+
     return {
       id: payload.id,
       phone: payload.phone,
@@ -92,6 +97,13 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Verifies an active session for API routes and initializes the request's tenant context.
+ */
+export async function requireApiSession(): Promise<SessionUser | null> {
+  return getSessionUser();
 }
 
 /** Throws unless the caller is the Super Admin on a process where admin is enabled. */

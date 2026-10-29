@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { friendlyGeminiError, refineQuestion, resolveApiKey, type QuestionType } from "@/lib/gemini";
-
-
+import { requireApiSession } from "@/lib/auth";
 
 /** AI agent pass on a single question: fix OCR typos, re-split options, solve, or format equations. */
 export async function POST(req: NextRequest) {
+  const session = await requireApiSession();
+  if (!session) {
+    return NextResponse.json({ success: false, error: "غير مصرح لك بالوصول." }, { status: 401 });
+  }
   let body: {
     question?: any;
     task?: "organize" | "fix_typos" | "solve" | "convert_type" | "generate_distractors";

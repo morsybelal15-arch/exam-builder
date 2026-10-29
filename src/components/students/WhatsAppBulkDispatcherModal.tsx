@@ -169,10 +169,13 @@ ${parentPortalUrl}`;
     const latestGrade = gradesList.length > 0 ? gradesList[0] : null;
 
     const paidMonths = financialsList
-      .filter((f: any) => f.status === "paid")
+      .filter((f: any) => f.status === "paid" && (f.paidAmount || 0) >= (f.totalAmount || student.monthlyFee || 250))
       .map((f: any) => f.month);
+    const partialMonths = financialsList
+      .filter((f: any) => (f.paidAmount || 0) > 0 && (f.paidAmount || 0) < (f.totalAmount || student.monthlyFee || 250))
+      .map((f: any) => `${f.month} (${f.paidAmount}/${f.totalAmount || student.monthlyFee || 250} ج.م)`);
     const unpaidMonths = financialsList
-      .filter((f: any) => f.status === "unpaid")
+      .filter((f: any) => f.status === "unpaid" || ((f.paidAmount || 0) === 0 && f.status !== "paid"))
       .map((f: any) => f.month);
 
     const gradeText = latestGrade
@@ -181,13 +184,20 @@ ${parentPortalUrl}`;
 
     const paidText =
       paidMonths.length > 0
-        ? `• الشهور المدفوعة: ${paidMonths.join("، ")}`
-        : "• لا توجد شهور مسجلة كمدفوعة";
+        ? `• الشهور المسددة بالكامل: ${paidMonths.join("، ")}`
+        : "• لا توجد شهور مسجلة كمسددة بالكامل";
+
+    const partialText =
+      partialMonths.length > 0
+        ? `\n• شهور مسددة جزئياً: ${partialMonths.join("، ")}`
+        : "";
 
     const unpaidText =
       unpaidMonths.length > 0
         ? `\n• الشهور المستحقة: ${unpaidMonths.join("، ")}`
-        : "\n• كافة الاشتراكات مسددة بالكامل بنجاح";
+        : partialMonths.length === 0
+        ? "\n• كافة الاشتراكات مسددة بالكامل بنجاح"
+        : "";
 
     return `السلام عليكم ورحمة الله وبركاته،
 ولي أمر الطالب/ة: *${student.name}* المحترم،
@@ -205,7 +215,7 @@ ${parentPortalUrl}`;
 ${gradeText}
 
 💳 *موقف الاشتراكات الشهرية:*
-${paidText}${unpaidText}
+${paidText}${partialText}${unpaidText}
 
 🔗 *رابط المتابعة المباشر والشامل لولي الأمر (بدون تسجيل دخول):*
 ${parentPortalUrl}

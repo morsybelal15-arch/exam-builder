@@ -4,16 +4,34 @@ import fs from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { getLocalUploadedFiles, addLocalUploadedFile, deleteLocalUploadedFile, getUploadsDir } from "@/lib/db";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Allow up to 5 minutes for heavy 200MB+ uploads
 
+function resolveUniqueDiskName(dir: string, baseName: string): string {
+  const safeBase = path.basename(baseName);
+  const candidate = path.join(dir, safeBase);
+  if (!fs.existsSync(candidate)) {
+    return safeBase;
+  }
+  const ext = path.extname(safeBase);
+  const stem = path.basename(safeBase, ext);
+  return `${stem}_${Date.now()}${ext}`;
+}
+
 export async function GET() {
   try {
-    const rawFiles = getLocalUploadedFiles();
-    const uploadsDir = getUploadsDir();
-    // Ensure every file has a valid filepath that can be loaded in the viewer and accurate size
+    const session = await requireApiSession();
+    if (!session) {
+      return NextResponse.json({ error: "غير مصرح لك بالوصول" }, { status: 401 });
+    }
+
+    const rawFiles = getLocalUploadedFiles(session.id);
+    const uploadsDir = getUploadsDir(session.id);
+    const defaultUploadsDir = getUploadsDir("default");
+
     const files = rawFiles.map((f: any) => {
       let fp = f.filepath;
       if (!fp || fp.trim() === "") {
@@ -21,12 +39,17 @@ export async function GET() {
       }
       let realSize = f.size;
       try {
-        const diskPath = path.join(uploadsDir, path.basename(f.name));
+        const diskName = fp.includes("?name=")
+          ? decodeURIComponent(fp.split("?name=").pop() || f.name)
+          : path.basename(f.name);
+        const diskPath = fs.existsSync(path.join(uploadsDir, diskName))
+          ? path.join(uploadsDir, diskName)
+          : path.join(defaultUploadsDir, diskName);
         if (fs.existsSync(diskPath)) {
           const stats = fs.statSync(diskPath);
           realSize = (stats.size / (1024 * 1024)).toFixed(1) + " ميجابايت";
         }
-      } catch {}
+      } catch { }
       return { ...f, size: realSize, filepath: fp };
     });
     return NextResponse.json({ success: true, files });
@@ -37,6 +60,12 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) {
+      return NextResponse.json({ error: "غير مصرح لك بالوصول" }, { status: 401 });
+    }
+
+    const tenantUploadsDir = getUploadsDir(session.id);
     const contentType = req.headers.get("content-type") || "";
     const uploadMode = req.headers.get("x-upload-mode") || "";
     const rawHeaderFileName = req.headers.get("x-file-name");
@@ -46,7 +75,8 @@ export async function POST(req: NextRequest) {
     if (uploadMode === "stream" || contentType === "application/octet-stream" || rawHeaderFileName) {
       const decodedName = rawHeaderFileName ? decodeURIComponent(rawHeaderFileName) : "مستند_مرفوع.pdf";
       const safeName = path.basename(decodedName);
-      const targetPath = path.join(getUploadsDir(), safeName);
+      const diskName = resolveUniqueDiskName(tenantUploadsDir, safeName);
+      const targetPath = path.join(tenantUploadsDir, diskName);
 
       if (!req.body) {
         return NextResponse.json({ error: "لا يوجد محتوى في تدفق الملف." }, { status: 400 });
@@ -67,15 +97,16 @@ export async function POST(req: NextRequest) {
       const fileType = isPdf ? "pdf" : isWord ? "word" : "image";
 
       const fileRecord = {
-        id: `f-${Date.now()}`,
+        id: `f-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         name: safeName,
         type: fileType,
         size: sizeMb,
+        size_bytes: bytes,
         date: "اليوم",
-        filepath: `/api/files/content?name=${encodeURIComponent(safeName)}`,
+        filepath: `/api/files/content?name=${encodeURIComponent(diskName)}`,
       };
 
-      addLocalUploadedFile(fileRecord);
+      addLocalUploadedFile(fileRecord, session.id);
 
       return NextResponse.json({
         success: true,
@@ -94,7 +125,8 @@ export async function POST(req: NextRequest) {
 
       const fileName = file.name || "مستند_جديد.png";
       const safeName = path.basename(fileName);
-      const targetPath = path.join(getUploadsDir(), safeName);
+      const diskName = resolveUniqueDiskName(tenantUploadsDir, safeName);
+      const targetPath = path.join(tenantUploadsDir, diskName);
 
       // Stream file directly to write stream to prevent node heap overflow on 200MB+ files
       const nodeStream = Readable.fromWeb(file.stream() as any);
@@ -107,15 +139,16 @@ export async function POST(req: NextRequest) {
       const fileType = isPdf ? "pdf" : isWord ? "word" : "image";
 
       const fileRecord = {
-        id: `f-${Date.now()}`,
+        id: `f-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         name: safeName,
         type: fileType,
         size: sizeMb,
+        size_bytes: file.size,
         date: "اليوم",
-        filepath: `/api/files/content?name=${encodeURIComponent(safeName)}`,
+        filepath: `/api/files/content?name=${encodeURIComponent(diskName)}`,
       };
 
-      addLocalUploadedFile(fileRecord);
+      addLocalUploadedFile(fileRecord, session.id);
 
       return NextResponse.json({
         success: true,
@@ -130,6 +163,7 @@ export async function POST(req: NextRequest) {
     const safeName = path.basename(name || "ملف_جديد.png");
 
     let finalFilepath = filepath || "";
+    let sizeBytes = 0;
 
     // If base64 payload is provided, save to disk to keep database light & fast
     if (filepath && typeof filepath === "string" && filepath.startsWith("data:")) {
@@ -137,9 +171,11 @@ export async function POST(req: NextRequest) {
         const matches = filepath.match(/^data:([^;]+);base64,(.+)$/);
         if (matches && matches[2]) {
           const buffer = Buffer.from(matches[2], "base64");
-          const targetPath = path.join(getUploadsDir(), safeName);
+          sizeBytes = buffer.length;
+          const diskName = resolveUniqueDiskName(tenantUploadsDir, safeName);
+          const targetPath = path.join(tenantUploadsDir, diskName);
           fs.writeFileSync(targetPath, buffer);
-          finalFilepath = `/api/files/content?name=${encodeURIComponent(safeName)}`;
+          finalFilepath = `/api/files/content?name=${encodeURIComponent(diskName)}`;
         }
       } catch (err) {
         console.warn("Could not save base64 to uploads folder, keeping original:", err);
@@ -149,15 +185,16 @@ export async function POST(req: NextRequest) {
     }
 
     const fileRecord = {
-      id: id || `f-${Date.now()}`,
+      id: id || `f-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: safeName,
       type: type || (safeName.endsWith(".pdf") ? "pdf" : "image"),
-      size: size || "1.0 ميجابايت",
+      size: size || (sizeBytes > 0 ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} ميجابايت` : "1.0 ميجابايت"),
+      size_bytes: sizeBytes,
       date: date || "اليوم",
       filepath: finalFilepath,
     };
 
-    addLocalUploadedFile(fileRecord);
+    addLocalUploadedFile(fileRecord, session.id);
 
     return NextResponse.json({
       success: true,
@@ -171,6 +208,11 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) {
+      return NextResponse.json({ error: "غير مصرح لك بالوصول" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     const name = searchParams.get("name");
@@ -178,17 +220,34 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Missing file ID or name" }, { status: 400 });
     }
 
+    let deletedRecord: any = null;
     if (id) {
-      deleteLocalUploadedFile(id);
+      deletedRecord = deleteLocalUploadedFile(id, session.id);
     }
 
+    const candidateNames = new Set<string>();
     if (name) {
-      const safeName = path.basename(name);
-      const filePath = path.join(getUploadsDir(), safeName);
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch {}
+      candidateNames.add(path.basename(name));
+    }
+    if (deletedRecord?.filepath && typeof deletedRecord.filepath === "string" && deletedRecord.filepath.includes("?name=")) {
+      const fromUrl = decodeURIComponent(deletedRecord.filepath.split("?name=").pop() || "");
+      if (fromUrl) candidateNames.add(path.basename(fromUrl));
+    }
+    if (deletedRecord?.name) {
+      candidateNames.add(path.basename(deletedRecord.name));
+    }
+
+    const tenantUploadsDir = getUploadsDir(session.id);
+    const defaultUploadsDir = getUploadsDir("default");
+
+    for (const safeName of candidateNames) {
+      for (const dir of [tenantUploadsDir, defaultUploadsDir]) {
+        const filePath = path.join(dir, safeName);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+          } catch { }
+        }
       }
     }
 

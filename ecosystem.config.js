@@ -45,9 +45,11 @@ module.exports = {
       args: "start -p 3015 -H 127.0.0.1",
       env: {
         NODE_ENV: "production",
-        APP_MODE: "tenant",
+        APP_MODE: "all",
         PORT: "3015",
+        VPS_LOCAL_EXEC: "1",
         ...readEnvFile(".env.tenant"),
+        ...readEnvFile(".env.admin"),
       },
     },
     {

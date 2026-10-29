@@ -24,6 +24,7 @@ export interface Student {
   notes?: string;
   createdAt: number;
   updatedAt: number;
+  leftAt?: number;
 }
 
 export type PaymentStatus = "paid" | "unpaid" | "returned";

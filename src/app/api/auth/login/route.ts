@@ -3,6 +3,7 @@ import { createSessionCookie, verifyPassword } from "@/lib/auth";
 import { getAppMode } from "@/lib/app-mode";
 import { isAdminConfigured, verifyAdminCredentials } from "@/lib/admin-credentials";
 import { findTenantByPhone, getTenantAccessBlock } from "@/lib/tenants-repository";
+import { getFirstAllowedRoute } from "@/lib/app-features";
 
 const INVALID = "بيانات تسجيل الدخول غير صحيحة";
 
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest) {
       success: true,
       message: "تم تسجيل الدخول بنجاح",
       role: "TENANT",
-      redirectUrl: "/",
+      redirectUrl: getFirstAllowedRoute(user.enabledFeatures),
     });
   } catch (error: any) {
     console.error("Login authentication error:", error);

@@ -8,6 +8,7 @@ import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
 import StudentProfileClient from "./StudentProfileClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  await getSessionUser();
   const { id } = await params;
   const profile = getFullStudentProfile(id);
   if (!profile || !profile.student) {

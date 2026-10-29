@@ -52,8 +52,129 @@ export default function ImagesToPdfPage() {
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const [isNameModalOpen, setIsNameModalOpen] = useState<boolean>(false);
   const [pdfName, setPdfName] = useState<string>("مستند_أوراق_الاختبار.pdf");
-  const [savedFile, setSavedFile] = useState<{ id: string; name: string } | null>(null);
+  const [savedFile, setSavedFile] = useState<{ id: string; name: string; filepath?: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Convert queued images into a real multi-page A4 PDF Blob (pure browser canvas + PDF 1.4 DCTDecode)
+  const buildPdfBlobFromImages = async (items: QueuedImage[]): Promise<Blob> => {
+    const pageJpegs: Array<{ bytes: Uint8Array; width: number; height: number }> = [];
+
+    for (const item of items) {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.crossOrigin = "anonymous";
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = item.previewUrl;
+      });
+
+      const maxDim = 1800;
+      let w = img.naturalWidth || img.width || 800;
+      let h = img.naturalHeight || img.height || 1100;
+      if (w > maxDim || h > maxDim) {
+        const scale = Math.min(maxDim / w, maxDim / h);
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+      }
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const base64 = dataUrl.split(",")[1] || "";
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      pageJpegs.push({ bytes, width: w, height: h });
+    }
+
+    const encoder = new TextEncoder();
+    const chunks: Uint8Array[] = [];
+    const offsets: number[] = [0]; // 1-indexed PDF object byte offsets
+    let currentOffset = 0;
+
+    const pushStr = (s: string) => {
+      const arr = encoder.encode(s);
+      chunks.push(arr);
+      currentOffset += arr.length;
+    };
+    const pushBytes = (arr: Uint8Array) => {
+      chunks.push(arr);
+      currentOffset += arr.length;
+    };
+
+    pushStr("%PDF-1.4\n%\xFF\xFF\xFF\xFF\n");
+
+    const pageCount = pageJpegs.length;
+    const pageObjIds: number[] = [];
+    for (let i = 0; i < pageCount; i++) {
+      pageObjIds.push(3 + i * 3);
+    }
+
+    offsets[1] = currentOffset;
+    pushStr("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    offsets[2] = currentOffset;
+    pushStr(`2 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageCount} >>\nendobj\n`);
+
+    const a4W = 595.28;
+    const a4H = 841.89;
+
+    for (let i = 0; i < pageCount; i++) {
+      const { bytes, width, height } = pageJpegs[i];
+      const pageObjId = 3 + i * 3;
+      const contentObjId = pageObjId + 1;
+      const imgObjId = pageObjId + 2;
+
+      const margin = 18;
+      const availW = a4W - margin * 2;
+      const availH = a4H - margin * 2;
+      const ratio = Math.min(availW / width, availH / height);
+      const drawW = (width * ratio).toFixed(2);
+      const drawH = (height * ratio).toFixed(2);
+      const drawX = ((a4W - width * ratio) / 2).toFixed(2);
+      const drawY = ((a4H - height * ratio) / 2).toFixed(2);
+
+      const contentStream = `q\n${drawW} 0 0 ${drawH} ${drawX} ${drawY} cm\n/Im${i} Do\nQ\n`;
+      const contentBytes = encoder.encode(contentStream);
+
+      offsets[pageObjId] = currentOffset;
+      pushStr(
+        `${pageObjId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${a4W} ${a4H}] /Resources << /XObject << /Im${i} ${imgObjId} 0 R >> >> /Contents ${contentObjId} 0 R >>\nendobj\n`
+      );
+
+      offsets[contentObjId] = currentOffset;
+      pushStr(`${contentObjId} 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`);
+      pushBytes(contentBytes);
+      pushStr("\nendstream\nendobj\n");
+
+      offsets[imgObjId] = currentOffset;
+      pushStr(
+        `${imgObjId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bytes.length} >>\nstream\n`
+      );
+      pushBytes(bytes);
+      pushStr("\nendstream\nendobj\n");
+    }
+
+    const totalObjs = 2 + pageCount * 3;
+    const xrefOffset = currentOffset;
+    pushStr(`xref\n0 ${totalObjs + 1}\n0000000000 65535 f \n`);
+    for (let id = 1; id <= totalObjs; id++) {
+      pushStr(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+    }
+    pushStr(`trailer\n<< /Size ${totalObjs + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+    return new Blob(chunks as BlobPart[], { type: "application/pdf" });
+  };
 
   // Drag and drop image reordering states
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -105,31 +226,32 @@ export default function ImagesToPdfPage() {
     const trimmed = pdfName.trim() || "مستند_أوراق_الاختبار";
     const finalName = trimmed.toLowerCase().endsWith(".pdf") ? trimmed : `${trimmed}.pdf`;
 
-    // Process simulation
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    const newFileItem = {
-      id: `f-${Date.now()}`,
-      name: finalName,
-      type: "pdf" as const,
-      size: `${(images.length * 0.9).toFixed(1)} ميجابايت`,
-      date: "اليوم",
-      filepath: images[0]?.previewUrl || "/sample-textbook.svg",
-    };
-
     try {
-      await fetch("/api/files", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newFileItem),
-      });
-    } catch (err) {
-      console.error("Failed to save PDF to uploaded files", err);
-    }
+      const pdfBlob = await buildPdfBlobFromImages(images);
+      const pdfFile = new File([pdfBlob], finalName, { type: "application/pdf" });
+      const formData = new FormData();
+      formData.append("file", pdfFile);
 
-    setSavedFile(newFileItem);
-    setIsGenerating(false);
-    setIsSuccess(true);
+      const res = await fetch("/api/files", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data?.file) {
+        setSavedFile(data.file);
+      } else {
+        setSavedFile({
+          id: `f-${Date.now()}`,
+          name: finalName,
+          filepath: `/api/files/content?name=${encodeURIComponent(finalName)}`,
+        });
+      }
+      setIsSuccess(true);
+    } catch (err) {
+      console.error("Failed to generate and save PDF to uploaded files", err);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -166,18 +288,23 @@ export default function ImagesToPdfPage() {
                 <span>قسم الملفات المرفوعة</span>
               </Link>
               <Link
-                href="/exam-builder"
+                href={
+                  savedFile?.filepath
+                    ? `/exam-builder?file=${encodeURIComponent(savedFile.filepath)}&type=pdf&name=${encodeURIComponent(savedFile.name)}`
+                    : "/exam-builder"
+                }
                 className="inline-flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
               >
                 <span>منشئ الاختبارات</span>
               </Link>
-              <button
-                onClick={() => alert(`جاري تحميل الملف: ${savedFile?.name || pdfName}`)}
+              <a
+                href={savedFile?.filepath || `/api/files/content?name=${encodeURIComponent(savedFile?.name || pdfName)}`}
+                download={savedFile?.name || `${pdfName}.pdf`}
                 className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
               >
                 <FileDown className="w-4 h-4" />
                 <span>تحميل</span>
-              </button>
+              </a>
             </div>
           </div>
         )}

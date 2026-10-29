@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { resolveApiKey, CANDIDATE_MODELS } from "@/lib/gemini";
 import { getStudents, saveStudentGrade } from "@/lib/management-db";
+import { requireApiSession } from "@/lib/auth";
 
 function stripDataUrl(b64: string): { data: string; mimeType: string } {
   const match = b64.match(/^data:(image\/[\w+.-]+);base64,([\s\S]*)$/);
@@ -11,6 +12,10 @@ function stripDataUrl(b64: string): { data: string; mimeType: string } {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) {
+      return NextResponse.json({ error: "غير مصرح لك بالوصول" }, { status: 401 });
+    }
     const body = await req.json();
     const { imageBase64, groupId, examRecordId, apiKey: requestApiKey, autoSave } = body;
 

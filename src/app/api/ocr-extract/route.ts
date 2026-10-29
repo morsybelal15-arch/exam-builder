@@ -8,6 +8,10 @@ import {
   resolveApiKey,
   type ExtractedQuestion,
 } from "@/lib/gemini";
+import { requireApiSession } from "@/lib/auth";
+
+// Passage extraction (long text + several questions) can take 30s+.
+export const maxDuration = 120;
 
 
 
@@ -59,6 +63,10 @@ function runLocalArabicOcr(imageBase64: string): Promise<{ rawText: string; ques
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireApiSession();
+  if (!session) {
+    return NextResponse.json({ success: false, error: "غير مصرح لك بالوصول." }, { status: 401 });
+  }
   let body: { imageBase64?: string; apiKey?: string };
   try {
     body = await req.json();

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { testGeminiKey, resolveApiKey, friendlyGeminiError } from "@/lib/gemini";
+import { testGeminiKey } from "@/lib/gemini";
+import { requireApiSession } from "@/lib/auth";
 import fs from "node:fs";
 import path from "node:path";
 
-
-
 export async function GET(req: NextRequest) {
+  const session = await requireApiSession();
+  if (!session) {
+    return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
+  }
   const headerKey = req.headers.get("x-gemini-key");
   const envKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   const key = (headerKey || "").trim() || envKey;
@@ -18,6 +21,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireApiSession();
+  if (!session) {
+    return NextResponse.json({ success: false, error: "غير مصرح" }, { status: 401 });
+  }
   let body: { apiKey?: string; saveToEnv?: boolean };
   try {
     body = await req.json();
@@ -42,8 +49,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Optionally persist to .env.local
-  if (body.saveToEnv !== false) {
+  // Only persist to global .env.local when Super Admin or in local development
+  const canWriteServerEnv = session.role === "SUPER_ADMIN" || process.env.NODE_ENV !== "production";
+  if (body.saveToEnv !== false && canWriteServerEnv) {
     try {
       const envPath = path.join(process.cwd(), ".env.local");
       let content = "";

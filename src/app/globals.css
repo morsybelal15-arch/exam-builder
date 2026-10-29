@@ -1,8 +1,626 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f8fafc;
+/* ============================================================================
+   UNIFIED MULTI-THEME DESIGN SYSTEM
+   ----------------------------------------------------------------------------
+   To switch or create a new theme (e.g., Dark Mode, Orange, Burgundy Red),
+   you only need to override the 4 core semantic token groups below on
+   `:root` or `[data-theme="..."]`! Every Tailwind utility across the entire
+   app automatically inherits from these unified variables.
+   ============================================================================ */
+
+:root,
+:host {
+  /* Surface & Typography Tokens */
+  --background: #f4f6fa;
   --foreground: #1e293b;
+  --theme-bg: #f4f6fa;
+  --theme-surface: #ffffff;
+  --theme-text: #1e293b;
+
+  /* --------------------------------------------------------------------------
+     PILLAR 1: PRIMARY THEME PALETTE (Sidebar & Primary Actions - Text in White)
+     Change these 11 shades (or set [data-theme]) to re-skin the entire app!
+     -------------------------------------------------------------------------- */
+  --theme-primary-50: #eff6ff;
+  --theme-primary-100: #dbeafe;
+  --theme-primary-200: #bfdbfe;
+  --theme-primary-300: #93c5fd;
+  --theme-primary-400: #60a5fa;
+  --theme-primary-500: #2563eb;
+  --theme-primary-600: #1b64f2;
+  --theme-primary-700: #1554d1;
+  --theme-primary-800: #1246b5;
+  --theme-primary-900: #1e3a8a;
+  --theme-primary-950: #172554;
+
+  /* --------------------------------------------------------------------------
+     PILLAR 2: SUCCESS / POSITIVE PALETTE (Green)
+     -------------------------------------------------------------------------- */
+  --theme-success-50: #ecfdf5;
+  --theme-success-100: #d1fae5;
+  --theme-success-200: #a7f3d0;
+  --theme-success-300: #6ee7b7;
+  --theme-success-400: #34d399;
+  --theme-success-500: #00c875;
+  --theme-success-600: #00b368;
+  --theme-success-700: #047857;
+  --theme-success-800: #065f46;
+
+  /* --------------------------------------------------------------------------
+     PILLAR 3: DANGER / NEGATIVE PALETTE (Red - Opposite of Green)
+     -------------------------------------------------------------------------- */
+  --theme-danger-50: #fef2f2;
+  --theme-danger-100: #fee2e2;
+  --theme-danger-200: #fecaca;
+  --theme-danger-300: #fca5a5;
+  --theme-danger-400: #f87171;
+  --theme-danger-500: #ef4444;
+  --theme-danger-600: #e11d48;
+  --theme-danger-700: #be123c;
+  --theme-danger-800: #9f1239;
+
+  /* --------------------------------------------------------------------------
+     PILLAR 4: NEUTRAL PALETTE (Slate Gray)
+     -------------------------------------------------------------------------- */
+  --theme-neutral-50: #f8fafc;
+  --theme-neutral-100: #f1f5f9;
+  --theme-neutral-200: #e2e8f0;
+  --theme-neutral-300: #cbd5e1;
+  --theme-neutral-400: #94a3b8;
+  --theme-neutral-500: #64748b;
+  --theme-neutral-600: #475569;
+  --theme-neutral-700: #334155;
+  --theme-neutral-800: #1e293b;
+  --theme-neutral-900: #0f172a;
+  --theme-neutral-950: #020617;
+
+  /* ==========================================================================
+     TAILWIND UTILITY BINDINGS (Auto-bound to the 4 Theme Pillars above)
+     ========================================================================== */
+
+  /* Bind Blue, Indigo, Violet, Purple, Sky, Cyan -> PILLAR 1 (Primary) */
+  --color-blue-50: var(--theme-primary-50);
+  --color-blue-100: var(--theme-primary-100);
+  --color-blue-200: var(--theme-primary-200);
+  --color-blue-300: var(--theme-primary-300);
+  --color-blue-400: var(--theme-primary-400);
+  --color-blue-500: var(--theme-primary-500);
+  --color-blue-600: var(--theme-primary-600);
+  --color-blue-700: var(--theme-primary-700);
+  --color-blue-800: var(--theme-primary-800);
+  --color-blue-900: var(--theme-primary-900);
+  --color-blue-950: var(--theme-primary-950);
+
+  --color-indigo-50: var(--theme-primary-50);
+  --color-indigo-100: var(--theme-primary-100);
+  --color-indigo-200: var(--theme-primary-200);
+  --color-indigo-300: var(--theme-primary-300);
+  --color-indigo-400: var(--theme-primary-400);
+  --color-indigo-500: var(--theme-primary-500);
+  --color-indigo-600: var(--theme-primary-600);
+  --color-indigo-700: var(--theme-primary-700);
+  --color-indigo-800: var(--theme-primary-800);
+  --color-indigo-900: var(--theme-primary-900);
+  --color-indigo-950: var(--theme-primary-950);
+
+  --color-violet-50: var(--theme-primary-50);
+  --color-violet-100: var(--theme-primary-100);
+  --color-violet-200: var(--theme-primary-200);
+  --color-violet-300: var(--theme-primary-300);
+  --color-violet-400: var(--theme-primary-400);
+  --color-violet-500: var(--theme-primary-500);
+  --color-violet-600: var(--theme-primary-600);
+  --color-violet-700: var(--theme-primary-700);
+  --color-violet-800: var(--theme-primary-800);
+  --color-violet-900: var(--theme-primary-900);
+
+  --color-purple-50: var(--theme-primary-50);
+  --color-purple-100: var(--theme-primary-100);
+  --color-purple-200: var(--theme-primary-200);
+  --color-purple-300: var(--theme-primary-300);
+  --color-purple-400: var(--theme-primary-400);
+  --color-purple-500: var(--theme-primary-500);
+  --color-purple-600: var(--theme-primary-600);
+  --color-purple-700: var(--theme-primary-700);
+  --color-purple-800: var(--theme-primary-800);
+  --color-purple-900: var(--theme-primary-900);
+
+  --color-sky-50: var(--theme-primary-50);
+  --color-sky-100: var(--theme-primary-100);
+  --color-sky-200: var(--theme-primary-200);
+  --color-sky-300: var(--theme-primary-300);
+  --color-sky-400: var(--theme-primary-400);
+  --color-sky-500: var(--theme-primary-500);
+  --color-sky-600: var(--theme-primary-600);
+  --color-sky-700: var(--theme-primary-700);
+
+  --color-cyan-50: var(--theme-primary-50);
+  --color-cyan-100: var(--theme-primary-100);
+  --color-cyan-500: var(--theme-primary-500);
+  --color-cyan-600: var(--theme-primary-600);
+  --color-cyan-700: var(--theme-primary-700);
+
+  /* Bind Emerald, Green, Teal -> PILLAR 2 (Success Green) */
+  --color-emerald-50: var(--theme-success-50);
+  --color-emerald-100: var(--theme-success-100);
+  --color-emerald-200: var(--theme-success-200);
+  --color-emerald-300: var(--theme-success-300);
+  --color-emerald-400: var(--theme-success-400);
+  --color-emerald-500: var(--theme-success-500);
+  --color-emerald-600: var(--theme-success-600);
+  --color-emerald-700: var(--theme-success-700);
+  --color-emerald-800: var(--theme-success-800);
+
+  --color-green-50: var(--theme-success-50);
+  --color-green-100: var(--theme-success-100);
+  --color-green-200: var(--theme-success-200);
+  --color-green-300: var(--theme-success-300);
+  --color-green-400: var(--theme-success-400);
+  --color-green-500: var(--theme-success-500);
+  --color-green-600: var(--theme-success-600);
+  --color-green-700: var(--theme-success-700);
+  --color-green-800: var(--theme-success-800);
+
+  --color-teal-50: var(--theme-success-50);
+  --color-teal-100: var(--theme-success-100);
+  --color-teal-200: var(--theme-success-200);
+  --color-teal-500: var(--theme-success-500);
+  --color-teal-600: var(--theme-success-600);
+  --color-teal-700: var(--theme-success-700);
+
+  /* Bind Red, Rose -> PILLAR 3 (Danger Red) */
+  --color-red-50: var(--theme-danger-50);
+  --color-red-100: var(--theme-danger-100);
+  --color-red-200: var(--theme-danger-200);
+  --color-red-300: var(--theme-danger-300);
+  --color-red-400: var(--theme-danger-400);
+  --color-red-500: var(--theme-danger-500);
+  --color-red-600: var(--theme-danger-600);
+  --color-red-700: var(--theme-danger-700);
+  --color-red-800: var(--theme-danger-800);
+
+  --color-rose-50: var(--theme-danger-50);
+  --color-rose-100: var(--theme-danger-100);
+  --color-rose-200: var(--theme-danger-200);
+  --color-rose-300: var(--theme-danger-300);
+  --color-rose-400: var(--theme-danger-400);
+  --color-rose-500: var(--theme-danger-500);
+  --color-rose-600: var(--theme-danger-600);
+  --color-rose-700: var(--theme-danger-700);
+  --color-rose-800: var(--theme-danger-800);
+
+  --color-pink-50: var(--theme-danger-50);
+  --color-pink-100: var(--theme-danger-100);
+  --color-pink-200: var(--theme-danger-200);
+  --color-pink-500: var(--theme-danger-500);
+  --color-pink-600: var(--theme-danger-600);
+  --color-pink-700: var(--theme-danger-700);
+
+  /* Bind Slate, Gray, Zinc, Amber, Orange, Yellow -> PILLAR 4 (Neutral) */
+  --color-slate-50: var(--theme-neutral-50);
+  --color-slate-100: var(--theme-neutral-100);
+  --color-slate-200: var(--theme-neutral-200);
+  --color-slate-300: var(--theme-neutral-300);
+  --color-slate-400: var(--theme-neutral-400);
+  --color-slate-500: var(--theme-neutral-500);
+  --color-slate-600: var(--theme-neutral-600);
+  --color-slate-700: var(--theme-neutral-700);
+  --color-slate-800: var(--theme-neutral-800);
+  --color-slate-900: var(--theme-neutral-900);
+  --color-slate-950: var(--theme-neutral-950);
+
+  --color-amber-50: var(--theme-neutral-100);
+  --color-amber-100: var(--theme-neutral-200);
+  --color-amber-200: var(--theme-neutral-300);
+  --color-amber-300: var(--theme-neutral-400);
+  --color-amber-400: var(--theme-neutral-500);
+  --color-amber-500: var(--theme-neutral-500);
+  --color-amber-600: var(--theme-neutral-600);
+  --color-amber-700: var(--theme-neutral-700);
+  --color-amber-800: var(--theme-neutral-800);
+  --color-amber-900: var(--theme-neutral-900);
+  --color-amber-950: var(--theme-neutral-950);
+
+  --color-orange-50: var(--theme-neutral-100);
+  --color-orange-100: var(--theme-neutral-200);
+  --color-orange-200: var(--theme-neutral-300);
+  --color-orange-300: var(--theme-neutral-400);
+  --color-orange-400: var(--theme-neutral-500);
+  --color-orange-500: var(--theme-neutral-500);
+  --color-orange-600: var(--theme-neutral-600);
+  --color-orange-700: var(--theme-neutral-700);
+  --color-orange-800: var(--theme-neutral-800);
+
+  --color-yellow-50: var(--theme-neutral-100);
+  --color-yellow-100: var(--theme-neutral-200);
+  --color-yellow-200: var(--theme-neutral-300);
+  --color-yellow-300: var(--theme-neutral-400);
+  --color-yellow-400: var(--theme-neutral-500);
+  --color-yellow-500: var(--theme-neutral-500);
+  --color-yellow-600: var(--theme-neutral-600);
+  --color-yellow-700: var(--theme-neutral-700);
+}
+
+/* ============================================================================
+   READY-TO-USE THEME PRESETS
+   Switch via <html data-theme="default | orange | burgundy | emerald | violet | dark">
+   ============================================================================ */
+
+/* Theme Preset 1: Orange Theme (ثيم برتقالي دافئ) */
+[data-theme="orange"] {
+  --theme-primary-50: #fff7ed;
+  --theme-primary-100: #ffedd5;
+  --theme-primary-200: #fed7aa;
+  --theme-primary-300: #fdba74;
+  --theme-primary-400: #fb923c;
+  --theme-primary-500: #f97316;
+  --theme-primary-600: #ea580c;
+  --theme-primary-700: #c2410c;
+  --theme-primary-800: #9a3412;
+  --theme-primary-900: #7c2d12;
+  --theme-primary-950: #431407;
+}
+
+/* Theme Preset 2: Burgundy Red Theme (ثيم أحمر برجاندي ملكي) */
+[data-theme="burgundy"] {
+  --theme-primary-50: #fff1f2;
+  --theme-primary-100: #ffe4e6;
+  --theme-primary-200: #fecdd3;
+  --theme-primary-300: #fda4af;
+  --theme-primary-400: #fb7185;
+  --theme-primary-500: #be123c;
+  --theme-primary-600: #881337;
+  --theme-primary-700: #6b0f2b;
+  --theme-primary-800: #4c0519;
+  --theme-primary-900: #3b0414;
+  --theme-primary-950: #26020d;
+}
+
+/* Theme Preset 3: Emerald Forest Theme (ثيم زمردي احترافي) */
+[data-theme="emerald"] {
+  --theme-primary-50: #ecfdf5;
+  --theme-primary-100: #d1fae5;
+  --theme-primary-200: #a7f3d0;
+  --theme-primary-300: #6ee7b7;
+  --theme-primary-400: #34d399;
+  --theme-primary-500: #10b981;
+  --theme-primary-600: #047857;
+  --theme-primary-700: #065f46;
+  --theme-primary-800: #064e3b;
+  --theme-primary-900: #022c22;
+  --theme-primary-950: #022c22;
+}
+
+/* Theme Preset 4: Royal Violet Theme (ثيم بنفسجي ملكي) */
+[data-theme="violet"] {
+  --theme-primary-50: #f5f3ff;
+  --theme-primary-100: #ede9fe;
+  --theme-primary-200: #ddd6fe;
+  --theme-primary-300: #c4b5fd;
+  --theme-primary-400: #a78bfa;
+  --theme-primary-500: #8b5cf6;
+  --theme-primary-600: #6d28d9;
+  --theme-primary-700: #5b21b6;
+  --theme-primary-800: #4c1d95;
+  --theme-primary-900: #2e1065;
+  --theme-primary-950: #1e0b4b;
+}
+
+/* Theme Preset 5: Dark Mode (دارك مود احترافي شامل لكل أجزاء التطبيق) */
+[data-theme="dark"],
+.dark {
+  color-scheme: dark;
+
+  --background: #0b1120;
+  --foreground: #f8fafc;
+  --theme-bg: #0b1120;
+  --theme-surface: #131c31;
+  --theme-text: #f8fafc;
+
+  /* Keep vibrant royal blue for primary buttons & badges, deep slate-blue for sidebar gradient */
+  --theme-primary-50: rgba(59, 130, 246, 0.14);
+  --theme-primary-100: rgba(59, 130, 246, 0.24);
+  --theme-primary-200: rgba(59, 130, 246, 0.36);
+  --theme-primary-300: #60a5fa;
+  --theme-primary-400: #60a5fa;
+  --theme-primary-500: #3b82f6;
+  --theme-primary-600: #2563eb;
+  --theme-primary-700: #1d4ed8;
+  --theme-primary-800: #1e293b;
+  --theme-primary-900: #0f172a;
+  --theme-primary-950: #020617;
+
+  /* Dark-mode friendly soft emerald & red tints */
+  --theme-success-50: rgba(16, 185, 129, 0.14);
+  --theme-success-100: rgba(16, 185, 129, 0.24);
+  --theme-success-200: rgba(16, 185, 129, 0.35);
+  --theme-success-700: #34d399;
+  --theme-success-800: #6ee7b7;
+
+  --theme-danger-50: rgba(244, 63, 94, 0.14);
+  --theme-danger-100: rgba(244, 63, 94, 0.24);
+  --theme-danger-200: rgba(244, 63, 94, 0.35);
+  --theme-danger-700: #fb7185;
+  --theme-danger-800: #fda4af;
+
+  /* Invert Neutral Scale: Light surfaces become dark, Dark text becomes bright */
+  --theme-neutral-50: #0f172a;
+  --theme-neutral-100: #1e293b;
+  --theme-neutral-200: #334155;
+  --theme-neutral-300: #475569;
+  --theme-neutral-400: #94a3b8;
+  --theme-neutral-500: #cbd5e1;
+  --theme-neutral-600: #e2e8f0;
+  --theme-neutral-700: #f1f5f9;
+  --theme-neutral-800: #f8fafc;
+  --theme-neutral-900: #ffffff;
+  --theme-neutral-950: #ffffff;
+}
+
+/* ============================================================================
+   COMPREHENSIVE DARK MODE ENGINE
+   Converts white cards, headers, modals, tabs, filters, tables, inputs, and
+   loading skeletons to dark surfaces while preserving crisp white text inside
+   buttons, badges, and the sidebar, and keeping A4 print sheets pure white.
+   ============================================================================ */
+
+/* 1. Main Page & App Backgrounds */
+[data-theme="dark"] body,
+[data-theme="dark"] main,
+[data-theme="dark"] .bg-\[\#F4F6FA\] {
+  background-color: #0b1120 !important;
+  color: #f8fafc !important;
+}
+
+/* 2. Cards, Containers, Headers, Modals, Dropdowns, Tables (excluding A4 paper) */
+[data-theme="dark"] header.bg-white,
+[data-theme="dark"] aside.bg-white,
+[data-theme="dark"] aside > div.bg-white,
+[data-theme="dark"] div.bg-white:not(.a4-page-sheet):not(.a4-page-sheet *),
+[data-theme="dark"] section.bg-white:not(.a4-page-sheet *),
+[data-theme="dark"] form.bg-white:not(.a4-page-sheet *),
+[data-theme="dark"] table.bg-white:not(.a4-page-sheet *),
+[data-theme="dark"] tbody.bg-white:not(.a4-page-sheet *),
+[data-theme="dark"] ul.bg-white:not(.a4-page-sheet *),
+[data-theme="dark"] nav.bg-white:not(.a4-page-sheet *) {
+  background-color: #131c31 !important;
+  color: #f8fafc;
+}
+
+/* Semi-transparent white surfaces (e.g. bg-white/60, bg-white/80, bg-white/90) */
+[data-theme="dark"] .bg-white\/50:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-white\/60:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-white\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-white\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-white\/90:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-white\/95:not(.a4-page-sheet *) {
+  background-color: rgba(19, 28, 49, 0.92) !important;
+}
+
+/* 3. Buttons & Tabs with bg-white (Active Tabs, Secondary Action Buttons, Sidebar CTA) */
+[data-theme="dark"] button.bg-white:not(.a4-page-sheet *),
+[data-theme="dark"] a.bg-white:not(.a4-page-sheet *) {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+[data-theme="dark"] button.bg-white:hover:not(.a4-page-sheet *),
+[data-theme="dark"] a.bg-white:hover:not(.a4-page-sheet *) {
+  background-color: #283548 !important;
+}
+
+/* Active tab buttons & primary white pill buttons: make blue-600 text bright sky-blue for high contrast on dark tab */
+[data-theme="dark"] .text-blue-600:not(.a4-page-sheet *),
+[data-theme="dark"] .text-blue-700:not(.a4-page-sheet *),
+[data-theme="dark"] .text-indigo-600:not(.a4-page-sheet *),
+[data-theme="dark"] .text-indigo-700:not(.a4-page-sheet *) {
+  color: #60a5fa !important;
+}
+[data-theme="dark"] .group:hover .group-hover\:text-blue-600:not(.a4-page-sheet *),
+[data-theme="dark"] .hover\:text-blue-600:hover:not(.a4-page-sheet *) {
+  color: #93c5fd !important;
+}
+
+/* 4. Inputs, Selects, Textareas & Search Bars */
+[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.a4-page-sheet *),
+[data-theme="dark"] select:not(.a4-page-sheet *),
+[data-theme="dark"] textarea:not(.a4-page-sheet *) {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+[data-theme="dark"] input:not(.a4-page-sheet *)::placeholder,
+[data-theme="dark"] textarea:not(.a4-page-sheet *)::placeholder {
+  color: #64748b !important;
+}
+[data-theme="dark"] select:not(.a4-page-sheet *) option {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+/* 5. Borders & Table Dividers */
+[data-theme="dark"] .border-slate-100:not(.a4-page-sheet *),
+[data-theme="dark"] .border-slate-100\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .border-slate-100\/60:not(.a4-page-sheet *),
+[data-theme="dark"] .border-slate-200:not(.a4-page-sheet *),
+[data-theme="dark"] .border-slate-200\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .border-slate-200\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .border-slate-200\/60:not(.a4-page-sheet *),
+[data-theme="dark"] .border-gray-100:not(.a4-page-sheet *),
+[data-theme="dark"] .border-gray-200:not(.a4-page-sheet *) {
+  border-color: #1e293b !important;
+}
+[data-theme="dark"] .border-slate-300:not(.a4-page-sheet *) {
+  border-color: #334155 !important;
+}
+[data-theme="dark"] .divide-slate-100 > :not([hidden]) ~ :not([hidden]):not(.a4-page-sheet *),
+[data-theme="dark"] .divide-slate-200 > :not([hidden]) ~ :not([hidden]):not(.a4-page-sheet *) {
+  border-color: #1e293b !important;
+}
+
+/* 6. Table Rows, Financial Status Rows & Hover States */
+[data-theme="dark"] tr.hover\:bg-slate-50\/80:hover:not(.a4-page-sheet *),
+[data-theme="dark"] tr.hover\:bg-slate-50:hover:not(.a4-page-sheet *),
+[data-theme="dark"] .hover\:bg-slate-50:hover:not(.a4-page-sheet *),
+[data-theme="dark"] .hover\:bg-slate-100:hover:not(.a4-page-sheet *) {
+  background-color: rgba(30, 41, 59, 0.75) !important;
+}
+[data-theme="dark"] .bg-\[\#faf0e6\]:not(.a4-page-sheet *) {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+  color: #fde68a !important;
+}
+[data-theme="dark"] .hover\:bg-\[\#f5e6d3\]:hover:not(.a4-page-sheet *) {
+  background-color: rgba(245, 158, 11, 0.22) !important;
+}
+
+/* 7. Soft Badges & Status Pills (Blue, Emerald, Red, Neutral) */
+[data-theme="dark"] .bg-blue-50:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-blue-50\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-blue-50\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-blue-50\/60:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-blue-50\/40:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-indigo-50:not(.a4-page-sheet *) {
+  background-color: rgba(37, 99, 235, 0.18) !important;
+  border-color: rgba(59, 130, 246, 0.32) !important;
+}
+[data-theme="dark"] .bg-emerald-50:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-emerald-50\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-emerald-50\/30:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-emerald-100:not(.a4-page-sheet *) {
+  background-color: rgba(16, 185, 129, 0.16) !important;
+  color: #6ee7b7 !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+[data-theme="dark"] .bg-red-50:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-red-50\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-red-50\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-red-50\/60:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-red-50\/20:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-red-100:not(.a4-page-sheet *) {
+  background-color: rgba(244, 63, 94, 0.16) !important;
+  color: #fda4af !important;
+  border-color: rgba(244, 63, 94, 0.3) !important;
+}
+
+/* 8. Dark Floating Action Bars & Modals that use bg-slate-900 / bg-slate-800 */
+/* Because --theme-neutral-900 is inverted for text-slate-900, keep explicit dark backgrounds dark! */
+[data-theme="dark"] .bg-slate-900:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-950:not(.a4-page-sheet *) {
+  background-color: #090d16 !important;
+  color: #f8fafc !important;
+}
+[data-theme="dark"] .bg-slate-800:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-800\/80:not(.a4-page-sheet *) {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+[data-theme="dark"] .bg-slate-700:not(.a4-page-sheet *) {
+  background-color: #334155 !important;
+  color: #f8fafc !important;
+}
+[data-theme="dark"] .bg-slate-900\/50,
+[data-theme="dark"] .bg-slate-950\/70,
+[data-theme="dark"] .bg-slate-950\/80 {
+  background-color: rgba(2, 6, 23, 0.78) !important;
+}
+
+/* 9. Loading Skeletons (animate-pulse) */
+[data-theme="dark"] .animate-pulse .bg-slate-200,
+[data-theme="dark"] .animate-pulse .bg-slate-100,
+[data-theme="dark"] .animate-pulse .bg-slate-50 {
+  background-color: #1e293b !important;
+}
+
+/* 10. Neutral & Gray Badges, Chips, and Secondary Recess Surfaces */
+[data-theme="dark"] .bg-slate-700.text-white:not(.a4-page-sheet *) {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+  border: 1px solid #334155;
+}
+[data-theme="dark"] .bg-slate-200\/60:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-200\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-200\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-200:not(.a4-page-sheet *) {
+  background-color: #0b1120 !important;
+}
+[data-theme="dark"] .bg-slate-100\/70:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-100\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-100:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-50:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-50\/80:not(.a4-page-sheet *),
+[data-theme="dark"] .bg-slate-50\/60:not(.a4-page-sheet *) {
+  background-color: #0f172a !important;
+}
+[data-theme="dark"] thead.bg-slate-50:not(.a4-page-sheet *),
+[data-theme="dark"] thead.bg-slate-50\/80:not(.a4-page-sheet *) {
+  background-color: #0b1120 !important;
+  color: #94a3b8 !important;
+}
+
+/* 11. Protect A4 Print Preview Sheet (.a4-page-sheet) so Exam Papers & all internal
+   Question Cards, Option Boxes, Header Boxes, Empty State, and Inputs stay 100%
+   authentic Light Paper even when the surrounding app is in Dark Mode! */
+[data-theme="dark"] .a4-page-sheet {
+  color-scheme: light;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+
+  /* Restore Light-Mode Neutral & Slate Variables inside the physical A4 paper */
+  --theme-neutral-50: #f8fafc;
+  --theme-neutral-100: #f1f5f9;
+  --theme-neutral-200: #e2e8f0;
+  --theme-neutral-300: #cbd5e1;
+  --theme-neutral-400: #94a3b8;
+  --theme-neutral-500: #64748b;
+  --theme-neutral-600: #475569;
+  --theme-neutral-700: #334155;
+  --theme-neutral-800: #1e293b;
+  --theme-neutral-900: #0f172a;
+  --theme-neutral-950: #020617;
+
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #f1f5f9;
+  --color-gray-200: #e2e8f0;
+  --color-gray-300: #cbd5e1;
+  --color-gray-400: #94a3b8;
+  --color-gray-500: #64748b;
+  --color-gray-600: #475569;
+  --color-gray-700: #334155;
+  --color-gray-800: #1e293b;
+  --color-gray-900: #0f172a;
+
+  /* Restore Light-Mode Blue / Primary Variables inside the physical A4 paper */
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #2563eb;
+  --color-blue-600: #1b64f2;
+  --color-blue-700: #1554d1;
+  --color-blue-800: #1246b5;
+  --color-blue-900: #1e3a8a;
+  --color-blue-950: #172554;
+
+  --color-amber-50: #f1f5f9;
+  --color-amber-100: #e2e8f0;
+  --color-amber-200: #cbd5e1;
+  --color-amber-300: #94a3b8;
+  --color-amber-600: #475569;
+  --color-amber-900: #0f172a;
 }
 
 body {

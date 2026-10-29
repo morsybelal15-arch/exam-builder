@@ -6,21 +6,21 @@ import {
   extendSubscriptionAction,
   toggleTenantStatusAction,
 } from "@/app/actions/admin-tenants";
-import { autoDeployTenantVpsAction, syncAllTenantsToVpsAction } from "@/app/actions/vps-provisioning";
+import {
+  autoDeployTenantVpsAction,
+  syncAllTenantsToVpsAction,
+} from "@/app/actions/vps-provisioning";
 import {
   Search,
   Users,
-  Calendar,
   Globe,
   HardDrive,
   FileText,
   FolderUp,
-  Key,
   Phone,
   Edit3,
   Pause,
   Play,
-  Copy,
   Check,
   ExternalLink,
   Server,
@@ -32,12 +32,18 @@ import {
   Filter,
   RefreshCw,
   Plus,
-  ShieldCheck,
   Loader2,
   Sparkles,
-  Rocket,
+  Layers,
+  Building2,
+  GraduationCap,
 } from "lucide-react";
 import { HOSTINGER_VPS_CONFIG, generateNginxConfig } from "@/lib/vps-service";
+import {
+  ALL_FEATURE_IDS,
+  APP_FEATURES_REGISTRY,
+  normalizeEnabledFeatures,
+} from "@/lib/app-features";
 
 interface TenantListViewProps {
   initialTenants: TenantData[];
@@ -97,11 +103,11 @@ export default function TenantListView({
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "STOPPED" | "EXPIRED">("ALL");
   const [editingTenant, setEditingTenant] = useState<TenantData | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [vpsQuickModalTenant, setVpsQuickModalTenant] = useState<TenantData | null>(null);
-  const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [copiedVpsId, setCopiedVpsId] = useState<string | null>(null);
   const [deployingTenantId, setDeployingTenantId] = useState<string | null>(null);
-  const [deployFeedback, setDeployFeedback] = useState<{ [id: string]: { success: boolean; message: string } }>({});
+  const [deployFeedback, setDeployFeedback] = useState<{
+    [id: string]: { success: boolean; message: string };
+  }>({});
   const [isPending, startTransition] = useTransition();
   const [syncNotice, setSyncNotice] = useState<{ success: boolean; message: string } | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
@@ -126,7 +132,10 @@ export default function TenantListView({
     setIsSyncingAll(true);
     try {
       const res: any = await syncAllTenantsToVpsAction();
-      setSyncNotice({ success: !!res.success, message: res.message || (res.success ? "تمت المزامنة" : "فشلت المزامنة") });
+      setSyncNotice({
+        success: !!res.success,
+        message: res.message || (res.success ? "تمت المزامنة" : "فشلت المزامنة"),
+      });
     } catch (err: any) {
       setSyncNotice({ success: false, message: err.message || "فشلت المزامنة" });
     } finally {
@@ -136,14 +145,11 @@ export default function TenantListView({
 
   // Filtered tenants list
   const filteredTenants = initialTenants.filter((tenant) => {
-    // Search match
     const nameMatch = tenant.name?.toLowerCase().includes(searchTerm.toLowerCase());
     const phoneMatch = tenant.phone.includes(searchTerm);
     const domainMatch = tenant.domain?.toLowerCase().includes(searchTerm.toLowerCase());
-    const codeMatch = tenant.verificationCode?.includes(searchTerm);
-    const matchesSearch = !searchTerm || nameMatch || phoneMatch || domainMatch || codeMatch;
+    const matchesSearch = !searchTerm || nameMatch || phoneMatch || domainMatch;
 
-    // Status filter match
     let matchesStatus = true;
     if (statusFilter === "ACTIVE") matchesStatus = tenant.subscriptionStatus === "ACTIVE";
     if (statusFilter === "STOPPED") matchesStatus = tenant.subscriptionStatus === "STOPPED";
@@ -151,12 +157,6 @@ export default function TenantListView({
 
     return matchesSearch && matchesStatus;
   });
-
-  const handleCopyCode = (tenantId: string, code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCodeId(tenantId);
-    setTimeout(() => setCopiedCodeId(null), 2000);
-  };
 
   const handleCopyVpsNginx = (tenant: TenantData) => {
     const domain = tenant.domain || "example.com";
@@ -190,14 +190,14 @@ export default function TenantListView({
   const handleToggleStatus = (tenantId: string) => {
     startTransition(async () => {
       const res = await toggleTenantStatusAction(tenantId);
-      reportSync(res, "تم تغيير حالة الاشتراك وتطبيقه على VPS فوراً ✓");
+      reportSync(res, "تم تغيير حالة الاشتراك ومزامنته مع تطبيق العميل والسيرفر فوراً ✓");
     });
   };
 
   const handleQuickExtend = (tenantId: string) => {
     startTransition(async () => {
       const res = await extendSubscriptionAction(tenantId, 30);
-      reportSync(res, "تم تمديد الاشتراك 30 يوماً وتطبيقه على VPS ✓");
+      reportSync(res, "تم تمديد الاشتراك 30 يوماً ومزامنته مع تطبيق العميل ✓");
     });
   };
 
@@ -207,7 +207,9 @@ export default function TenantListView({
       <div className="bg-white rounded-2xl p-3 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
           <Server className="w-4 h-4 text-blue-600" />
-          <span>كل تعديل على الاشتراكات يُطبَّق تلقائياً على تطبيقات العملاء في VPS</span>
+          <span>
+            مزامنة لحظية شاملة: أي تعديل في المواعيد أو نوع الاشتراك أو خواص الـ Sidebar يُطبَّق فوراً في تطبيق العميل
+          </span>
         </div>
         <button
           id="sync-all-vps-btn"
@@ -215,10 +217,15 @@ export default function TenantListView({
           disabled={isSyncingAll}
           className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold transition-all cursor-pointer"
         >
-          {isSyncingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          {isSyncingAll ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
           <span>{isSyncingAll ? "جاري المزامنة..." : "مزامنة الكل مع VPS"}</span>
         </button>
       </div>
+
       {syncNotice && (
         <div
           className={`rounded-xl px-4 py-2.5 text-xs font-bold flex items-center justify-between gap-2 border ${
@@ -228,24 +235,31 @@ export default function TenantListView({
           }`}
         >
           <span className="flex items-center gap-1.5">
-            {syncNotice.success ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+            {syncNotice.success ? (
+              <CheckCircle2 className="w-4 h-4" />
+            ) : (
+              <AlertTriangle className="w-4 h-4" />
+            )}
             {syncNotice.message}
           </span>
-          <button onClick={() => setSyncNotice(null)} className="cursor-pointer opacity-60 hover:opacity-100">
+          <button
+            onClick={() => setSyncNotice(null)}
+            className="cursor-pointer opacity-60 hover:opacity-100"
+          >
             <XCircle className="w-4 h-4" />
           </button>
         </div>
       )}
+
       {/* Search and Filters Bar */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-        {/* Search Input */}
         <div className="relative w-full md:w-96">
           <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="بحث بالاسم، رقم الهاتف، الدومين، أو رمز التحقق..."
+            placeholder="بحث باسم العميل، رقم الهاتف، أو الدومين..."
             className="w-full pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs sm:text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
           />
         </div>
@@ -277,7 +291,9 @@ export default function TenantListView({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>النشطة ({initialTenants.filter((t) => t.subscriptionStatus === "ACTIVE").length})</span>
+            <span>
+              النشطة ({initialTenants.filter((t) => t.subscriptionStatus === "ACTIVE").length})
+            </span>
           </button>
 
           <button
@@ -289,7 +305,9 @@ export default function TenantListView({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span>الموقوفة ({initialTenants.filter((t) => t.subscriptionStatus === "STOPPED").length})</span>
+            <span>
+              الموقوفة ({initialTenants.filter((t) => t.subscriptionStatus === "STOPPED").length})
+            </span>
           </button>
 
           <button
@@ -300,7 +318,9 @@ export default function TenantListView({
                 : "bg-red-50 text-red-700 hover:bg-red-100/70 border border-red-200/60"
             }`}
           >
-            <span>المنتهية ({initialTenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})</span>
+            <span>
+              المنتهية ({initialTenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
+            </span>
           </button>
         </div>
       </div>
@@ -315,12 +335,12 @@ export default function TenantListView({
             <h3 className="text-base font-bold text-slate-800 mb-1">
               {searchTerm || statusFilter !== "ALL"
                 ? "لا توجد نتائج مطابقة لخيارات البحث"
-                : "لا يوجد مستأجرين مسجلين بعد"}
+                : "لا يوجد عملاء مسجلون بعد"}
             </h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
               {searchTerm || statusFilter !== "ALL"
-                ? "جرب كتابة رقم هاتف أو اسم آخر أو تغيير الفلتر لعرض جميع المستأجرين."
-                : "ابدأ بإضافة أول مستأجر ومعلم وتخصيص دومين له على سيرفر Hostinger VPS مباشرة."}
+                ? "جرب كتابة رقم هاتف أو اسم آخر أو تغيير الفلتر."
+                : "ابدأ بتسطيب أول تطبيق لعميل جديد وتخصيص الدومين والـ Features الخاصة به."}
             </p>
             {onOpenCreateModal && (
               <button
@@ -328,7 +348,7 @@ export default function TenantListView({
                 className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>إضافة مستأجر جديد الآن</span>
+                <span>تسطيب تطبيق عميل جديد</span>
               </button>
             )}
           </div>
@@ -337,138 +357,151 @@ export default function TenantListView({
             <table className="w-full text-right border-collapse">
               <thead>
                 <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-                  <th className="py-4 px-5">المعلم / المستأجر</th>
-                  <th className="py-4 px-5">الهاتف ورمز التحقق</th>
-                  <th className="py-4 px-5">الدومين وخادم VPS</th>
-                  <th className="py-4 px-5">خطة الاشتراك والمدة</th>
+                  <th className="py-4 px-5">العميل ونوع الاشتراك</th>
+                  <th className="py-4 px-5">رقم الدخول والدومين</th>
+                  <th className="py-4 px-5">فترة الاشتراك (Calendar)</th>
+                  <th className="py-4 px-5">خواص التطبيق المثبتة (Sidebar)</th>
                   <th className="py-4 px-5">استهلاك الموارد</th>
                   <th className="py-4 px-5 text-center">الحالة</th>
-                  <th className="py-4 px-5 text-center">أزرار التحكم التلقائية (VPS)</th>
+                  <th className="py-4 px-5 text-center">التحكم بالاشتراك والخواص</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
                 {filteredTenants.map((tenant) => {
                   const usedBytesNum = Number(tenant.usedStorageBytes) || 0;
                   const limitBytesNum = Number(tenant.storageLimitBytes) || 1073741824;
-                  const storagePercent = Math.min(100, Math.round((usedBytesNum / limitBytesNum) * 100));
+                  const storagePercent = Math.min(
+                    100,
+                    Math.round((usedBytesNum / limitBytesNum) * 100)
+                  );
                   const examsLimit = tenant.examsLimit || 150;
                   const examsCount = tenant._count?.exams || 0;
                   const filesLimit = tenant.filesLimit || 200;
                   const filesCount = tenant._count?.uploadedFiles || 0;
                   const dueInfo = getDaysRemaining(tenant.subscriptionDueDate);
+                  const subType = tenant.subscriptionType === "معلم" ? "معلم" : "سنتر";
+                  const installedFeatures = normalizeEnabledFeatures(tenant.enabledFeatures);
+                  const availableToAddCount = ALL_FEATURE_IDS.length - installedFeatures.length;
+                  const startDateDisplay = tenant.subscriptionStartDate
+                    ? new Date(tenant.subscriptionStartDate).toLocaleDateString("ar-EG", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : new Date(tenant.createdAt).toLocaleDateString("ar-EG", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      });
+                  const dueDateDisplay = tenant.subscriptionDueDate
+                    ? new Date(tenant.subscriptionDueDate).toLocaleDateString("ar-EG", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "غير محدد";
 
                   return (
                     <tr
                       key={tenant.id}
                       className="hover:bg-slate-50/60 transition-colors group"
                     >
-                      {/* 1. Tenant Info */}
+                      {/* 1. Client Name & Subscription Type */}
                       <td className="py-4 px-5">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
-                            {(tenant.name || tenant.phone).slice(0, 2).toUpperCase()}
+                            {subType === "معلم" ? (
+                              <GraduationCap className="w-5 h-5" />
+                            ) : (
+                              <Building2 className="w-5 h-5" />
+                            )}
                           </div>
                           <div>
                             <span className="block font-black text-slate-900 group-hover:text-blue-600 transition-colors">
-                              {tenant.name || "معلم بدون اسم"}
+                              {tenant.name || "عميل بدون اسم"}
                             </span>
-                            <span className="block text-[11px] text-slate-400 font-normal">
-                              مسجل:{" "}
-                              {new Date(tenant.createdAt).toLocaleDateString("ar-EG", {
-                                year: "numeric",
-                                month: "short",
-                                day: "numeric",
-                              })}
-                            </span>
-                            {tenant.notes && (
-                              <span className="inline-block mt-0.5 text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                {tenant.notes}
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                                  subType === "سنتر"
+                                    ? "bg-blue-50 text-blue-700 border border-blue-200/60"
+                                    : "bg-purple-50 text-purple-700 border border-purple-200/60"
+                                }`}
+                              >
+                                <span>اشتراك {subType}</span>
                               </span>
-                            )}
+                            </div>
                           </div>
                         </div>
                       </td>
 
-                      {/* 2. Phone and Verification Code */}
+                      {/* 2. Phone & Domain */}
                       <td className="py-4 px-5">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-slate-800" dir="ltr">
+                        <div className="space-y-1.5">
+                          <div
+                            className="flex items-center gap-1.5 font-mono text-xs font-bold text-slate-800"
+                            dir="ltr"
+                          >
                             <Phone className="w-3 h-3 text-slate-400" />
                             <span>{tenant.phone}</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-slate-400 font-bold">كود التحقق:</span>
-                            <button
-                              onClick={() => handleCopyCode(tenant.id, tenant.verificationCode || "123456")}
-                              title="نسخ كود التحقق"
-                              className="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100/80 text-amber-800 border border-amber-200/60 px-1.5 py-0.5 rounded text-[11px] font-mono font-bold transition-all cursor-pointer"
-                            >
-                              <span>{tenant.verificationCode || "123456"}</span>
-                              {copiedCodeId === tenant.id ? (
-                                <Check className="w-3 h-3 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-3 h-3 text-amber-600" />
+                          {tenant.domain ? (
+                            <div className="space-y-1">
+                              <a
+                                href={`http://${tenant.domain}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                                dir="ltr"
+                                title="فتح تطبيق العميل على السيرفر"
+                              >
+                                <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                <span className="truncate max-w-[150px]">{tenant.domain}</span>
+                                <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" />
+                              </a>
+                              {deployFeedback[tenant.id] && (
+                                <p
+                                  className={`text-[10px] font-bold ${
+                                    deployFeedback[tenant.id].success
+                                      ? "text-emerald-600"
+                                      : "text-red-500"
+                                  }`}
+                                >
+                                  {deployFeedback[tenant.id].message}
+                                </p>
                               )}
-                            </button>
-                          </div>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                              <Globe className="w-3.5 h-3.5 text-slate-300" />
+                              <span>دومين مشترك</span>
+                            </div>
+                          )}
                         </div>
                       </td>
 
-                      {/* 3. Domain & VPS */}
-                      <td className="py-4 px-5">
-                        {tenant.domain ? (
-                          <div className="space-y-1.5">
-                            <a
-                              href={`http://${tenant.domain}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
-                              dir="ltr"
-                              title="فتح موقع المستأجر على الخادم"
-                            >
-                              <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              <span className="truncate max-w-[150px]">{tenant.domain}</span>
-                              <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" />
-                            </a>
-                            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono" dir="ltr">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                              <span>{HOSTINGER_VPS_CONFIG.ip}</span>
-                            </div>
-                            {deployFeedback[tenant.id] && (
-                              <p
-                                className={`text-[10px] font-bold ${
-                                  deployFeedback[tenant.id].success
-                                    ? "text-emerald-600"
-                                    : "text-red-500"
-                                }`}
-                              >
-                                {deployFeedback[tenant.id].message}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                            <Globe className="w-3.5 h-3.5 text-slate-300" />
-                            <span>دومين مشترك / لم يعين</span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* 4. Plan & Due Date */}
+                      {/* 3. Subscription Start & End Dates */}
                       <td className="py-4 px-5">
                         <div className="space-y-1">
-                          <span className="inline-block text-xs font-bold text-slate-800">
-                            {tenant.planType || "الخطة الاحترافية"}
-                          </span>
+                          <div className="text-[11px] font-bold text-slate-700">
+                            من: <span className="text-slate-900">{startDateDisplay}</span>
+                          </div>
+                          <div className="text-[11px] font-bold text-slate-700">
+                            إلى: <span className="text-blue-700">{dueDateDisplay}</span>
+                          </div>
                           <div className="flex items-center gap-1 text-[11px]">
-                            <Clock className={`w-3.5 h-3.5 ${dueInfo.isUrgent ? "text-red-500" : "text-slate-400"}`} />
+                            <Clock
+                              className={`w-3.5 h-3.5 ${
+                                dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
+                              }`}
+                            />
                             <span
                               className={`font-semibold ${
                                 dueInfo.isExpired
                                   ? "text-red-600 font-bold"
                                   : dueInfo.isUrgent
                                   ? "text-amber-600 font-bold"
-                                  : "text-slate-500"
+                                  : "text-emerald-600 font-bold"
                               }`}
                             >
                               {dueInfo.text}
@@ -477,10 +510,54 @@ export default function TenantListView({
                         </div>
                       </td>
 
+                      {/* 4. Installed Sidebar Features */}
+                      <td className="py-4 px-5">
+                        <div className="space-y-1.5 max-w-[230px]">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-lg">
+                              <Layers className="w-3 h-3" />
+                              <span>
+                                {installedFeatures.length} / {ALL_FEATURE_IDS.length} خاصية مثبتة
+                              </span>
+                            </span>
+                            {availableToAddCount > 0 && (
+                              <button
+                                onClick={() => {
+                                  setEditingTenant(tenant);
+                                  setIsModalOpen(true);
+                                }}
+                                className="text-[10px] font-extrabold text-amber-800 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                                title="اضغط لإضافة خواص جديدة لهذا العميل"
+                              >
+                                +{availableToAddCount} متاح للإضافة
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {APP_FEATURES_REGISTRY.filter((f) =>
+                              installedFeatures.includes(f.id)
+                            )
+                              .slice(0, 4)
+                              .map((f) => (
+                                <span
+                                  key={f.id}
+                                  className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded"
+                                >
+                                  {f.name}
+                                </span>
+                              ))}
+                            {installedFeatures.length > 4 && (
+                              <span className="text-[10px] font-bold text-slate-500 px-1 py-0.5">
+                                +{installedFeatures.length - 4} أخرى
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
                       {/* 5. Resource Limits & Quotas */}
-                      <td className="py-4 px-5 min-w-[170px]">
+                      <td className="py-4 px-5 min-w-[160px]">
                         <div className="space-y-2">
-                          {/* Storage Bar */}
                           <div>
                             <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mb-1">
                               <span className="flex items-center gap-1">
@@ -505,15 +582,18 @@ export default function TenantListView({
                             </div>
                           </div>
 
-                          {/* Exams and Files Count */}
                           <div className="flex items-center justify-between text-[11px] text-slate-500">
                             <span className="inline-flex items-center gap-1 font-medium">
                               <FileText className="w-3 h-3 text-slate-400" />
-                              <span>{examsCount}/{examsLimit} اختبار</span>
+                              <span>
+                                {examsCount}/{examsLimit} اختبار
+                              </span>
                             </span>
                             <span className="inline-flex items-center gap-1 font-medium">
                               <FolderUp className="w-3 h-3 text-slate-400" />
-                              <span>{filesCount}/{filesLimit} ملف</span>
+                              <span>
+                                {filesCount}/{filesLimit} ملف
+                              </span>
                             </span>
                           </div>
                         </div>
@@ -539,14 +619,18 @@ export default function TenantListView({
                         )}
                       </td>
 
-                      {/* 7. Automated VPS Action Buttons */}
+                      {/* 7. Action Buttons */}
                       <td className="py-4 px-5 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           {/* Pause / Resume button */}
                           <button
                             onClick={() => handleToggleStatus(tenant.id)}
                             disabled={isPending}
-                            title={tenant.subscriptionStatus === "ACTIVE" ? "إيقاف مؤقت للاشتراك" : "تفعيل الاشتراك"}
+                            title={
+                              tenant.subscriptionStatus === "ACTIVE"
+                                ? "إيقاف مؤقت للاشتراك"
+                                : "تشغيل واستئناف الاشتراك"
+                            }
                             className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                               tenant.subscriptionStatus === "ACTIVE"
                                 ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200/60"
@@ -575,7 +659,7 @@ export default function TenantListView({
                             <button
                               onClick={() => handleAutoDeploy(tenant)}
                               disabled={deployingTenantId === tenant.id || isPending}
-                              title="تفعيل الدومين وإعداد Nginx تلقائياً على خادم VPS بزر واحد وبدون أي أوامر يدوية"
+                              title="تفعيل الدومين وإعداد Nginx تلقائياً على خادم VPS"
                               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
                                 deployFeedback[tenant.id]?.success
                                   ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
@@ -601,7 +685,7 @@ export default function TenantListView({
                             </button>
                           )}
 
-                          {/* VPS Setup Commands Copy (Fallback) */}
+                          {/* VPS Setup Commands Copy */}
                           {tenant.domain && (
                             <button
                               onClick={() => handleCopyVpsNginx(tenant)}
@@ -616,7 +700,7 @@ export default function TenantListView({
                             </button>
                           )}
 
-                          {/* Edit Full Subscription Modal Trigger */}
+                          {/* Edit Full Subscription & Features Modal Trigger */}
                           <button
                             onClick={() => {
                               setEditingTenant(tenant);
@@ -625,7 +709,7 @@ export default function TenantListView({
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs hover:shadow-md transition-all cursor-pointer"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
-                            <span>تعديل</span>
+                            <span>إدارة المواعيد والخواص</span>
                           </button>
                         </div>
                       </td>

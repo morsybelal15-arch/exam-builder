@@ -46,6 +46,7 @@ export default function FastPaymentScannerModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const handleCodeLookupRef = useRef<(code: string) => void>(() => { });
 
   // Loaded student payment info for confirmation
   const [pendingStudent, setPendingStudent] = useState<{
@@ -121,7 +122,7 @@ export default function FastPaymentScannerModal({
             if (barcodes && barcodes.length > 0) {
               const codeValue = barcodes[0].rawValue;
               if (codeValue) {
-                handleCodeLookup(codeValue);
+                handleCodeLookupRef.current(codeValue);
               }
             }
           } catch (e) {
@@ -180,6 +181,7 @@ export default function FastPaymentScannerModal({
       setTimeout(() => setIsProcessing(false), 800);
     }
   };
+  handleCodeLookupRef.current = handleCodeLookup;
 
   // Submit payment
   const handleRecordPayment = async (status: PaymentStatus, amount?: number) => {
@@ -329,14 +331,18 @@ export default function FastPaymentScannerModal({
                 <span className="text-xs text-slate-300">
                   حالة شهر ({selectedMonth}):
                 </span>
-                {pendingStudent.financial.status === "paid" ? (
+                {pendingStudent.financial.paidAmount > 0 &&
+                  pendingStudent.financial.paidAmount <
+                  (pendingStudent.financial.totalAmount || pendingStudent.student.monthlyFee || 250) ? (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    مدفوع جزئياً ({pendingStudent.financial.paidAmount} من {pendingStudent.student.monthlyFee || 250} ج.م)
+                  </span>
+                ) : pendingStudent.financial.status === "paid" &&
+                  pendingStudent.financial.paidAmount >=
+                  (pendingStudent.financial.totalAmount || pendingStudent.student.monthlyFee || 250) ? (
                   <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     مدفوع بالكامل ({pendingStudent.financial.paidAmount} ج.م)
-                  </span>
-                ) : pendingStudent.financial.paidAmount > 0 ? (
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    مدفوع جزئياً ({pendingStudent.financial.paidAmount} من {pendingStudent.student.monthlyFee || 250} ج.م)
                   </span>
                 ) : (
                   <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/30">

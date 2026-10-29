@@ -112,15 +112,24 @@ export default async function AdminDashboardPage() {
               <ExternalLink className="w-3 h-3 text-indigo-400" />
             </a>
 
-            {/* Back to Exam Builder (local dev "all" mode only) */}
+            {/* Back to Main Dashboard & Exam Builder (local dev "all" mode) */}
             {tenantEnabled() && (
-              <Link
-                href="/exam-builder"
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/70 px-3.5 py-2.5 rounded-xl transition-all"
-              >
-                <span>منشئ الاختبارات</span>
-                <ArrowLeft className="w-3.5 h-3.5" />
-              </Link>
+              <>
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2.5 rounded-xl transition-all shadow-xs"
+                >
+                  <span>معاينة الداشبورد الرئيسية</span>
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </Link>
+                <Link
+                  href="/exam-builder"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/70 px-3.5 py-2.5 rounded-xl transition-all"
+                >
+                  <span>منشئ الاختبارات</span>
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </Link>
+              </>
             )}
 
             {/* Logout */}

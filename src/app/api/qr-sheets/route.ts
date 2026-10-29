@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSavedQrPdfs, saveQrPdf, deleteSavedQrPdf } from "@/lib/management-db";
+import { requireApiSession } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const sheets = getSavedQrPdfs();
     return NextResponse.json({ success: true, sheets });
   } catch (error: any) {
@@ -12,6 +15,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const body = await req.json();
     const { title, groupName, studentIds, pagesCount } = body;
     if (!title || !Array.isArray(studentIds)) {
@@ -26,6 +31,8 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing ID" }, { status: 400 });

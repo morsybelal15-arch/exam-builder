@@ -2,6 +2,13 @@ import React from "react";
 import { redirect } from "next/navigation";
 import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { findTenantById, findTenantByPhone } from "@/lib/tenants-repository";
+import { getTenantUsageStats } from "@/lib/db";
+import {
+  APP_FEATURES_REGISTRY,
+  SIDEBAR_SECTIONS_ORDER,
+  normalizeEnabledFeatures,
+} from "@/lib/app-features";
 import {
   CreditCard,
   Calendar,
@@ -14,6 +21,8 @@ import {
   ShieldCheck,
   Zap,
   Clock,
+  Building2,
+  GraduationCap,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -33,18 +42,16 @@ export default async function MySubscriptionPage() {
     redirect("/login");
   }
 
-  // Fetch tenant details, usage, and limits
   let tenant: any = null;
   let examsCount = 0;
   let filesCount = 0;
+  const localUsage = getTenantUsageStats(session.id);
 
   try {
+    tenant = (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
     const isReachable = await isDatabaseReachable();
     if (isReachable) {
-      const [tenantData, examsTotal, filesTotal] = await Promise.all([
-        prisma.tenant.findUnique({
-          where: { id: session.id },
-        }),
+      const [examsTotal, filesTotal] = await Promise.all([
         prisma.exam.count({
           where: { tenantId: session.id },
         }),
@@ -53,21 +60,31 @@ export default async function MySubscriptionPage() {
         }),
       ]);
 
-      tenant = tenantData;
-      examsCount = examsTotal;
-      filesCount = filesTotal;
+      examsCount = Math.max(examsTotal, localUsage.examsCount);
+      filesCount = Math.max(filesTotal, localUsage.filesCount);
+    } else {
+      examsCount = localUsage.examsCount;
+      filesCount = localUsage.filesCount;
     }
-  } catch (error) {
-    // Graceful offline fallback
+  } catch {
+    examsCount = localUsage.examsCount;
+    filesCount = localUsage.filesCount;
   }
 
-  // Fallback defaults if new user or offline DB
-  const planType = tenant?.planType || "الخطة الاحترافية للمعلمين (Teacher Pro)";
+  const clientName = tenant?.name || session.name || "العميل المشترك";
+  const subscriptionType = tenant?.subscriptionType === "معلم" ? "معلم" : "سنتر";
+  const planType =
+    tenant?.planType ||
+    (subscriptionType === "سنتر" ? "باقة إدارة السنتر المتكاملة" : "باقة المعلم الذكي");
   const status = tenant?.subscriptionStatus || "ACTIVE";
   const isActive = status === "ACTIVE";
+  const enabledFeatures = normalizeEnabledFeatures(tenant?.enabledFeatures);
 
-  // Calculate Due Date (defaults to 1 year from creation if null)
+  // Start Date & Due Date
   const createdAt = tenant?.createdAt ? new Date(tenant.createdAt) : new Date();
+  const startDate = tenant?.subscriptionStartDate
+    ? new Date(tenant.subscriptionStartDate)
+    : createdAt;
   const dueDate = tenant?.subscriptionDueDate
     ? new Date(tenant.subscriptionDueDate)
     : new Date(createdAt.getTime() + 365 * 24 * 60 * 60 * 1000);
@@ -77,8 +94,11 @@ export default async function MySubscriptionPage() {
   const diffDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
   // Storage calculation
-  const storageLimitBytes = tenant?.storageLimitBytes ?? BigInt(1073741824); // 1GB
-  const usedStorageBytes = tenant?.usedStorageBytes ?? BigInt(0);
+  const storageLimitBytes = tenant?.storageLimitBytes ?? 1073741824; // 1GB
+  const usedStorageBytes = Math.max(
+    Number(tenant?.usedStorageBytes ?? 0),
+    localUsage.usedStorageBytes
+  );
   const storageLimitNum = Number(storageLimitBytes);
   const usedStorageNum = Number(usedStorageBytes);
   const storagePercent = Math.min(
@@ -87,10 +107,10 @@ export default async function MySubscriptionPage() {
   );
 
   // Limits
-  const examsLimit = 150;
+  const examsLimit = Number(tenant?.examsLimit) || 150;
   const examsPercent = Math.min(100, Math.round((examsCount / examsLimit) * 100));
 
-  const filesLimit = 200;
+  const filesLimit = Number(tenant?.filesLimit) || 200;
   const filesPercent = Math.min(100, Math.round((filesCount / filesLimit) * 100));
 
   return (
@@ -101,15 +121,24 @@ export default async function MySubscriptionPage() {
           <div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
               <CreditCard className="w-7 h-7 text-blue-600" />
-              <span>تفاصيل اشتراكي والخطة (My Subscription)</span>
+              <span>تفاصيل اشتراك: {clientName}</span>
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              معلومات خطتك الحالية، موعد التجديد، وسعة التخزين والحدود المتاحة
+              معلومات الباقة، فترة الاشتراك، المميزات المثبتة في التطبيق، وحدود الاستهلاك
             </p>
           </div>
 
-          {/* Status Pill */}
-          <div className="flex items-center gap-2">
+          {/* Status & Subscription Type Pills */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+              {subscriptionType === "معلم" ? (
+                <GraduationCap className="w-4 h-4" />
+              ) : (
+                <Building2 className="w-4 h-4" />
+              )}
+              <span>نوع الاشتراك: {subscriptionType}</span>
+            </span>
+
             <span
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold border shadow-xs ${
                 isActive
@@ -132,7 +161,7 @@ export default async function MySubscriptionPage() {
           </div>
         </div>
 
-        {/* Section 1: Subscription Due Date & Plan Hero Card */}
+        {/* Section 1: Subscription Dates & Plan Hero Card */}
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 sm:p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
 
@@ -141,12 +170,30 @@ export default async function MySubscriptionPage() {
             <div className="lg:col-span-2 space-y-3">
               <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-blue-100">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>الخطة الحالية</span>
+                <span>الخطة الحالية ({subscriptionType})</span>
               </div>
               <h2 className="text-2xl font-black text-slate-900">{planType}</h2>
               <p className="text-sm text-slate-500 leading-relaxed max-w-xl">
-                تمنحك هذه الخطة وصولاً كاملاً إلى الذكاء الاصطناعي لاستخراج الأسئلة، رفع ملفات PDF عالية الدقة، دمج الصور، مع سعة تخزين سحابية خاصة بك.
+                نسخة مخصصة باسم ({clientName}) تحتوي على ({enabledFeatures.length}) ميزة مثبتة ومفعلة في القائمة الجانبية (Sidebar).
               </p>
+
+              <div className="flex flex-wrap items-center gap-4 pt-2 text-xs font-bold text-slate-600">
+                <span className="bg-slate-100 px-3 py-1.5 rounded-xl">
+                  تاريخ بداية الاشتراك:{" "}
+                  <strong className="text-slate-900">
+                    {startDate.toLocaleDateString("ar-EG", {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </strong>
+                </span>
+                {tenant?.domain && (
+                  <span className="bg-slate-100 px-3 py-1.5 rounded-xl font-mono" dir="ltr">
+                    {tenant.domain}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Due Date Countdown Box */}
@@ -155,7 +202,7 @@ export default async function MySubscriptionPage() {
                 <Calendar className="w-5 h-5" />
               </div>
               <span className="text-xs font-semibold text-slate-500">
-                تاريخ استحقاق التجديد (Due Date)
+                تاريخ نهاية الاشتراك (End Date)
               </span>
               <span className="text-lg font-black text-slate-900 mt-1">
                 {dueDate.toLocaleDateString("ar-EG", {
@@ -205,7 +252,6 @@ export default async function MySubscriptionPage() {
                 </div>
               </div>
 
-              {/* Progress bar */}
               <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                 <div
                   className="bg-purple-600 h-2.5 rounded-full transition-all duration-500"
@@ -240,7 +286,6 @@ export default async function MySubscriptionPage() {
                 </div>
               </div>
 
-              {/* Progress bar */}
               <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                 <div
                   className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
@@ -275,7 +320,6 @@ export default async function MySubscriptionPage() {
                 </div>
               </div>
 
-              {/* Progress bar */}
               <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                 <div
                   className="bg-emerald-600 h-2.5 rounded-full transition-all duration-500"
@@ -289,37 +333,47 @@ export default async function MySubscriptionPage() {
           </div>
         </div>
 
-        {/* Section 3: Features Included */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 sm:p-8 space-y-4">
-          <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-600" />
-            <span>المميزات المضمنة في باقتك</span>
-          </h3>
+        {/* Section 3: Installed Sidebar Features */}
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 sm:p-8 space-y-5">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              <span>الخواص والمميزات المثبتة في نسختك ({enabledFeatures.length})</span>
+            </h3>
+            <span className="text-xs font-bold text-slate-500">
+              متزامنة تلقائياً مع إدارة النظام
+            </span>
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-xs font-bold text-slate-800">استخراج الأسئلة بالذكاء الاصطناعي</h4>
-                <p className="text-[11px] text-slate-500 mt-0.5">تحليل وتفريغ الأسئلة من الصور والـ PDF تلقائياً</p>
-              </div>
-            </div>
+          <div className="space-y-4">
+            {SIDEBAR_SECTIONS_ORDER.map((sectionTitle) => {
+              const installedInSection = APP_FEATURES_REGISTRY.filter(
+                (f) => f.section === sectionTitle && enabledFeatures.includes(f.id)
+              );
+              if (installedInSection.length === 0) return null;
 
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-xs font-bold text-slate-800">سحب وإفلات على صفحات A4</h4>
-                <p className="text-[11px] text-slate-500 mt-0.5">تصميم امتحانات احترافية جاهزة للطباعة الفورية</p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-xs font-bold text-slate-800">تحويل وتجميع الصور إلى PDF</h4>
-                <p className="text-[11px] text-slate-500 mt-0.5">دمج المستندات وإعادة ترتيبها بدقة عالية</p>
-              </div>
-            </div>
+              return (
+                <div key={sectionTitle} className="space-y-2.5">
+                  <h4 className="text-xs font-extrabold text-blue-600">
+                    قسم {sectionTitle} ({installedInSection.length})
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {installedInSection.map((feat) => (
+                      <div
+                        key={feat.id}
+                        className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-start gap-3"
+                      >
+                        <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                        <div>
+                          <h5 className="text-xs font-bold text-slate-800">{feat.name}</h5>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{feat.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

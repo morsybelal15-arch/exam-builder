@@ -19,6 +19,7 @@ const TENANT_APP_PREFIXES = [
   "/groups",
   "/students",
   "/qr-printing",
+  "/excel-sheets",
   "/uploaded-files",
   "/images-to-pdf",
   "/created-exams",
@@ -61,7 +62,7 @@ export function proxy(request: NextRequest) {
   const isAdmin = session?.role === "SUPER_ADMIN" && mode !== "tenant";
   const isTenant = session?.role === "TENANT" && mode !== "admin";
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ADMIN DOMAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ───────────────────────────── ADMIN DOMAIN ─────────────────────────────
   if (mode === "admin") {
     const adminHost = getAdminHost();
     if (adminHost && hostOf(request) !== adminHost) return notFound(request);
@@ -92,6 +93,17 @@ export function proxy(request: NextRequest) {
 
   if (pathname.startsWith("/api/auth/")) return NextResponse.next();
 
+  // Require an authenticated tenant or admin session for all protected API routes
+  if (pathname.startsWith("/api/")) {
+    if (!isTenant && !isAdmin) {
+      return NextResponse.json(
+        { error: "غير مصرح لك بالوصول. يرجى تسجيل الدخول أولاً." },
+        { status: 401 }
+      );
+    }
+    return NextResponse.next();
+  }
+
   if (pathname === "/login") {
     if (request.nextUrl.searchParams.has("blocked") || request.nextUrl.searchParams.has("logout")) {
       const response = NextResponse.next();
@@ -108,8 +120,7 @@ export function proxy(request: NextRequest) {
   }
 
   if (pathname === "/") {
-    if (isAdmin) return redirectTo(request, "/admin");
-    if (isTenant) return NextResponse.next();
+    if (isTenant || isAdmin) return NextResponse.next();
     return redirectTo(request, "/login");
   }
 

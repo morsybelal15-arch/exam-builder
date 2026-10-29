@@ -39,7 +39,6 @@ import {
   StudentGradeRecord,
   StudentStatus,
 } from "@/lib/types/management";
-import { generateUniqueStudentCode } from "@/lib/student-code";
 
 interface StudentProfileClientProps {
   initialProfile: {
@@ -73,6 +72,10 @@ export default function StudentProfileClient({
   const [groupsList, setGroupsList] = useState<Group[]>(allGroups);
 
   useEffect(() => {
+    setProfileData(initialProfile);
+  }, [initialProfile]);
+
+  useEffect(() => {
     if (!allGroups || allGroups.length === 0) {
       fetch("/api/groups")
         .then((res) => res.json())
@@ -85,7 +88,7 @@ export default function StudentProfileClient({
     }
   }, [allGroups]);
 
-  const { student, group, financials, attendance, grades } = profileData;
+  const { student, group, financials, attendance, sessions = [], grades } = profileData;
   const isInactive = student.status === "inactive";
 
   // Function to refresh profile from database
@@ -108,7 +111,7 @@ export default function StudentProfileClient({
   };
 
   // Calculate stats
-  const totalSessions = attendance.length;
+  const totalSessions = Math.max(attendance.length, sessions.length);
   const attendedCount = attendance.filter((a) => a.status === "attended").length;
   const attendanceRate = totalSessions > 0 ? Math.round((attendedCount / totalSessions) * 100) : 100;
 
@@ -240,11 +243,6 @@ ${portalUrl}
       status: student.status,
     });
     setIsEditStudentModalOpen(true);
-  };
-
-  const handleGenerateNewRandomCode = () => {
-    const newCode = generateUniqueStudentCode();
-    setEditStudentForm((prev) => ({ ...prev, code: newCode }));
   };
 
   const handleSaveStudent = async (e: React.FormEvent) => {
@@ -727,29 +725,42 @@ ${portalUrl}
         </div>
 
         {/* Card 3: Financials (With 3 statuses support) */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-400 block">حالة المصروفات</span>
-            <span className="text-2xl font-black text-slate-800 tracking-tight mt-1 block">
-              {financials[0]?.status === "paid" && (financials[0]?.paidAmount >= (financials[0]?.totalAmount || 250))
-                ? "مسدد بالكامل"
-                : (financials[0]?.paidAmount || 0) > 0
-                ? "مسدد جزئياً"
-                : "مستحق (غير مسدد)"}
-            </span>
-            <span className="text-[11px] text-slate-500">
-              شهر {financials[0]?.month || "الحالي"}
-              {financials[0] && (
-                <span className="font-mono font-bold mr-1">
-                  ({financials[0].paidAmount || 0} / {financials[0].totalAmount || student.monthlyFee || 250} ج.م)
+        {(() => {
+          const now = new Date();
+          const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+          const activeFin = financials.find((f) => f.month === currentMonthKey) || financials[0];
+          const targetTotal = activeFin?.totalAmount || student.monthlyFee || 250;
+          const paidAmt = activeFin?.paidAmount || 0;
+          const statusLabel =
+            activeFin?.status === "returned"
+              ? "مرتجع"
+              : paidAmt > 0 && paidAmt < targetTotal
+              ? "مسدد جزئياً"
+              : activeFin?.status === "paid" || (paidAmt >= targetTotal && targetTotal > 0)
+              ? "مسدد بالكامل"
+              : "مستحق (غير مسدد)";
+          return (
+            <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-400 block">حالة المصروفات</span>
+                <span className="text-2xl font-black text-slate-800 tracking-tight mt-1 block">
+                  {statusLabel}
                 </span>
-              )}
-            </span>
-          </div>
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-            <CreditCard className="w-6 h-6" />
-          </div>
-        </div>
+                <span className="text-[11px] text-slate-500">
+                  شهر {activeFin?.month || currentMonthKey}
+                  {activeFin && (
+                    <span className="font-mono font-bold mr-1">
+                      ({paidAmt} / {targetTotal} ج.م)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <CreditCard className="w-6 h-6" />
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Tabs Navigation (Hidden on print) */}

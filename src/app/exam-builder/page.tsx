@@ -785,6 +785,17 @@ export default function ExamBuilderPage() {
               setExamModels(null);
             }
             if (ex.total_points) setMaxScore(ex.total_points);
+            if (ex.extraData && typeof ex.extraData === "object") {
+              const extra = ex.extraData;
+              if (extra.questionStyles) setQuestionStyles(extra.questionStyles);
+              if (extra.globalFontSize) setGlobalFontSize(extra.globalFontSize);
+              if (extra.examDirection) setExamDirection(extra.examDirection);
+              if (extra.choiceFormat) setChoiceFormat(extra.choiceFormat);
+              if (extra.watermarkImage !== undefined) setWatermarkImage(extra.watermarkImage);
+              if (extra.watermarkOpacity !== undefined) setWatermarkOpacity(extra.watermarkOpacity);
+              if (Array.isArray(extra.freeCanvasImages)) setFreeCanvasImages(extra.freeCanvasImages);
+              if (Array.isArray(extra.strokes)) setStrokes(extra.strokes);
+            }
             setSaveStatus(`تم تحميل نموذج الاختبار للتعديل: ${ex.title}`);
             setTimeout(() => setSaveStatus(null), 3500);
           }
@@ -1117,8 +1128,14 @@ export default function ExamBuilderPage() {
         if (pdf.numPages > 1) queuePdfPage(2, false);
         if (pdf.numPages > 2) queuePdfPage(3, false);
         setSelectedFile(file.name);
-        setImageSrc(blobUrl);
-        URL.revokeObjectURL(blobUrl);
+        setImageSrc((prev) => {
+          if (prev && prev.startsWith("blob:")) {
+            try {
+              URL.revokeObjectURL(prev);
+            } catch {}
+          }
+          return blobUrl;
+        });
       } catch (err) {
         console.warn("Could not render PDF via PDF.js on client:", err);
       }
@@ -1624,9 +1641,12 @@ export default function ExamBuilderPage() {
 
   const isGeminiActive = Boolean(geminiApiKey || hasServerKey);
 
-  // Helper to retrieve the style of a specific question index
+  // Helper to retrieve the style of a specific question (preferring question.id over array index so shuffling/reordering preserves styles)
   const getQuestionStyle = (index: number): QuestionStyle => {
+    const qId = examQuestions[index]?.id;
+    const byId = qId ? (questionStyles as Record<string, QuestionStyle>)[qId] : undefined;
     return (
+      byId ||
       questionStyles[index] || {
         fontSize: globalFontSize,
         isBold: false,
@@ -1637,15 +1657,21 @@ export default function ExamBuilderPage() {
 
   const updateFocusedQuestionStyle = (updater: (prev: QuestionStyle) => QuestionStyle) => {
     const activeIdx = focusedQuestionIndex ?? 0;
+    const qId = examQuestions[activeIdx]?.id;
     setQuestionStyles((prev) => {
-      const current = prev[activeIdx] || {
-        fontSize: globalFontSize,
-        isBold: false,
-        textAlign: examDirection === "ltr" ? "left" : "right",
-      };
+      const byId = qId ? (prev as Record<string, QuestionStyle>)[qId] : undefined;
+      const current =
+        byId ||
+        prev[activeIdx] || {
+          fontSize: globalFontSize,
+          isBold: false,
+          textAlign: examDirection === "ltr" ? "left" : "right",
+        };
+      const updatedStyle = updater(current);
       return {
         ...prev,
-        [activeIdx]: updater(current),
+        [activeIdx]: updatedStyle,
+        ...(qId ? { [qId]: updatedStyle } : {}),
       };
     });
   };
@@ -1686,14 +1712,37 @@ export default function ExamBuilderPage() {
       if (examModels && examModels.modelCount > 1) {
         const currentKey = examModels.activeModelKey;
         const updatedModels = { ...examModels.models };
+        const syncSharedFieldsToModelA = (editedList: ExamQuestionItem[]) => {
+          const byId = new Map(editedList.map((q) => [q.id, q]));
+          updatedModels.A = {
+            ...updatedModels.A,
+            questions: updatedModels.A.questions.map((aq) => {
+              const edited = byId.get(aq.id);
+              if (!edited) return aq;
+              return {
+                ...aq,
+                text: edited.text,
+                points: edited.points,
+                imageUrl: edited.imageUrl,
+                imageWidth: edited.imageWidth,
+                imageAlign: edited.imageAlign,
+                passageText: edited.passageText,
+                passageTitle: edited.passageTitle,
+              };
+            }),
+          };
+        };
+
         if (currentKey === "A") {
           updatedModels.A = { ...updatedModels.A, questions: [...examQuestions] };
           modelAQuestions = examQuestions;
         } else if (currentKey === "B" && updatedModels.B) {
           updatedModels.B = { ...updatedModels.B, questions: [...examQuestions] };
+          syncSharedFieldsToModelA(examQuestions);
           modelAQuestions = updatedModels.A.questions;
         } else if (currentKey === "C" && updatedModels.C) {
           updatedModels.C = { ...updatedModels.C, questions: [...examQuestions] };
+          syncSharedFieldsToModelA(examQuestions);
           modelAQuestions = updatedModels.A.questions;
         }
         modelsToSave = { ...examModels, models: updatedModels };
@@ -1702,6 +1751,19 @@ export default function ExamBuilderPage() {
 
       const totalPts = modelAQuestions.reduce((acc, q) => acc + (q.points || 0), 0);
       const examId = activeExamId || `exam-${examCode}-${Date.now()}`;
+      const extraDataPayload = {
+        questionStyles,
+        globalFontSize,
+        examDirection,
+        choiceFormat,
+        watermarkImage: watermarkImage && watermarkImage.length < 500000 ? watermarkImage : null,
+        watermarkOpacity,
+        freeCanvasImages: freeCanvasImages.map((img) => ({
+          ...img,
+          url: img.url.length < 500000 ? img.url : "",
+        })),
+        strokes,
+      };
       const res = await fetch("/api/exams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1715,6 +1777,7 @@ export default function ExamBuilderPage() {
           duration: "ساعتان",
           questions: JSON.stringify(modelAQuestions),
           models: modelsToSave && modelsToSave.modelCount > 1 ? JSON.stringify(modelsToSave) : undefined,
+          extraData: extraDataPayload,
           questions_count: modelAQuestions.length,
           total_points: maxScore || totalPts,
           date_created: new Date().toLocaleDateString("ar-EG"),
@@ -2186,7 +2249,9 @@ export default function ExamBuilderPage() {
         }
       }
 
-      resolve(canvas.toDataURL("image/png"));
+      // JPEG (on a white background) is ~5-10x smaller than PNG for large passage
+      // regions, which makes upload + Gemini processing much faster.
+      resolve(canvas.toDataURL("image/jpeg", 0.9));
     });
   };
 
@@ -2255,7 +2320,11 @@ export default function ExamBuilderPage() {
           ? [data.parsedQuestion]
           : [];
 
-      if (extractedList.length === 0) {
+      const returnedPassage = String(data.passageText || data.rawText || "").trim();
+      // A passage-only selection legitimately returns zero questions — keep it as a passage.
+      const treatAsPassage = isPassageLassoWaiting || (extractedList.length === 0 && returnedPassage.length > 30);
+
+      if (extractedList.length === 0 && !treatAsPassage) {
         setExtractionFeedback("لم يتم العثور على أي سؤال واضح في المنطقة المحددة.");
         setIsExtracting(false);
         return;
@@ -2278,13 +2347,15 @@ export default function ExamBuilderPage() {
         subType: pQ.subType,
       }));
 
-      const isEnglishExam = newItems.some((item) => /[a-zA-Z]{3,}/.test(item.text) || (item.options && item.options.some(o => /[a-zA-Z]{3,}/.test(o))));
+      const isEnglishExam =
+        newItems.some((item) => /[a-zA-Z]{3,}/.test(item.text) || (item.options && item.options.some(o => /[a-zA-Z]{3,}/.test(o)))) ||
+        (newItems.length === 0 && /[a-zA-Z]{3,}/.test(returnedPassage));
       if (examQuestions.length === 0 && isEnglishExam) {
         setExamDirection("ltr");
         setChoiceFormat("english_lower");
       }
 
-      if (isPassageLassoWaiting) {
+      if (treatAsPassage) {
         setIsPassageLassoWaiting(false);
         const extractedPassage = (data.passageText || extractedList.find((q) => q.passageText)?.passageText || data.rawText || "").trim();
         const extractedTitle = (data.passageTitle || extractedList.find((q) => q.passageTitle)?.passageTitle || "").trim();

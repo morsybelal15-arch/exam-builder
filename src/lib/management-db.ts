@@ -14,6 +14,7 @@ import {
   SavedQrPdf,
 } from "./types/management";
 import { generateUniqueStudentCode } from "./student-code";
+import { sanitizeTenantKey } from "./tenant-context";
 export { generateUniqueStudentCode };
 
 const dataDir = path.join(os.homedir(), ".exam_builder");
@@ -21,7 +22,61 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const storePath = path.join(dataDir, "management_store.json");
+const tenantsDir = path.join(dataDir, "tenants");
+const legacyStorePath = path.join(dataDir, "management_store.json");
+
+export function getLocalTodayDate(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveStorePath(tenantId?: string): string {
+  const key = sanitizeTenantKey(tenantId);
+  if (!key || key === "default") {
+    return legacyStorePath;
+  }
+
+  const tenantFolder = path.join(tenantsDir, key);
+  const targetPath = path.join(tenantFolder, "management_store.json");
+
+  if (!fs.existsSync(targetPath)) {
+    const isFirstTenantEver =
+      !fs.existsSync(tenantsDir) ||
+      fs.readdirSync(tenantsDir).filter((d) => {
+        try {
+          return fs.statSync(path.join(tenantsDir, d)).isDirectory();
+        } catch {
+          return false;
+        }
+      }).length === 0;
+
+    fs.mkdirSync(tenantFolder, { recursive: true });
+
+    if (isFirstTenantEver && fs.existsSync(legacyStorePath)) {
+      try {
+        fs.copyFileSync(legacyStorePath, targetPath);
+        return targetPath;
+      } catch {
+        // Fall through to initialize fresh store
+      }
+    }
+  }
+
+  return targetPath;
+}
+
+export interface DeletedStudentLogEntry {
+  id: string;
+  name: string;
+  code: string;
+  academicYear: string;
+  groupId: string;
+  groupName?: string;
+  leftAt: number;
+}
 
 interface ManagementStore {
   groups: Group[];
@@ -32,6 +87,7 @@ interface ManagementStore {
   examRecords: ExamRecord[];
   studentGrades: StudentGradeRecord[];
   savedQrPdfs: SavedQrPdf[];
+  deletedStudentsLog?: DeletedStudentLogEntry[];
 }
 
 function getInitialStore(): ManagementStore {
@@ -338,24 +394,50 @@ function getInitialStore(): ManagementStore {
   };
 }
 
-export function getManagementStore(): ManagementStore {
+export function getManagementStore(tenantId?: string): ManagementStore {
+  const activeStorePath = resolveStorePath(tenantId);
   try {
-    if (fs.existsSync(storePath)) {
-      const data = fs.readFileSync(storePath, "utf-8");
+    if (fs.existsSync(activeStorePath)) {
+      const data = fs.readFileSync(activeStorePath, "utf-8");
       return JSON.parse(data);
     }
   } catch (err) {
     console.error("Error reading management store:", err);
+    // Attempt recovery from backup file before falling back to initial store
+    const backupPath = `${activeStorePath}.bak`;
+    try {
+      if (fs.existsSync(backupPath)) {
+        const backupData = fs.readFileSync(backupPath, "utf-8");
+        const parsed = JSON.parse(backupData);
+        fs.copyFileSync(backupPath, activeStorePath);
+        return parsed;
+      }
+    } catch (backupErr) {
+      console.error("Error reading management store backup:", backupErr);
+    }
   }
 
   const initial = getInitialStore();
-  saveManagementStore(initial);
+  saveManagementStore(initial, tenantId);
   return initial;
 }
 
-export function saveManagementStore(store: ManagementStore): void {
+export function saveManagementStore(store: ManagementStore, tenantId?: string): void {
+  const activeStorePath = resolveStorePath(tenantId);
   try {
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
+    const dir = path.dirname(activeStorePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const serialized = JSON.stringify(store, null, 2);
+    const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmpPath, serialized, "utf-8");
+    fs.renameSync(tmpPath, activeStorePath);
+    try {
+      fs.writeFileSync(`${activeStorePath}.bak`, serialized, "utf-8");
+    } catch {
+      // Non-fatal backup write
+    }
   } catch (err) {
     console.error("Error saving management store:", err);
   }
@@ -457,12 +539,22 @@ export function saveStudent(student: Partial<Student> & { name: string; groupId:
   if (student.id) {
     const idx = store.students.findIndex((s) => s.id === student.id);
     if (idx >= 0) {
-      const existingCode = store.students[idx].code;
+      const existing = store.students[idx];
+      const existingCode = existing.code;
+      const nextStatus = student.status || existing.status;
+      let nextLeftAt = existing.leftAt;
+      if (nextStatus === "inactive" && existing.status !== "inactive") {
+        nextLeftAt = now;
+      } else if (nextStatus === "active") {
+        nextLeftAt = undefined;
+      }
       store.students[idx] = {
-        ...store.students[idx],
+        ...existing,
         ...student,
+        status: nextStatus,
+        leftAt: nextLeftAt,
         code: existingCode, // Code is immutable once generated
-        groupName: grp ? grp.name : store.students[idx].groupName,
+        groupName: grp ? grp.name : existing.groupName,
         updatedAt: now,
       };
       saveManagementStore(store);
@@ -476,8 +568,9 @@ export function saveStudent(student: Partial<Student> & { name: string; groupId:
     ? student.code.trim().toUpperCase()
     : generateUniqueStudentCode(existingCodes);
 
+  const initialStatus = student.status || "active";
   const newStudent: Student = {
-    id: student.id || `std-${Date.now()}`,
+    id: student.id || `std-${now}-${Math.random().toString(36).slice(2, 6)}`,
     code: assignedCode,
     name: student.name,
     academicYear: student.academicYear || grp?.academicYear || "الصف الأول الثانوي",
@@ -486,7 +579,8 @@ export function saveStudent(student: Partial<Student> & { name: string; groupId:
     parentPhone: student.parentPhone || "",
     studentPhone: student.studentPhone || "",
     monthlyFee: student.monthlyFee ?? 250,
-    status: student.status || "active",
+    status: initialStatus,
+    leftAt: initialStatus === "inactive" ? now : undefined,
     notes: student.notes || "",
     createdAt: now,
     updatedAt: now,
@@ -499,6 +593,22 @@ export function saveStudent(student: Partial<Student> & { name: string; groupId:
 
 export function deleteStudent(id: string): boolean {
   const store = getManagementStore();
+  const target = store.students.find((s) => s.id === id);
+  if (target) {
+    const grp = store.groups.find((g) => g.id === target.groupId);
+    if (!store.deletedStudentsLog) {
+      store.deletedStudentsLog = [];
+    }
+    store.deletedStudentsLog.push({
+      id: target.id,
+      name: target.name,
+      code: target.code,
+      academicYear: target.academicYear || grp?.academicYear || "غير محدد",
+      groupId: target.groupId,
+      groupName: target.groupName || grp?.name,
+      leftAt: Date.now(),
+    });
+  }
   store.students = store.students.filter((s) => s.id !== id);
   store.financials = store.financials.filter((f) => f.studentId !== id);
   store.attendance = store.attendance.filter((a) => a.studentId !== id);
@@ -531,12 +641,20 @@ export function transferStudents(studentIds: string[], targetGroupId: string): b
 
 export function bulkUpdateStudents(studentIds: string[], updates: Partial<Student>): boolean {
   const store = getManagementStore();
+  const now = Date.now();
   store.students = store.students.map((s) => {
     if (studentIds.includes(s.id)) {
+      let nextLeftAt = s.leftAt;
+      if (updates.status === "inactive" && s.status !== "inactive") {
+        nextLeftAt = now;
+      } else if (updates.status === "active") {
+        nextLeftAt = undefined;
+      }
       return {
         ...s,
         ...updates,
-        updatedAt: Date.now(),
+        leftAt: nextLeftAt,
+        updatedAt: now,
       };
     }
     return s;
@@ -922,7 +1040,7 @@ export function saveExamRecord(groupId: string, examName: string, totalScore: nu
     groupId,
     examName,
     totalScore: Number(totalScore) || 20,
-    date: date || new Date().toISOString().split("T")[0],
+    date: date || getLocalTodayDate(),
     createdAt: Date.now(),
   };
 
@@ -1028,18 +1146,51 @@ export function deleteFinancialRecord(groupId: string, studentId: string, month:
 // ==========================================
 
 export function getFullStudentProfile(studentId: string) {
-  const store = getManagementStore();
+  let store = getManagementStore();
   const clean = (studentId || "").includes("/s/")
     ? studentId.split("/s/").pop()?.split("?")[0]?.trim() || studentId.trim()
     : (studentId || "").trim();
 
-  const student = store.students.find(
-    (s) =>
-      s.id === clean ||
-      s.code === clean ||
-      s.id.toLowerCase() === clean.toLowerCase() ||
-      s.code.toLowerCase() === clean.toLowerCase()
-  );
+  const matchStudent = (stList: Student[]) =>
+    stList.find(
+      (s) =>
+        s.id === clean ||
+        s.code === clean ||
+        s.id.toLowerCase() === clean.toLowerCase() ||
+        s.code.toLowerCase() === clean.toLowerCase()
+    );
+
+  let student = matchStudent(store.students);
+
+  // If not found in the active tenant context (e.g. public /s/[token] parent portal without session),
+  // search across all tenant stores and legacy store so parent QR links always resolve.
+  if (!student) {
+    const candidateFiles: string[] = [];
+    if (fs.existsSync(tenantsDir)) {
+      try {
+        for (const entry of fs.readdirSync(tenantsDir)) {
+          const candidate = path.join(tenantsDir, entry, "management_store.json");
+          if (fs.existsSync(candidate)) candidateFiles.push(candidate);
+        }
+      } catch {}
+    }
+    if (fs.existsSync(legacyStorePath)) {
+      candidateFiles.push(legacyStorePath);
+    }
+
+    for (const filePath of candidateFiles) {
+      try {
+        const candidateStore = JSON.parse(fs.readFileSync(filePath, "utf-8")) as ManagementStore;
+        const found = matchStudent(candidateStore.students || []);
+        if (found) {
+          store = candidateStore;
+          student = found;
+          break;
+        }
+      } catch {}
+    }
+  }
+
   if (!student) return null;
 
   const group = store.groups.find((g) => g.id === student.groupId);
@@ -1243,17 +1394,39 @@ export function recordFastPayment(
 // HOME ANALYTICS API
 // ==========================================
 
+export type AnalyticsFilterMode = "month" | "year" | "custom";
+
+export interface AnalyticsRangeOptions {
+  mode?: AnalyticsFilterMode;
+  month?: string; // YYYY-MM
+  year?: string; // YYYY
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+}
+
 export interface HomeAnalytics {
   todayDate: string;
   currentMonth: string;
   todayDateFormatted: string;
   currentMonthFormatted: string;
+  filter: {
+    mode: AnalyticsFilterMode;
+    month: string;
+    year: string;
+    startDate: string;
+    endDate: string;
+    periodLabel: string;
+  };
   overall: {
     totalStudents: number;
     activeStudents: number;
     inactiveStudents: number;
     totalGroups: number;
     totalAcademicYears: number;
+    currentMonthlySubscriptionTotal: number;
+    newStudentsCount: number;
+    leftStudentsCount: number;
+    netStudentsChange: number;
     todayAttendedCount: number;
     todayAbsentCount: number;
     todayAttendanceRate: number;
@@ -1264,12 +1437,41 @@ export interface HomeAnalytics {
     paidStudentsCount: number;
     unpaidStudentsCount: number;
     partialStudentsCount: number;
+    overdueStudentsCount: number;
+    totalOverdueAmount: number;
   };
+  absentStudentsToday: Array<{
+    id: string;
+    name: string;
+    code: string;
+    academicYear: string;
+    groupId: string;
+    groupName: string;
+    parentPhone: string;
+    studentPhone: string;
+  }>;
+  overdueStudentsList: Array<{
+    id: string;
+    name: string;
+    code: string;
+    academicYear: string;
+    groupId: string;
+    groupName: string;
+    parentPhone: string;
+    studentPhone: string;
+    requiredAmount: number;
+    paidAmount: number;
+    remainingAmount: number;
+    status: "unpaid" | "partial";
+  }>;
   byYear: Array<{
     year: string;
     studentsCount: number;
     activeStudentsCount: number;
     inactiveStudentsCount: number;
+    newStudentsCount: number;
+    leftStudentsCount: number;
+    monthlySubscriptionTotal: number;
     groupsCount: number;
     percentageOfAllStudents: number;
     monthlyExpectedRevenue: number;
@@ -1277,6 +1479,24 @@ export interface HomeAnalytics {
     todayAttendedCount: number;
     todayTotalCount: number;
     attendanceRate: number;
+  }>;
+  newStudentsList: Array<{
+    id: string;
+    name: string;
+    code: string;
+    academicYear: string;
+    groupName: string;
+    monthlyFee: number;
+    createdAt: number;
+  }>;
+  leftStudentsList: Array<{
+    id: string;
+    name: string;
+    code: string;
+    academicYear: string;
+    groupName: string;
+    leftAt: number;
+    reason: "inactive" | "deleted";
   }>;
   byGroup: Array<{
     id: string;
@@ -1319,34 +1539,171 @@ export interface HomeAnalytics {
   }>;
 }
 
-export function getHomeAnalytics(targetDate?: string, targetMonth?: string): HomeAnalytics {
+export function getHomeAnalytics(
+  targetDate?: string,
+  targetMonth?: string,
+  rangeOptions?: AnalyticsRangeOptions
+): HomeAnalytics {
   const store = getManagementStore();
-  const todayDate = targetDate || new Date().toISOString().split("T")[0];
-  const currentMonth = targetMonth || todayDate.substring(0, 7);
+  const todayDate = targetDate || getLocalTodayDate();
+  const defaultMonth = targetMonth || todayDate.substring(0, 7);
+  const defaultYear = todayDate.substring(0, 4);
+
+  const mode: AnalyticsFilterMode = rangeOptions?.mode || "month";
+  const selectedMonth = rangeOptions?.month || defaultMonth;
+  const selectedYear = rangeOptions?.year || selectedMonth.substring(0, 4) || defaultYear;
+
+  let startDate = `${selectedMonth}-01`;
+  let endDate = todayDate;
+
+  if (mode === "month") {
+    const [yStr, mStr] = selectedMonth.split("-");
+    const y = parseInt(yStr, 10) || new Date().getFullYear();
+    const m = parseInt(mStr, 10) || new Date().getMonth() + 1;
+    const lastDay = new Date(y, m, 0).getDate();
+    startDate = `${y}-${String(m).padStart(2, "0")}-01`;
+    endDate = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  } else if (mode === "year") {
+    const y = parseInt(selectedYear, 10) || new Date().getFullYear();
+    startDate = `${y}-01-01`;
+    endDate = `${y}-12-31`;
+  } else if (mode === "custom") {
+    startDate = rangeOptions?.startDate || `${defaultMonth}-01`;
+    endDate = rangeOptions?.endDate || todayDate;
+    if (startDate > endDate) {
+      const tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
+    }
+  }
+
+  const rangeStartMs = new Date(`${startDate}T00:00:00`).getTime();
+  const rangeEndMs = new Date(`${endDate}T23:59:59.999`).getTime();
+  const startMonthKey = startDate.substring(0, 7);
+  const endMonthKey = endDate.substring(0, 7);
+  const currentMonth = mode === "month" ? selectedMonth : endMonthKey;
 
   // Format Dates in Arabic
   let todayDateFormatted = todayDate;
   let currentMonthFormatted = currentMonth;
+  let periodLabel = currentMonth;
   try {
-    const d = new Date(todayDate);
+    const d = new Date(`${todayDate}T12:00:00`);
     todayDateFormatted = d.toLocaleDateString("ar-EG", {
       weekday: "long",
       year: "numeric",
       month: "long",
       day: "numeric",
     });
-    currentMonthFormatted = d.toLocaleDateString("ar-EG", {
-      year: "numeric",
-      month: "long",
-    });
-  } catch (e) {
+
+    if (mode === "month") {
+      const mDate = new Date(`${startDate}T12:00:00`);
+      currentMonthFormatted = mDate.toLocaleDateString("ar-EG", {
+        year: "numeric",
+        month: "long",
+      });
+      periodLabel = currentMonthFormatted;
+    } else if (mode === "year") {
+      periodLabel = `سنة ${selectedYear}`;
+      currentMonthFormatted = periodLabel;
+    } else {
+      const sDate = new Date(`${startDate}T12:00:00`).toLocaleDateString("ar-EG", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+      const eDate = new Date(`${endDate}T12:00:00`).toLocaleDateString("ar-EG", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+      periodLabel = `من ${sDate} إلى ${eDate}`;
+      currentMonthFormatted = periodLabel;
+    }
+  } catch {
     // fallback
   }
 
   const totalStudents = store.students.length;
-  const activeStudents = store.students.filter((s) => s.status === "active").length;
-  const inactiveStudents = store.students.filter((s) => s.status === "inactive").length;
+  const activeStudentsList = store.students.filter((s) => s.status === "active");
+  const inactiveStudentsList = store.students.filter((s) => s.status === "inactive");
+  const activeStudents = activeStudentsList.length;
+  const inactiveStudents = inactiveStudentsList.length;
   const totalGroups = store.groups.length;
+
+  // 1. Current Monthly Subscription Total (إجمالي الاشتراك الشهري الحالي للطلاب الفعليين)
+  const currentMonthlySubscriptionTotal = activeStudentsList.reduce(
+    (sum, s) => sum + (s.monthlyFee || 250),
+    0
+  );
+
+  // 2. New Students & Left Students in [rangeStartMs, rangeEndMs]
+  const newStudentsInRange = store.students
+    .filter((s) => s.createdAt >= rangeStartMs && s.createdAt <= rangeEndMs)
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  const newStudentsList = newStudentsInRange.slice(0, 12).map((s) => {
+    const grp = store.groups.find((g) => g.id === s.groupId);
+    return {
+      id: s.id,
+      name: s.name,
+      code: s.code,
+      academicYear: s.academicYear || grp?.academicYear || "غير محدد",
+      groupName: grp?.name || s.groupName || "مجموعة عامة",
+      monthlyFee: s.monthlyFee || 250,
+      createdAt: s.createdAt,
+    };
+  });
+
+  const leftStudentsRaw: Array<{
+    id: string;
+    name: string;
+    code: string;
+    academicYear: string;
+    groupName: string;
+    leftAt: number;
+    reason: "inactive" | "deleted";
+  }> = [];
+  const seenLeftIds = new Set<string>();
+
+  inactiveStudentsList.forEach((s) => {
+    const leftTimestamp = s.leftAt || s.updatedAt || s.createdAt;
+    if (leftTimestamp >= rangeStartMs && leftTimestamp <= rangeEndMs) {
+      const grp = store.groups.find((g) => g.id === s.groupId);
+      seenLeftIds.add(s.id);
+      leftStudentsRaw.push({
+        id: s.id,
+        name: s.name,
+        code: s.code,
+        academicYear: s.academicYear || grp?.academicYear || "غير محدد",
+        groupName: grp?.name || s.groupName || "مجموعة عامة",
+        leftAt: leftTimestamp,
+        reason: "inactive",
+      });
+    }
+  });
+
+  (store.deletedStudentsLog || []).forEach((del) => {
+    if (!seenLeftIds.has(del.id) && del.leftAt >= rangeStartMs && del.leftAt <= rangeEndMs) {
+      seenLeftIds.add(del.id);
+      leftStudentsRaw.push({
+        id: del.id,
+        name: del.name,
+        code: del.code,
+        academicYear: del.academicYear || "غير محدد",
+        groupName: del.groupName || "مجموعة عامة",
+        leftAt: del.leftAt,
+        reason: "deleted",
+      });
+    }
+  });
+
+  leftStudentsRaw.sort((a, b) => b.leftAt - a.leftAt);
+  const leftStudentsList = leftStudentsRaw.slice(0, 12);
+
+  const newStudentsCount = newStudentsInRange.length;
+  const leftStudentsCount = leftStudentsRaw.length;
+  const netStudentsChange = newStudentsCount - leftStudentsCount;
 
   // Distinct academic years
   const yearsSet = new Set<string>();
@@ -1356,59 +1713,163 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
   store.groups.forEach((g) => {
     if (g.academicYear) yearsSet.add(g.academicYear);
   });
+  leftStudentsRaw.forEach((l) => {
+    if (l.academicYear) yearsSet.add(l.academicYear);
+  });
   const academicYears = Array.from(yearsSet);
 
-  // Today's attendance
+  // Today's attendance (measured against active students when available)
   const todayAttendedRecords = store.attendance.filter(
     (a) => a.date === todayDate && a.status === "attended"
   );
-  const todayAttendedCount = todayAttendedRecords.length;
-  const todayAbsentCount = Math.max(0, totalStudents - todayAttendedCount);
-  const todayAttendanceRate =
-    totalStudents > 0 ? Math.round((todayAttendedCount / totalStudents) * 100) : 0;
+  const attendedStudentIdsToday = new Set(todayAttendedRecords.map((a) => a.studentId));
+  const absentStudentsToday = activeStudentsList
+    .filter((s) => !attendedStudentIdsToday.has(s.id))
+    .map((s) => {
+      const grp = store.groups.find((g) => g.id === s.groupId);
+      return {
+        id: s.id,
+        name: s.name,
+        code: s.code,
+        academicYear: s.academicYear || grp?.academicYear || "غير محدد",
+        groupId: s.groupId,
+        groupName: grp?.name || s.groupName || "مجموعة عامة",
+        parentPhone: s.parentPhone || "",
+        studentPhone: s.studentPhone || "",
+      };
+    });
 
-  // Monthly financials
+  const todayAttendedCount = todayAttendedRecords.length;
+  const attendanceDenominator = activeStudents > 0 ? activeStudents : totalStudents;
+  const todayAbsentCount = absentStudentsToday.length;
+  const todayAttendanceRate =
+    attendanceDenominator > 0 ? Math.min(100, Math.round((todayAttendedCount / attendanceDenominator) * 100)) : 0;
+
+  // Helper to check if a financial record belongs to the selected period
+  const isFinancialInPeriod = (fin: FinancialRecord) => {
+    if (mode === "month") {
+      return fin.month === selectedMonth;
+    }
+    if (mode === "year") {
+      return fin.month.startsWith(selectedYear);
+    }
+    // custom mode: match month range [startMonthKey, endMonthKey]
+    return fin.month >= startMonthKey && fin.month <= endMonthKey;
+  };
+
+  // Monthly / Period financials & Overdue Students Tracking
   let monthlyExpectedRevenue = 0;
   let monthlyCollectedRevenue = 0;
   let paidStudentsCount = 0;
   let unpaidStudentsCount = 0;
   let partialStudentsCount = 0;
+  let totalOverdueAmount = 0;
+
+  const overdueStudentsList: Array<{
+    id: string;
+    name: string;
+    code: string;
+    academicYear: string;
+    groupId: string;
+    groupName: string;
+    parentPhone: string;
+    studentPhone: string;
+    requiredAmount: number;
+    paidAmount: number;
+    remainingAmount: number;
+    status: "unpaid" | "partial";
+  }> = [];
 
   store.students.forEach((s) => {
     const fee = s.monthlyFee || 250;
+    const grp = store.groups.find((g) => g.id === s.groupId);
     if (s.status === "active") {
       monthlyExpectedRevenue += fee;
     }
-    const fin = store.financials.find(
-      (f) => f.studentId === s.id && f.month === currentMonth
+    const matchingFins = store.financials.filter(
+      (f) => f.studentId === s.id && isFinancialInPeriod(f)
     );
-    if (fin) {
-      monthlyCollectedRevenue += fin.paidAmount || 0;
-      if (fin.status === "paid") {
-        paidStudentsCount++;
-      } else if (fin.status === "returned") {
+    if (matchingFins.length > 0) {
+      const studentPaidSum = matchingFins.reduce((acc, f) => acc + (f.paidAmount || 0), 0);
+      monthlyCollectedRevenue += studentPaidSum;
+      // Evaluate against the primary/latest month in period
+      const latestFin =
+        matchingFins.find((f) => f.month === currentMonth) ||
+        matchingFins[matchingFins.length - 1];
+      const targetTotal = latestFin.totalAmount || fee;
+      const paidVal = latestFin.status === "returned" ? 0 : latestFin.paidAmount || 0;
+      const remVal = Math.max(0, targetTotal - paidVal);
+
+      if (latestFin.status === "returned") {
         unpaidStudentsCount++;
-      } else if (fin.paidAmount > 0 && fin.paidAmount < (fin.totalAmount || fee)) {
+      } else if (paidVal > 0 && paidVal < targetTotal) {
         partialStudentsCount++;
+      } else if (latestFin.status === "paid" || (paidVal >= targetTotal && targetTotal > 0)) {
+        paidStudentsCount++;
       } else {
         unpaidStudentsCount++;
       }
+
+      if (s.status === "active" && remVal > 0) {
+        totalOverdueAmount += remVal;
+        overdueStudentsList.push({
+          id: s.id,
+          name: s.name,
+          code: s.code,
+          academicYear: s.academicYear || grp?.academicYear || "غير محدد",
+          groupId: s.groupId,
+          groupName: grp?.name || s.groupName || "مجموعة عامة",
+          parentPhone: s.parentPhone || "",
+          studentPhone: s.studentPhone || "",
+          requiredAmount: targetTotal,
+          paidAmount: paidVal,
+          remainingAmount: remVal,
+          status: paidVal > 0 ? "partial" : "unpaid",
+        });
+      }
     } else {
       unpaidStudentsCount++;
+      if (s.status === "active") {
+        totalOverdueAmount += fee;
+        overdueStudentsList.push({
+          id: s.id,
+          name: s.name,
+          code: s.code,
+          academicYear: s.academicYear || grp?.academicYear || "غير محدد",
+          groupId: s.groupId,
+          groupName: grp?.name || s.groupName || "مجموعة عامة",
+          parentPhone: s.parentPhone || "",
+          studentPhone: s.studentPhone || "",
+          requiredAmount: fee,
+          paidAmount: 0,
+          remainingAmount: fee,
+          status: "unpaid",
+        });
+      }
     }
   });
+
+  overdueStudentsList.sort((a, b) => b.remainingAmount - a.remainingAmount);
+  const overdueStudentsCount = overdueStudentsList.length;
 
   const monthlyRemainingRevenue = Math.max(0, monthlyExpectedRevenue - monthlyCollectedRevenue);
   const monthlyCollectionRate =
     monthlyExpectedRevenue > 0
-      ? Math.round((monthlyCollectedRevenue / monthlyExpectedRevenue) * 100)
+      ? Math.min(100, Math.round((monthlyCollectedRevenue / monthlyExpectedRevenue) * 100))
       : 0;
 
   // By Academic Year
   const byYear = academicYears.map((year) => {
     const yearStudents = store.students.filter((s) => s.academicYear === year);
-    const activeCount = yearStudents.filter((s) => s.status === "active").length;
+    const activeYearStudents = yearStudents.filter((s) => s.status === "active");
+    const activeCount = activeYearStudents.length;
     const inactiveCount = yearStudents.filter((s) => s.status === "inactive").length;
+    const yearNewCount = newStudentsInRange.filter((s) => s.academicYear === year).length;
+    const yearLeftCount = leftStudentsRaw.filter((s) => s.academicYear === year).length;
+    const monthlySubscriptionTotal = activeYearStudents.reduce(
+      (sum, s) => sum + (s.monthlyFee || 250),
+      0
+    );
     const groupsCount = store.groups.filter((g) => g.academicYear === year).length;
     const percentageOfAllStudents =
       totalStudents > 0 ? Math.round((yearStudents.length / totalStudents) * 100) : 0;
@@ -1420,10 +1881,12 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
     yearStudents.forEach((st) => {
       const fee = st.monthlyFee || 250;
       if (st.status === "active") expectedRev += fee;
-      const fin = store.financials.find(
-        (f) => f.studentId === st.id && f.month === currentMonth
+      const matchingFins = store.financials.filter(
+        (f) => f.studentId === st.id && isFinancialInPeriod(f)
       );
-      if (fin) collectedRev += fin.paidAmount || 0;
+      matchingFins.forEach((fin) => {
+        collectedRev += fin.paidAmount || 0;
+      });
 
       const att = store.attendance.find(
         (a) => a.studentId === st.id && a.date === todayDate && a.status === "attended"
@@ -1439,6 +1902,9 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
       studentsCount: yearStudents.length,
       activeStudentsCount: activeCount,
       inactiveStudentsCount: inactiveCount,
+      newStudentsCount: yearNewCount,
+      leftStudentsCount: yearLeftCount,
+      monthlySubscriptionTotal,
       groupsCount,
       percentageOfAllStudents,
       monthlyExpectedRevenue: expectedRev,
@@ -1477,13 +1943,18 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
       );
       if (att) attendedToday++;
 
-      const fin = store.financials.find(
-        (f) => f.studentId === st.id && f.month === currentMonth
+      const matchingFins = store.financials.filter(
+        (f) => f.studentId === st.id && isFinancialInPeriod(f)
       );
-      if (fin) {
-        collectedAmount += fin.paidAmount || 0;
-        if (fin.status === "paid") paidCount++;
-        else if (fin.paidAmount > 0) partialCount++;
+      if (matchingFins.length > 0) {
+        collectedAmount += matchingFins.reduce((acc, f) => acc + (f.paidAmount || 0), 0);
+        const fin =
+          matchingFins.find((f) => f.month === currentMonth) ||
+          matchingFins[matchingFins.length - 1];
+        const targetTotal = fin.totalAmount || fee;
+        if (fin.status === "returned") unpaidCount++;
+        else if (fin.paidAmount > 0 && fin.paidAmount < targetTotal) partialCount++;
+        else if (fin.status === "paid" || (fin.paidAmount >= targetTotal && targetTotal > 0)) paidCount++;
         else unpaidCount++;
       } else {
         unpaidCount++;
@@ -1493,7 +1964,7 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
     const attRate =
       grpStudents.length > 0 ? Math.round((attendedToday / grpStudents.length) * 100) : 0;
     const collRate =
-      expectedAmount > 0 ? Math.round((collectedAmount / expectedAmount) * 100) : 0;
+      expectedAmount > 0 ? Math.min(100, Math.round((collectedAmount / expectedAmount) * 100)) : 0;
 
     return {
       id: grp.id,
@@ -1513,7 +1984,7 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
     };
   });
 
-  // Recent attendance (latest 10)
+  // Recent attendance (latest 8)
   const recentAttendance = [...store.attendance]
     .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")))
     .slice(0, 8)
@@ -1560,12 +2031,24 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
     currentMonth,
     todayDateFormatted,
     currentMonthFormatted,
+    filter: {
+      mode,
+      month: selectedMonth,
+      year: selectedYear,
+      startDate,
+      endDate,
+      periodLabel,
+    },
     overall: {
       totalStudents,
       activeStudents,
       inactiveStudents,
       totalGroups,
       totalAcademicYears: academicYears.length,
+      currentMonthlySubscriptionTotal,
+      newStudentsCount,
+      leftStudentsCount,
+      netStudentsChange,
       todayAttendedCount,
       todayAbsentCount,
       todayAttendanceRate,
@@ -1576,10 +2059,390 @@ export function getHomeAnalytics(targetDate?: string, targetMonth?: string): Hom
       paidStudentsCount,
       unpaidStudentsCount,
       partialStudentsCount,
+      overdueStudentsCount,
+      totalOverdueAmount,
     },
+    absentStudentsToday,
+    overdueStudentsList,
     byYear,
+    newStudentsList,
+    leftStudentsList,
     byGroup,
     recentAttendance,
     recentPayments,
+  };
+}
+
+
+// ============================================================================
+// EXCEL / SHEETS BULK IMPORT & EXPORT ENGINE
+// ============================================================================
+
+function normalizeNameForMatch(name: string): string {
+  return String(name || "")
+    .replace(/[\u200B-\u200F\u202A-\u202E\uFEFF]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/[\u064B-\u065F\u0640]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export interface BulkImportStudentRow {
+  name: string;
+  parentPhone?: string;
+  studentPhone?: string;
+  monthlyFee?: number;
+  academicYear?: string;
+  groupId?: string;
+  groupName?: string;
+  notes?: string;
+  code?: string;
+}
+
+export function bulkImportStudents(params: {
+  rows: BulkImportStudentRow[];
+  defaultGroupId: string;
+  defaultAcademicYear: string;
+  defaultMonthlyFee?: number;
+  duplicateMode?: "skip" | "update" | "allow";
+}): {
+  importedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorsCount: number;
+  totalProcessed: number;
+  importedStudents: Student[];
+} {
+  const store = getManagementStore();
+  const now = Date.now();
+  const duplicateMode = params.duplicateMode || "skip";
+  const defaultFee = Number.isFinite(params.defaultMonthlyFee) ? Number(params.defaultMonthlyFee) : 250;
+
+  const existingCodes = new Set(store.students.map((s) => s.code.toUpperCase()));
+
+  // Build lookup maps for duplicate detection within target group
+  const existingByGroupAndName = new Map<string, number>();
+  const existingByCode = new Map<string, number>();
+
+  store.students.forEach((s, idx) => {
+    const key = `${s.groupId}::${normalizeNameForMatch(s.name)}`;
+    existingByGroupAndName.set(key, idx);
+    if (s.code) {
+      existingByCode.set(s.code.toUpperCase(), idx);
+    }
+  });
+
+  // Also map group names to group IDs in case a row specifies a valid groupName
+  const groupByName = new Map<string, Group>();
+  const groupById = new Map<string, Group>();
+  store.groups.forEach((g) => {
+    groupById.set(g.id, g);
+    groupByName.set(normalizeNameForMatch(g.name), g);
+  });
+
+  const fallbackGroup = groupById.get(params.defaultGroupId) || store.groups[0];
+  if (!fallbackGroup) {
+    throw new Error("لا توجد مجموعة دراسية محددة للاستيراد. يرجى إنشاء أو اختيار مجموعة أولاً.");
+  }
+
+  let importedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let errorsCount = 0;
+  const importedStudents: Student[] = [];
+
+  params.rows.forEach((rawRow, index) => {
+    const cleanName = String(rawRow.name || "").replace(/\s+/g, " ").trim();
+    if (!cleanName || cleanName.length < 2) {
+      errorsCount++;
+      return;
+    }
+
+    // Resolve group: explicit groupId -> explicit matching groupName -> fallbackGroup
+    let targetGroup = fallbackGroup;
+    if (rawRow.groupId && groupById.has(rawRow.groupId)) {
+      targetGroup = groupById.get(rawRow.groupId)!;
+    } else if (rawRow.groupName) {
+      const matchedGrp = groupByName.get(normalizeNameForMatch(rawRow.groupName));
+      if (matchedGrp) targetGroup = matchedGrp;
+    }
+
+    const resolvedYear =
+      rawRow.academicYear?.trim() ||
+      targetGroup.academicYear ||
+      params.defaultAcademicYear ||
+      "الصف الأول الثانوي";
+
+    const resolvedFee =
+      rawRow.monthlyFee !== undefined && Number.isFinite(Number(rawRow.monthlyFee)) && Number(rawRow.monthlyFee) >= 0
+        ? Math.round(Number(rawRow.monthlyFee))
+        : defaultFee;
+
+    const cleanParentPhone = String(rawRow.parentPhone || "").trim();
+    const cleanStudentPhone = String(rawRow.studentPhone || "").trim();
+    const cleanNotes = String(rawRow.notes || "").trim();
+    const requestedCode = String(rawRow.code || "").trim().toUpperCase();
+
+    const dupKey = `${targetGroup.id}::${normalizeNameForMatch(cleanName)}`;
+    const existingIdx =
+      (requestedCode && existingByCode.has(requestedCode)
+        ? existingByCode.get(requestedCode)
+        : undefined) ?? existingByGroupAndName.get(dupKey);
+
+    if (existingIdx !== undefined && duplicateMode !== "allow") {
+      if (duplicateMode === "skip") {
+        skippedCount++;
+        return;
+      }
+      if (duplicateMode === "update") {
+        const current = store.students[existingIdx];
+        store.students[existingIdx] = {
+          ...current,
+          name: cleanName,
+          academicYear: resolvedYear,
+          groupId: targetGroup.id,
+          groupName: targetGroup.name,
+          parentPhone: cleanParentPhone || current.parentPhone,
+          studentPhone: cleanStudentPhone || current.studentPhone,
+          monthlyFee: resolvedFee,
+          notes: cleanNotes || current.notes,
+          status: "active",
+          leftAt: undefined,
+          updatedAt: now,
+        };
+        updatedCount++;
+        importedStudents.push(store.students[existingIdx]);
+        return;
+      }
+    }
+
+    // Assign guaranteed unique code
+    let finalCode = "";
+    if (requestedCode && requestedCode.length >= 3 && requestedCode.length <= 12 && !existingCodes.has(requestedCode)) {
+      finalCode = requestedCode;
+    } else {
+      finalCode = generateUniqueStudentCode(existingCodes);
+    }
+    existingCodes.add(finalCode);
+
+    const newStudent: Student = {
+      id: `std-${now}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+      code: finalCode,
+      name: cleanName,
+      academicYear: resolvedYear,
+      groupId: targetGroup.id,
+      groupName: targetGroup.name,
+      parentPhone: cleanParentPhone,
+      studentPhone: cleanStudentPhone,
+      monthlyFee: resolvedFee,
+      status: "active",
+      notes: cleanNotes,
+      createdAt: now + index,
+      updatedAt: now + index,
+    };
+
+    const newIdx = store.students.push(newStudent) - 1;
+    existingByGroupAndName.set(dupKey, newIdx);
+    existingByCode.set(finalCode, newIdx);
+    importedCount++;
+    importedStudents.push(newStudent);
+  });
+
+  if (importedCount > 0 || updatedCount > 0) {
+    saveManagementStore(store);
+  }
+
+  return {
+    importedCount,
+    updatedCount,
+    skippedCount,
+    errorsCount,
+    totalProcessed: params.rows.length,
+    importedStudents,
+  };
+}
+
+export interface ExportRowItem {
+  id: string;
+  code: string;
+  name: string;
+  academicYear: string;
+  groupId: string;
+  groupName: string;
+  teacher: string;
+  subject: string;
+  studentPhone: string;
+  parentPhone: string;
+  monthlyFee: number;
+  status: "active" | "inactive";
+  statusArabic: string;
+  month: string;
+  paymentStatus: "paid" | "partial" | "unpaid" | "returned";
+  paymentStatusArabic: string;
+  paidAmount: number;
+  remainingAmount: number;
+  financialNotes: string;
+  studentNotes: string;
+  createdAtArabic: string;
+}
+
+export function getExportDataset(params: {
+  academicYear?: string;
+  groupId?: string;
+  studentStatus?: "active" | "inactive" | "all";
+  month?: string;
+  paymentFilter?: "all" | "paid" | "unpaid" | "overdue";
+}): {
+  rows: ExportRowItem[];
+  groups: Group[];
+  academicYears: string[];
+  month: string;
+  summary: {
+    totalStudents: number;
+    totalExpectedFee: number;
+    totalPaidAmount: number;
+    totalRemainingAmount: number;
+  };
+} {
+  const store = getManagementStore();
+  const targetMonth = params.month || getLocalTodayDate().slice(0, 7);
+  const groupMap = new Map<string, Group>();
+  store.groups.forEach((g) => groupMap.set(g.id, g));
+
+  // Financial lookup for targetMonth
+  const finMap = new Map<string, FinancialRecord>();
+  store.financials.forEach((f) => {
+    if (f.month === targetMonth) {
+      finMap.set(f.studentId, f);
+    }
+  });
+
+  const yearsSet = new Set<string>();
+  store.groups.forEach((g) => {
+    if (g.academicYear) yearsSet.add(g.academicYear);
+  });
+  store.students.forEach((s) => {
+    if (s.academicYear) yearsSet.add(s.academicYear);
+  });
+
+  let filteredStudents = store.students.map((s) => {
+    const grp = groupMap.get(s.groupId);
+    return {
+      ...s,
+      groupName: grp?.name || s.groupName || "غير محدد",
+      academicYear: s.academicYear || grp?.academicYear || "غير محدد",
+      teacher: grp?.teacher || "",
+      subject: grp?.subject || "",
+    };
+  });
+
+  // 1. Filter by Student Status
+  const statusFilter = params.studentStatus || "active";
+  if (statusFilter === "active") {
+    filteredStudents = filteredStudents.filter((s) => s.status === "active");
+  } else if (statusFilter === "inactive") {
+    filteredStudents = filteredStudents.filter((s) => s.status === "inactive");
+  }
+
+  // 2. Filter by Academic Year
+  if (params.academicYear && params.academicYear !== "ALL") {
+    filteredStudents = filteredStudents.filter((s) => s.academicYear === params.academicYear);
+  }
+
+  // 3. Filter by Group ID
+  if (params.groupId && params.groupId !== "ALL") {
+    filteredStudents = filteredStudents.filter((s) => s.groupId === params.groupId);
+  }
+
+  // Build enriched rows
+  let rows: ExportRowItem[] = filteredStudents.map((s) => {
+    const fin = finMap.get(s.id);
+    const fee = Number(s.monthlyFee) || 0;
+    let paid = 0;
+    let paymentStatus: "paid" | "partial" | "unpaid" | "returned" = "unpaid";
+    let paymentStatusArabic = "غير مسدد (متأخر)";
+
+    if (fin) {
+      if (fin.status === "returned") {
+        paymentStatus = "returned";
+        paymentStatusArabic = "مسترد / ملغي";
+        paid = 0;
+      } else if (fin.status === "paid" || (fin.paidAmount && fin.paidAmount > 0)) {
+        paid = Number(fin.paidAmount) || 0;
+        if (paid >= fee && fee > 0) {
+          paymentStatus = "paid";
+          paymentStatusArabic = "مسدد بالكامل";
+        } else if (paid > 0) {
+          paymentStatus = "partial";
+          paymentStatusArabic = "سداد جزئي";
+        }
+      }
+    }
+
+    const remaining = paymentStatus === "returned" ? 0 : Math.max(0, fee - paid);
+
+    let createdAtArabic = "";
+    try {
+      createdAtArabic = new Date(s.createdAt).toLocaleDateString("ar-EG", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch {
+      createdAtArabic = "";
+    }
+
+    return {
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      academicYear: s.academicYear,
+      groupId: s.groupId,
+      groupName: s.groupName,
+      teacher: s.teacher,
+      subject: s.subject,
+      studentPhone: s.studentPhone || "",
+      parentPhone: s.parentPhone || "",
+      monthlyFee: fee,
+      status: s.status,
+      statusArabic: s.status === "active" ? "نشط" : "منقطع / غير نشط",
+      month: targetMonth,
+      paymentStatus,
+      paymentStatusArabic,
+      paidAmount: paid,
+      remainingAmount: remaining,
+      financialNotes: fin?.notes || "",
+      studentNotes: s.notes || "",
+      createdAtArabic,
+    };
+  });
+
+  // 4. Filter by Payment Status if requested
+  if (params.paymentFilter === "paid") {
+    rows = rows.filter((r) => r.paymentStatus === "paid");
+  } else if (params.paymentFilter === "unpaid") {
+    rows = rows.filter((r) => r.paymentStatus === "unpaid");
+  } else if (params.paymentFilter === "overdue") {
+    rows = rows.filter((r) => r.paymentStatus === "unpaid" || r.paymentStatus === "partial");
+  }
+
+  const totalExpectedFee = rows.reduce((sum, r) => sum + r.monthlyFee, 0);
+  const totalPaidAmount = rows.reduce((sum, r) => sum + r.paidAmount, 0);
+  const totalRemainingAmount = rows.reduce((sum, r) => sum + r.remainingAmount, 0);
+
+  return {
+    rows,
+    groups: store.groups.sort((a, b) => b.createdAt - a.createdAt),
+    academicYears: Array.from(yearsSet),
+    month: targetMonth,
+    summary: {
+      totalStudents: rows.length,
+      totalExpectedFee,
+      totalPaidAmount,
+      totalRemainingAmount,
+    },
   };
 }

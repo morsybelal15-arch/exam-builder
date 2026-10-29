@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFinancials, updateFinancial, bulkUpdateFinancials, deleteFinancialRecord } from "@/lib/management-db";
+import { getFinancials, updateFinancial, bulkUpdateFinancials, deleteFinancialRecord, getLocalTodayDate } from "@/lib/management-db";
+import { requireApiSession } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const groupId = searchParams.get("groupId");
-    const month = searchParams.get("month") || new Date().toISOString().substring(0, 7);
+    const month = searchParams.get("month") || getLocalTodayDate().substring(0, 7);
 
     if (!groupId) {
       return NextResponse.json({ error: "Missing groupId" }, { status: 400 });
@@ -20,6 +23,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const body = await req.json();
     const { action } = body;
 

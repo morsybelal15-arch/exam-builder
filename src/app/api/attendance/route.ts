@@ -7,10 +7,14 @@ import {
   createClassSession,
   deleteClassSession,
   deleteStudentAttendance,
+  getLocalTodayDate,
 } from "@/lib/management-db";
+import { requireApiSession } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const groupId = searchParams.get("groupId");
     const date = searchParams.get("date");
@@ -27,7 +31,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Return attendance list for a specific date
-    const targetDate = date || new Date().toISOString().split("T")[0];
+    const targetDate = date || getLocalTodayDate();
     const attendance = getAttendance(groupId, targetDate);
     const sessions = getGroupSessions(groupId, targetDate.substring(0, 7));
 
@@ -44,6 +48,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const body = await req.json();
     const { action } = body;
 
@@ -93,7 +99,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "معرف الطالب أو رمز QR مطلوب" }, { status: 400 });
     }
 
-    const targetDate = date || new Date().toISOString().split("T")[0];
+    const targetDate = date || getLocalTodayDate();
     const targetStatus = status || "attended";
     const res = markAttendance(studentIdOrCode, groupId, targetDate, targetStatus, method || "manual");
 

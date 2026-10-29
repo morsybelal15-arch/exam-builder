@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 
 export const CANDIDATE_MODELS = [
   process.env.GEMINI_MODEL,
@@ -281,59 +281,96 @@ const EXTRACTION_INSTRUCTION = `أنت خبير محترف واستثنائي ف
   ]
 }`;
 
-/** Call Gemini models.generateContent with candidate model fallback */
+function isAbortError(err: any): boolean {
+  const msg = String(err?.message || err);
+  return err?.name === "AbortError" || err?.name === "TimeoutError" || /aborted|timed? ?out|deadline/i.test(msg);
+}
+
+/**
+ * Call Gemini models.generateContent with candidate model fallback.
+ *
+ * Long outputs (e.g. a full reading passage + its questions) can take 20–40s,
+ * so we use a generous overall deadline shared across all fallback attempts
+ * instead of a tiny fixed per-call timeout.
+ */
 async function callGeminiGenerate(
   client: GoogleGenAI,
   params: {
     systemInstruction: string;
     prompt: string;
     inlineImage?: { mimeType: string; data: string };
+    /** Total time budget across all model attempts (ms). */
+    totalTimeoutMs?: number;
+    /** Max time for a single model attempt (ms). */
+    perAttemptTimeoutMs?: number;
   }
 ) {
+  const totalTimeoutMs = params.totalTimeoutMs ?? 100_000;
+  const perAttemptTimeoutMs = params.perAttemptTimeoutMs ?? 75_000;
+  const deadline = Date.now() + totalTimeoutMs;
   let lastError: any = null;
 
+  const contents: any[] = [];
+  if (params.inlineImage) {
+    contents.push({
+      inlineData: {
+        mimeType: params.inlineImage.mimeType,
+        data: params.inlineImage.data,
+      },
+    });
+  }
+  contents.push(params.prompt);
+
   for (const model of CANDIDATE_MODELS) {
-    try {
-      const contents: any[] = [];
-      if (params.inlineImage) {
-        contents.push({
-          inlineData: {
-            mimeType: params.inlineImage.mimeType,
-            data: params.inlineImage.data,
+    // Try with minimal thinking first (much faster for OCR/structuring); if the model
+    // rejects the thinking config, retry the same model without it.
+    for (const useThinkingConfig of [true, false]) {
+      const remaining = deadline - Date.now();
+      if (remaining < 5_000) {
+        throw lastError || new Error("انتهت مهلة الاتصال بـ Gemini.");
+      }
+
+      try {
+        const response = await client.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction: params.systemInstruction,
+            responseMimeType: "application/json",
+            temperature: 0.1,
+            maxOutputTokens: 16384,
+            ...(useThinkingConfig ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {}),
+            abortSignal: AbortSignal.timeout(Math.min(perAttemptTimeoutMs, remaining)),
           },
         });
-      }
-      contents.push(params.prompt);
 
-      const response = await client.models.generateContent({
-        model,
-        contents,
-        config: {
-          systemInstruction: params.systemInstruction,
-          responseMimeType: "application/json",
-          temperature: 0.1,
-          abortSignal: AbortSignal.timeout(8500),
-        },
-      });
+        const text = response.text;
+        if (!text) {
+          throw new Error(`أرجع النموذج ${model} نصاً فارغاً.`);
+        }
+        return text;
+      } catch (err: any) {
+        lastError = err;
+        const msg = String(err?.message || err);
 
-      const text = response.text;
-      if (!text) {
-        throw new Error(`أرجع النموذج ${model} نصاً فارغاً.`);
+        // Auth errors: no point trying other models
+        if (/api[_ ]?key|API_KEY_INVALID|401|403/i.test(msg)) {
+          throw err;
+        }
+
+        // Model doesn't accept the thinking config → retry same model without it
+        if (useThinkingConfig && /thinking/i.test(msg) && /400|INVALID_ARGUMENT|not supported|unsupported/i.test(msg)) {
+          console.warn(`[gemini] ${model} rejected thinkingConfig, retrying without it...`);
+          continue;
+        }
+
+        if (isAbortError(err)) {
+          console.warn(`[gemini] ${model} timed out, trying next candidate...`);
+        } else {
+          console.warn(`[gemini] ${model} failed (${msg.slice(0, 120)}), trying next candidate...`);
+        }
+        break; // move on to the next model
       }
-      return text;
-    } catch (err: any) {
-      lastError = err;
-      const msg = String(err?.message || err);
-      // If error is about model not found or temporary high demand (503), try the next candidate model
-      if (/not found|404|unsupported model|503|UNAVAILABLE|high demand|overloaded/i.test(msg)) {
-        console.warn(`[gemini] Model ${model} unavailable (${msg.slice(0, 60)}), trying next candidate...`);
-        continue;
-      }
-      // For auth errors, stop
-      if (/api[_ ]?key|API_KEY_INVALID|401|403/i.test(msg)) {
-        throw err;
-      }
-      continue;
     }
   }
 
@@ -471,6 +508,8 @@ export async function testGeminiKey(apiKey: string): Promise<{ valid: boolean; m
     const text = await callGeminiGenerate(client, {
       systemInstruction: "أنت نظام فحص المفتاح. أجب حصراً بـ JSON: {\"status\": \"ok\"}",
       prompt: "ping",
+      totalTimeoutMs: 20_000,
+      perAttemptTimeoutMs: 10_000,
     });
     return { valid: true, model: CANDIDATE_MODELS[0] || "gemini-2.5-flash" };
   } catch (err: any) {
@@ -492,6 +531,12 @@ export function friendlyGeminiError(err: unknown): { message: string; status: nu
     return {
       message: "تم تجاوز حد الاستخدام المؤقت لمفتاح Gemini المجاني. يرجى الانتظار 30 ثانية أو استخدام مفتاح آخر.",
       status: 429,
+    };
+  }
+  if (isAbortError(err)) {
+    return {
+      message: "استغرق Gemini وقتاً أطول من المعتاد في قراءة المنطقة المحددة. حاول مرة أخرى، أو قسّم القطعة الطويلة إلى جزأين.",
+      status: 504,
     };
   }
   if (/fetch failed|ENOTFOUND|ECONNRESET|network/i.test(raw)) {

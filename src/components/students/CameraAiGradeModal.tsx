@@ -232,7 +232,7 @@ export default function CameraAiGradeModal({
         {/* Header */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-blue-600/20 text-blue-400 flex items-center justify-center">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -276,21 +276,21 @@ export default function CameraAiGradeModal({
                   {/* Full View Area Framing - Corner Accents */}
                   <div className="absolute inset-0 pointer-events-none p-4 sm:p-6 flex flex-col justify-between">
                     <div className="flex justify-between items-start">
-                      <div className="w-10 h-10 border-t-3 border-r-3 border-amber-400 rounded-tr-xl" />
-                      <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-500/30 text-center">
-                        <span className="text-[11px] font-bold text-amber-300">
+                      <div className="w-10 h-10 border-t-3 border-r-3 border-blue-500 rounded-tr-xl" />
+                      <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-blue-500/30 text-center">
+                        <span className="text-[11px] font-bold text-white">
                           المساحة كاملة جاهزة لالتقاط ورقة الامتحان
                         </span>
                       </div>
-                      <div className="w-10 h-10 border-t-3 border-l-3 border-amber-400 rounded-tl-xl" />
+                      <div className="w-10 h-10 border-t-3 border-l-3 border-blue-500 rounded-tl-xl" />
                     </div>
 
                     <div className="flex justify-between items-end">
-                      <div className="w-10 h-10 border-b-3 border-r-3 border-amber-400 rounded-br-xl" />
+                      <div className="w-10 h-10 border-b-3 border-r-3 border-blue-500 rounded-br-xl" />
                       <span className="text-[10px] text-slate-300 bg-black/50 px-3 py-1 rounded-full">
                         تأكد من وضوح اسم الطالب والدرجة
                       </span>
-                      <div className="w-10 h-10 border-b-3 border-l-3 border-amber-400 rounded-bl-xl" />
+                      <div className="w-10 h-10 border-b-3 border-l-3 border-blue-500 rounded-bl-xl" />
                     </div>
                   </div>
                 </>
@@ -320,8 +320,8 @@ export default function CameraAiGradeModal({
 
               {isAnalyzing && (
                 <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center gap-3">
-                  <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-xs font-bold text-amber-300">
+                  <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs font-bold text-white">
                     جاري التعرف على اسم الطالب والدرجة بالذكاء الاصطناعي...
                   </span>
                 </div>
@@ -361,7 +361,7 @@ export default function CameraAiGradeModal({
               <button
                 type="button"
                 onClick={handleCapture}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-xs shadow-lg shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
               >
                 <Camera className="w-4 h-4" />
                 <span>التقاط وقراءة الدرجة</span>
@@ -470,7 +470,7 @@ export default function CameraAiGradeModal({
                                   {s.academicYear} {s.groupName ? `• ${s.groupName}` : ""}
                                 </span>
                               </div>
-                              <span className="font-mono text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-amber-400">
+                              <span className="font-mono text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-blue-400">
                                 {s.code}
                               </span>
                             </div>
@@ -491,7 +491,7 @@ export default function CameraAiGradeModal({
                   {/* Editable Degree / Score */}
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
-                      <Award className="w-3.5 h-3.5 text-amber-400" />
+                      <Award className="w-3.5 h-3.5 text-blue-400" />
                       <span>الدرجة المرصودة (من {totalScore}):</span>
                     </label>
                     <div className="flex items-center gap-2">
@@ -502,7 +502,7 @@ export default function CameraAiGradeModal({
                         min={0}
                         value={editableScore}
                         onChange={(e) => setEditableScore(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                       <span className="text-xs text-slate-400 font-mono shrink-0">
                         / {totalScore}
@@ -545,7 +545,7 @@ export default function CameraAiGradeModal({
                     type="button"
                     disabled={isSaving}
                     onClick={() => handleSaveGrade(false)}
-                    className="inline-flex items-center gap-1.5 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-xs shadow-md shadow-blue-600/20 transition-all cursor-pointer"
                   >
                     <span>{isSaving ? "جاري الحفظ..." : "تأكيد وحفظ"}</span>
                   </button>

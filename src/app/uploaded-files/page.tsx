@@ -143,8 +143,18 @@ export default function UploadedFilesPage() {
 
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
+            let uploadedItem: UploadedFileItem = newFileItem;
+            try {
+              const parsed = JSON.parse(xhr.responseText);
+              if (parsed?.file) {
+                uploadedItem = {
+                  ...newFileItem,
+                  ...parsed.file,
+                };
+              }
+            } catch {}
             setUploadProgress((prev) => (prev ? { ...prev, percent: 100, remainingSec: 0, status: "success" } : null));
-            setFiles((prev) => [newFileItem, ...prev]);
+            setFiles((prev) => [uploadedItem, ...prev]);
             setTimeout(() => {
               setUploadProgress(null);
               resolve();
@@ -176,8 +186,10 @@ export default function UploadedFilesPage() {
 
   const handleDelete = async (id: string) => {
     try {
+      const target = files.find((f) => f.id === id);
       setFiles((prev) => prev.filter((f) => f.id !== id));
-      await fetch(`/api/files?id=${id}`, { method: "DELETE" });
+      const nameParam = target?.name ? `&name=${encodeURIComponent(target.name)}` : "";
+      await fetch(`/api/files?id=${encodeURIComponent(id)}${nameParam}`, { method: "DELETE" });
     } catch (err) {
       console.error(err);
     }

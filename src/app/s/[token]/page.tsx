@@ -17,7 +17,10 @@ import {
   Phone,
   FileCheck,
 } from "lucide-react";
-import { getFullStudentProfile } from "@/lib/management-db";
+import { getFullStudentProfile, getLocalTodayDate } from "@/lib/management-db";
+import { headers } from "next/headers";
+import { findTenantByDomain } from "@/lib/tenants-repository";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 import ParentSectionsClient from "./ParentSectionsClient";
 import ParentShareButton from "./ParentShareButton";
 
@@ -29,7 +32,23 @@ interface PageProps {
   params: Promise<{ token: string }>;
 }
 
+async function resolveTenantFromRequestHost() {
+  try {
+    const h = await headers();
+    const host = h.get("host") || "";
+    if (host) {
+      const tenant = await findTenantByDomain(host);
+      if (tenant?.id) {
+        setCurrentTenantId(tenant.id);
+      }
+    }
+  } catch {
+    // Ignore header resolution errors
+  }
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  await resolveTenantFromRequestHost();
   const { token } = await params;
   const decoded = decodeURIComponent(token).trim();
   const profile = getFullStudentProfile(decoded);
@@ -57,6 +76,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function StudentParentPortalPage({ params }: PageProps) {
+  await resolveTenantFromRequestHost();
   const { token } = await params;
   const decodedToken = decodeURIComponent(token).trim();
   const profile = getFullStudentProfile(decodedToken);
@@ -122,7 +142,7 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
   const { student, group, financials, attendance, sessions, grades } = profile;
 
   // Compute Quick Summary Metrics
-  const totalAttendanceRecords = attendance.length;
+  const totalAttendanceRecords = Math.max(attendance.length, sessions.length);
   const attendedCount = attendance.filter((a) => a.status === "attended").length;
   const attendanceRate =
     totalAttendanceRecords > 0
@@ -134,7 +154,7 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
   ).length;
 
   // Current Month Payment Status
-  const currentMonthKey = new Date().toISOString().substring(0, 7); // "YYYY-MM"
+  const currentMonthKey = getLocalTodayDate().substring(0, 7); // "YYYY-MM"
   const currentMonthFinancial = financials.find((f) => f.month === currentMonthKey);
 
   const getFinancialBadge = (record?: typeof currentMonthFinancial) => {
@@ -145,11 +165,11 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
         icon: AlertCircle,
       };
     }
-    if (record.status === "paid" || record.paidAmount >= record.totalAmount) {
+    if (record.status === "returned") {
       return {
-        label: "مدفوع بالكامل",
-        style: "bg-emerald-50 text-emerald-700 border-emerald-200",
-        icon: CheckCircle2,
+        label: "تم إرجاع الاشتراك",
+        style: "bg-rose-50 text-rose-700 border-rose-200",
+        icon: XCircle,
       };
     }
     if (record.paidAmount > 0 && record.paidAmount < record.totalAmount) {
@@ -157,6 +177,13 @@ export default async function StudentParentPortalPage({ params }: PageProps) {
         label: `مدفوع جزئياً (${record.paidAmount} / ${record.totalAmount} ج.م)`,
         style: "bg-amber-50 text-amber-800 border-amber-200",
         icon: Clock,
+      };
+    }
+    if (record.status === "paid" || (record.paidAmount >= record.totalAmount && record.totalAmount > 0)) {
+      return {
+        label: "مدفوع بالكامل",
+        style: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        icon: CheckCircle2,
       };
     }
     return {

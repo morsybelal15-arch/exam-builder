@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import { HOSTINGER_VPS_CONFIG, TENANT_APP_PORT, DEFAULT_ADMIN_HOST, generateNginxConfig } from "@/lib/vps-service";
-import { exportRawTenantStore } from "@/lib/tenants-repository";
+import { exportRawTenantStoreAsync } from "@/lib/tenants-repository";
 
 export const VPS_APP_DIR = "/var/www/exam-builder";
 export const SSH_KEY_PATH = path.join(process.cwd(), ".vps_ssh", "vps_key");
@@ -87,14 +87,19 @@ export async function syncTenantsToVps(options: { force?: boolean } = {}): Promi
   }
 
   try {
-    const tenants = exportRawTenantStore();
+    const tenants = await exportRawTenantStoreAsync();
     const json = JSON.stringify(tenants, null, 2);
     const jsonB64 = Buffer.from(json, "utf-8").toString("base64");
     const target = `${VPS_APP_DIR}/data/tenants.json`;
+    const tenantDirsCmd = tenants
+      .map((t) => t.id.replace(/[^a-zA-Z0-9_-]/g, "_"))
+      .map((safeId) => `mkdir -p ${VPS_APP_DIR}/data/tenants/${safeId}`)
+      .join("\n");
 
     const script = `
 set -e
-mkdir -p ${VPS_APP_DIR}/data
+mkdir -p ${VPS_APP_DIR}/data/tenants
+${tenantDirsCmd}
 if [ "${options.force ? 1 : 0}" != "1" ] && [ -s ${target} ] && [ "$(tr -d '[:space:]' < ${target})" != "[]" ]; then
   echo SYNC_SKIPPED
   exit 0
@@ -172,7 +177,10 @@ fi
  * (bypasses local DNS / ISP caching on the admin machine).
  */
 export async function checkTenantDomainOnVps(domain: string): Promise<{ online: boolean; message: string }> {
-  const clean = domain.trim().toLowerCase();
+  const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(clean)) {
+    return { online: false, message: `اسم النطاق غير صالح: ${domain}` };
+  }
   const script = `
 code=$(curl -s -o /tmp/eb_check.html -w '%{http_code}' -H 'Host: ${clean}' http://127.0.0.1/login || echo 000)
 if grep -q 'منصة إعداد الاختبارات' /tmp/eb_check.html 2>/dev/null; then echo "APP_OK $code"; else echo "APP_MISSING $code"; fi

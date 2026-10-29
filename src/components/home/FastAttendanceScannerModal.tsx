@@ -50,6 +50,7 @@ export default function FastAttendanceScannerModal({
   const [manualCode, setManualCode] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const handleCodeDetectedRef = useRef<(code: string) => void>(() => {});
 
   // Play audio beep using Web Audio API
   const playBeep = () => {
@@ -117,7 +118,7 @@ export default function FastAttendanceScannerModal({
             if (barcodes && barcodes.length > 0) {
               const codeValue = barcodes[0].rawValue;
               if (codeValue) {
-                handleCodeDetected(codeValue);
+                handleCodeDetectedRef.current(codeValue);
               }
             }
           } catch (e) {
@@ -196,6 +197,7 @@ export default function FastAttendanceScannerModal({
       setTimeout(() => setIsProcessing(false), 1200);
     }
   };
+  handleCodeDetectedRef.current = handleCodeDetected;
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
 import fs from "node:fs";
 import { getUploadsDir } from "@/lib/db";
+import { requireApiSession } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const name = searchParams.get("name");
     if (!name) {
@@ -12,44 +18,30 @@ export async function GET(req: NextRequest) {
     }
 
     const safeName = path.basename(name);
-    const filePath = path.join(getUploadsDir(), safeName);
+    const candidatePaths = [
+      path.join(getUploadsDir(session.id), safeName),
+      path.join(getUploadsDir("default"), safeName),
+      path.join(process.cwd(), "public", safeName),
+    ];
 
-    if (fs.existsSync(filePath)) {
-      const buffer = fs.readFileSync(filePath);
-      const ext = path.extname(safeName).toLowerCase();
-      const contentType =
-        ext === ".svg" ? "image/svg+xml" :
-        ext === ".png" ? "image/png" :
-        ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" :
-        ext === ".webp" ? "image/webp" :
-        ext === ".pdf" ? "application/pdf" : "application/octet-stream";
+    for (const filePath of candidatePaths) {
+      if (fs.existsSync(filePath)) {
+        const buffer = fs.readFileSync(filePath);
+        const ext = path.extname(safeName).toLowerCase();
+        const contentType =
+          ext === ".svg" ? "image/svg+xml" :
+          ext === ".png" ? "image/png" :
+          ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" :
+          ext === ".webp" ? "image/webp" :
+          ext === ".pdf" ? "application/pdf" : "application/octet-stream";
 
-      return new NextResponse(buffer, {
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
-    }
-
-    // Fallback: check public directory (e.g. sample-textbook.svg)
-    const publicPath = path.join(process.cwd(), "public", safeName);
-    if (fs.existsSync(publicPath)) {
-      const buffer = fs.readFileSync(publicPath);
-      const ext = path.extname(safeName).toLowerCase();
-      const contentType =
-        ext === ".svg" ? "image/svg+xml" :
-        ext === ".png" ? "image/png" :
-        ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" :
-        ext === ".webp" ? "image/webp" :
-        ext === ".pdf" ? "application/pdf" : "application/octet-stream";
-
-      return new NextResponse(buffer, {
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
+        return new NextResponse(buffer, {
+          headers: {
+            "Content-Type": contentType,
+            "Cache-Control": "private, max-age=3600",
+          },
+        });
+      }
     }
 
     return new NextResponse("File not found", { status: 404 });

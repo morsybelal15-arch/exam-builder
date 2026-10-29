@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGroups, getGroupById, saveGroup, deleteGroup } from "@/lib/management-db";
+import { requireApiSession } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (id) {
@@ -19,6 +22,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const body = await req.json();
     const { name, teacher, academicYear, subject, id } = body;
     if (!name || !teacher || !academicYear || !subject) {
@@ -40,6 +45,8 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const session = await requireApiSession();
+    if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Missing group ID" }, { status: 400 });

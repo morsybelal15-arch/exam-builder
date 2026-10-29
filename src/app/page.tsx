@@ -15,10 +15,6 @@ export default async function RootPage() {
     redirect("/login");
   }
 
-  if (session.role === "SUPER_ADMIN") {
-    redirect("/admin");
-  }
-
   const analytics = getHomeAnalytics();
   const groups = getGroups();
 

@@ -908,11 +908,10 @@ function StudentsPageContent() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-200/70 p-1.5 rounded-2xl">
           <button
             onClick={() => setActiveTab("students")}
-            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-              activeTab === "students"
+            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${activeTab === "students"
                 ? "bg-white text-blue-600 shadow-sm"
                 : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-            }`}
+              }`}
           >
             <Users className="w-4 h-4" />
             <span>طلاب المجموعة</span>
@@ -920,11 +919,10 @@ function StudentsPageContent() {
 
           <button
             onClick={() => setActiveTab("financials")}
-            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-              activeTab === "financials"
-                ? "bg-white text-emerald-600 shadow-sm"
+            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${activeTab === "financials"
+                ? "bg-white text-blue-600 shadow-sm"
                 : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-            }`}
+              }`}
           >
             <CreditCard className="w-4 h-4" />
             <span>المالية والاشتراكات</span>
@@ -932,11 +930,10 @@ function StudentsPageContent() {
 
           <button
             onClick={() => setActiveTab("attendance")}
-            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-              activeTab === "attendance"
-                ? "bg-white text-indigo-600 shadow-sm"
+            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${activeTab === "attendance"
+                ? "bg-white text-blue-600 shadow-sm"
                 : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-            }`}
+              }`}
           >
             <CalendarIcon className="w-4 h-4" />
             <span>الغياب والحضور</span>
@@ -944,11 +941,10 @@ function StudentsPageContent() {
 
           <button
             onClick={() => setActiveTab("grades")}
-            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-              activeTab === "grades"
-                ? "bg-white text-amber-600 shadow-sm"
+            className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${activeTab === "grades"
+                ? "bg-white text-blue-600 shadow-sm"
                 : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-            }`}
+              }`}
           >
             <Award className="w-4 h-4" />
             <span>درجات الاختبارات</span>
@@ -1113,9 +1109,8 @@ function StudentsPageContent() {
                         return (
                           <tr
                             key={student.id}
-                            className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
-                              isSelected ? "bg-blue-50/40" : isInactive ? "bg-slate-50/50 opacity-75" : ""
-                            }`}
+                            className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${isSelected ? "bg-blue-50/40" : isInactive ? "bg-slate-50/50 opacity-75" : ""
+                              }`}
                           >
                             <td className="p-4" onClick={(e) => e.stopPropagation()}>
                               <input
@@ -1168,11 +1163,10 @@ function StudentsPageContent() {
 
                             <td className="p-4">
                               <span
-                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                                  isInactive
+                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${isInactive
                                     ? "bg-slate-200 text-slate-700"
                                     : "bg-emerald-100 text-emerald-800"
-                                }`}
+                                  }`}
                               >
                                 {isInactive ? "منقطع / غير نشط" : "نشط"}
                               </span>
@@ -1380,17 +1374,16 @@ function StudentsPageContent() {
                         const rowColorClass = isPaid
                           ? "bg-emerald-50/70 hover:bg-emerald-50 text-emerald-950"
                           : isPartial
-                          ? "bg-[#faf0e6] hover:bg-[#f5e6d3] text-amber-950"
-                          : isReturned
-                          ? "bg-slate-100/80 hover:bg-slate-100 text-slate-700"
-                          : "bg-red-50/70 hover:bg-red-50 text-red-950";
+                            ? "bg-[#faf0e6] hover:bg-[#f5e6d3] text-amber-950"
+                            : isReturned
+                              ? "bg-slate-100/80 hover:bg-slate-100 text-slate-700"
+                              : "bg-red-50/70 hover:bg-red-50 text-red-950";
 
                         return (
                           <tr
                             key={fin.id || fin.studentId}
-                            className={`transition-colors cursor-pointer border-b border-slate-100/60 ${rowColorClass} ${
-                              isSelected ? "ring-2 ring-blue-500/50" : ""
-                            }`}
+                            className={`transition-colors cursor-pointer border-b border-slate-100/60 ${rowColorClass} ${isSelected ? "ring-2 ring-blue-500/50" : ""
+                              }`}
                             onClick={() => router.push(`/students/${fin.studentId}`)}
                           >
                             <td className="p-4" onClick={(e) => e.stopPropagation()}>
@@ -1419,11 +1412,10 @@ function StudentsPageContent() {
                                 <button
                                   type="button"
                                   onClick={() => handleUpdateFinancialStatus(fin.studentId, "paid")}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                                    isPaid
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${isPaid
                                       ? "bg-emerald-600 text-white shadow-xs"
                                       : "bg-white/80 hover:bg-white text-emerald-700 border border-emerald-200"
-                                  }`}
+                                    }`}
                                 >
                                   <Check className="w-3 h-3" />
                                   <span>مدفوع</span>
@@ -1432,11 +1424,10 @@ function StudentsPageContent() {
                                 <button
                                   type="button"
                                   onClick={() => handleUpdateFinancialStatus(fin.studentId, "unpaid")}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                                    isUnpaid
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${isUnpaid
                                       ? "bg-red-600 text-white shadow-xs"
                                       : "bg-white/80 hover:bg-white text-red-700 border border-red-200"
-                                  }`}
+                                    }`}
                                 >
                                   <X className="w-3 h-3" />
                                   <span>غير مدفوع</span>
@@ -1589,15 +1580,13 @@ function StudentsPageContent() {
                       key={d.date}
                       type="button"
                       onClick={() => setAttendanceDate(d.date)}
-                      className={`p-2 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer relative ${
-                        isSelectedDay
+                      className={`p-2 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer relative ${isSelectedDay
                           ? "ring-2 ring-indigo-600 shadow-sm"
                           : ""
-                      } ${
-                        d.hasClass
+                        } ${d.hasClass
                           ? "bg-emerald-500 hover:bg-emerald-600 text-white font-black"
                           : "bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
-                      }`}
+                        }`}
                       title={d.hasClass ? `يوم حصة (${d.dayName}): ${d.date}` : `${d.dayName}: ${d.date}`}
                     >
                       <span className={`text-[10px] leading-tight font-medium ${d.hasClass ? "text-emerald-100" : "text-slate-500"}`}>
@@ -1807,9 +1796,8 @@ function StudentsPageContent() {
                             return (
                               <tr
                                 key={att.studentId}
-                                className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
-                                  isAttended ? "bg-emerald-50/30" : "bg-red-50/20"
-                                } ${isSelected ? "ring-2 ring-indigo-500/50" : ""}`}
+                                className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${isAttended ? "bg-emerald-50/30" : "bg-red-50/20"
+                                  } ${isSelected ? "ring-2 ring-indigo-500/50" : ""}`}
                                 onClick={() => router.push(`/students/${att.studentId}`)}
                               >
                                 <td className="p-4" onClick={(e) => e.stopPropagation()}>
@@ -1832,111 +1820,108 @@ function StudentsPageContent() {
                                   </div>
                                 </td>
 
-                            <td className="p-4 font-mono font-bold text-slate-600">
-                              {att.code}
-                            </td>
+                                <td className="p-4 font-mono font-bold text-slate-600">
+                                  {att.code}
+                                </td>
 
-                            <td className="p-4">
-                              <span
-                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
-                                  isAttended
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : "bg-red-100 text-red-800"
-                                }`}
-                              >
-                                {isAttended ? (
-                                  <>
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                    <span>حاضر</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <XCircle className="w-3 h-3 text-red-500" />
-                                    <span>غائب</span>
-                                  </>
-                                )}
-                              </span>
-                            </td>
+                                <td className="p-4">
+                                  <span
+                                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${isAttended
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : "bg-red-100 text-red-800"
+                                      }`}
+                                  >
+                                    {isAttended ? (
+                                      <>
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                        <span>حاضر</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <XCircle className="w-3 h-3 text-red-500" />
+                                        <span>غائب</span>
+                                      </>
+                                    )}
+                                  </span>
+                                </td>
 
-                            <td className="p-4 font-mono text-slate-500">
-                              {att.time || "-"}
-                            </td>
+                                <td className="p-4 font-mono text-slate-500">
+                                  {att.time || "-"}
+                                </td>
 
-                            <td className="p-4 text-slate-500">
-                              {att.method === "camera_qr" ? (
-                                <span className="text-blue-600 font-bold">مسح كاميرا QR</span>
-                              ) : isAttended ? (
-                                "تسجيل يدوي"
-                              ) : (
-                                "-"
-                              )}
-                            </td>
+                                <td className="p-4 text-slate-500">
+                                  {att.method === "camera_qr" ? (
+                                    <span className="text-blue-600 font-bold">مسح كاميرا QR</span>
+                                  ) : isAttended ? (
+                                    "تسجيل يدوي"
+                                  ) : (
+                                    "-"
+                                  )}
+                                </td>
 
-                            <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateAttendance(att.studentId, "attended")}
-                                  className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                                    isAttended
-                                      ? "bg-emerald-600 text-white"
-                                      : "bg-slate-100 hover:bg-slate-200 text-slate-600"
-                                  }`}
-                                >
-                                  حاضر
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateAttendance(att.studentId, "absent")}
-                                  className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                                    !isAttended
-                                      ? "bg-red-600 text-white"
-                                      : "bg-slate-100 hover:bg-slate-200 text-slate-600"
-                                  }`}
-                                >
-                                  غائب
-                                </button>
-                              </div>
-                            </td>
+                                <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateAttendance(att.studentId, "attended")}
+                                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${isAttended
+                                          ? "bg-emerald-600 text-white"
+                                          : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                                        }`}
+                                    >
+                                      حاضر
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateAttendance(att.studentId, "absent")}
+                                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${!isAttended
+                                          ? "bg-red-600 text-white"
+                                          : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                                        }`}
+                                    >
+                                      غائب
+                                    </button>
+                                  </div>
+                                </td>
 
-                            {/* Delete single attendance row */}
-                            <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (confirm(`حذف سجل حضور الطالب ${att.studentName} لهذا اليوم؟`)) {
-                                    await fetch("/api/attendance", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        action: "deleteStudentAttendance",
-                                        groupId: selectedGroupId,
-                                        studentId: att.studentId,
-                                        date: attendanceDate,
-                                      }),
-                                    });
-                                    fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
-                                      .then((r) => r.json())
-                                      .then((d) => d.success && setAttendanceRecords(d.attendance || []));
-                                  }
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                                title="حذف سجل الحضور"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
+                                {/* Delete single attendance row */}
+                                <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (confirm(`حذف سجل حضور الطالب ${att.studentName} لهذا اليوم؟`)) {
+                                        await fetch("/api/attendance", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({
+                                            action: "deleteStudentAttendance",
+                                            groupId: selectedGroupId,
+                                            studentId: att.studentId,
+                                            date: attendanceDate,
+                                          }),
+                                        });
+                                        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                                          .then((r) => r.json())
+                                          .then((d) => d.success && setAttendanceRecords(d.attendance || []));
+                                      }
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                    title="حذف سجل الحضور"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         )}
-      </div>
-    )}
 
         {/* =========================================================================
             TOGGLE 4: EXAM GRADES VIEW
@@ -1946,7 +1931,7 @@ function StudentsPageContent() {
             {/* Header / Create Exam Button */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-5 rounded-3xl border border-slate-100 shadow-2xs">
               <div className="flex items-center gap-2.5">
-                <Award className="w-5 h-5 text-amber-500" />
+                <Award className="w-5 h-5 text-blue-600" />
                 <div>
                   <h3 className="text-sm sm:text-base font-bold text-slate-800">
                     رصد درجات الاختبارات والامتحانات
@@ -1959,7 +1944,7 @@ function StudentsPageContent() {
 
               <button
                 onClick={() => setIsCreateExamModalOpen(true)}
-                className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-2xl text-xs font-black shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-2xl text-xs font-black shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>إنشاء سجل اختبار جديد</span>
@@ -1980,15 +1965,15 @@ function StudentsPageContent() {
                           setSelectedExamRecordId(exam.id);
                           loadExamGrades(exam.id);
                         }}
-                        className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-2 border ${
-                          isSelected
-                            ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm"
+                        className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-2 border ${isSelected
+                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
                             : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
-                        }`}
+                          }`}
                       >
                         <Award className="w-3.5 h-3.5" />
                         <span>{exam.examName}</span>
-                        <span className="font-mono bg-black/10 px-1.5 py-0.5 rounded-md text-[10px]">
+                        <span className={`font-mono px-1.5 py-0.5 rounded-md text-[10px] ${isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                          }`}>
                           {exam.totalScore} د
                         </span>
                       </button>
@@ -2003,10 +1988,10 @@ function StudentsPageContent() {
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => setIsCameraAiGradeOpen(true)}
-                          className="inline-flex items-center gap-2 bg-slate-900 hover:bg-black text-amber-400 px-5 py-2.5 rounded-2xl text-xs font-black shadow-md active:scale-95 transition-all cursor-pointer border border-amber-500/30"
+                          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-2xl text-xs font-black shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
                         >
-                          <Camera className="w-4 h-4 text-amber-400" />
-                          <Sparkles className="w-3.5 h-3.5" />
+                          <Camera className="w-4 h-4 text-white" />
+                          <Sparkles className="w-3.5 h-3.5 text-white" />
                           <span>تسجيل درجات الاختبار بالكاميرا (AI OCR)</span>
                         </button>
 
@@ -2067,7 +2052,7 @@ function StudentsPageContent() {
                                             handleManualGradeEdit(gradeItem.studentId, val);
                                           }
                                         }}
-                                        className="w-20 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                        className="w-20 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
                                       />
                                       <span className="text-[11px] text-slate-400">/ {gradeItem.totalScore}</span>
                                     </div>
@@ -2080,13 +2065,12 @@ function StudentsPageContent() {
                                   <td className="p-4 font-bold">
                                     {hasScore ? (
                                       <span
-                                        className={`px-2 py-0.5 rounded-md font-mono ${
-                                          percentage >= 85
+                                        className={`px-2 py-0.5 rounded-md font-mono ${percentage >= 85
                                             ? "bg-emerald-100 text-emerald-800"
                                             : percentage >= 65
-                                            ? "bg-blue-100 text-blue-800"
-                                            : "bg-red-100 text-red-800"
-                                        }`}
+                                              ? "bg-blue-100 text-blue-800"
+                                              : "bg-red-100 text-red-800"
+                                          }`}
                                       >
                                         {percentage}%
                                       </span>
@@ -2097,7 +2081,7 @@ function StudentsPageContent() {
 
                                   <td className="p-4 text-slate-500">
                                     {gradeItem.method === "camera_ai" ? (
-                                      <span className="text-amber-600 font-bold flex items-center gap-1">
+                                      <span className="text-blue-600 font-bold flex items-center gap-1">
                                         <Sparkles className="w-3 h-3" />
                                         <span>AI كاميرا</span>
                                       </span>
@@ -2164,7 +2148,7 @@ function StudentsPageContent() {
                 </p>
                 <button
                   onClick={() => setIsCreateExamModalOpen(true)}
-                  className="mt-2 inline-flex items-center gap-2 bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs"
+                  className="mt-2 inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>إنشاء سجل اختبار</span>
@@ -2432,15 +2416,14 @@ function StudentsPageContent() {
                                 setTransferPoolStudents((prev) => [...prev, s]);
                               }
                             }}
-                            className={`p-3 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
-                              isSelected ? "bg-blue-50/70" : "hover:bg-slate-50"
-                            }`}
+                            className={`p-3 flex items-center justify-between gap-3 cursor-pointer transition-colors ${isSelected ? "bg-blue-50/70" : "hover:bg-slate-50"
+                              }`}
                           >
                             <div className="flex items-center gap-3">
                               <input
                                 type="checkbox"
                                 checked={isSelected}
-                                onChange={() => {}} // handled by parent div
+                                onChange={() => { }} // handled by parent div
                                 className="rounded border-slate-300 pointer-events-none"
                               />
                               <div className="flex flex-col">
@@ -2580,20 +2563,20 @@ function StudentsPageContent() {
                 تسجيل سداد جزئي للاشتراك الشهري
               </h4>
               <p className="text-xs text-slate-500">
-                أدخل المبلغ الفعلي المدفوع وسيظهر الصف بلون بني فاتح مع توضيح المبلغ
+                أدخل المبلغ الفعلي المدفوع وسيتم تسجيله كسداد جزئي لهذا الشهر
               </p>
               <input
                 type="number"
                 value={partialAmountInput}
                 onChange={(e) => setPartialAmountInput(e.target.value)}
                 placeholder="المبلغ المدفوع (مثال: 150)"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
               <div className="flex items-center justify-end gap-2 text-xs font-bold pt-2">
                 <button
                   type="button"
                   onClick={() => setShowPartialModal(false)}
-                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
                 >
                   إلغاء
                 </button>
@@ -2609,7 +2592,7 @@ function StudentsPageContent() {
                     }
                     setShowPartialModal(false);
                   }}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-xs"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs cursor-pointer"
                 >
                   حفظ السداد الجزئي
                 </button>
@@ -2624,14 +2607,14 @@ function StudentsPageContent() {
             <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <Award className="w-5 h-5 text-amber-500" />
+                  <Award className="w-5 h-5 text-blue-600" />
                   <h3 className="text-base font-bold text-slate-800">
                     إنشاء سجل اختبار جديد
                   </h3>
                 </div>
                 <button
                   onClick={() => setIsCreateExamModalOpen(false)}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -2646,7 +2629,7 @@ function StudentsPageContent() {
                     value={newExamName}
                     onChange={(e) => setNewExamName(e.target.value)}
                     placeholder="مثال: اختبار الفصل الأول أو امتحان نصف الشهر"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
 
@@ -2658,7 +2641,7 @@ function StudentsPageContent() {
                     min={1}
                     value={newExamTotalScore}
                     onChange={(e) => setNewExamTotalScore(Number(e.target.value))}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
 
@@ -2666,13 +2649,13 @@ function StudentsPageContent() {
                   <button
                     type="button"
                     onClick={() => setIsCreateExamModalOpen(false)}
-                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl shadow-sm"
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-sm cursor-pointer"
                   >
                     إنشاء السجل
                   </button>
