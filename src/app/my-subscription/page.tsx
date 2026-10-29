@@ -82,9 +82,6 @@ export default async function MySubscriptionPage() {
               <CreditCard className="w-7 h-7 text-blue-600" />
               <span>تفاصيل اشتراك: {clientName}</span>
             </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              معلومات الباقة، رسائل الإدارة، فترة الاشتراك، المساحة السحابية، والدعم الفني
-            </p>
           </div>
 
           {/* Status & Subscription Type Pills */}
@@ -127,10 +124,6 @@ export default async function MySubscriptionPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
             {/* Plan Info */}
             <div className="lg:col-span-2 space-y-3">
-              <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-blue-100">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>الخطة الحالية ({subscriptionType})</span>
-              </div>
               <h2 className="text-2xl font-black text-slate-900">{planType}</h2>
               <p className="text-sm text-slate-500 leading-relaxed max-w-xl">
                 نسخة مخصصة باسم ({clientName}) مفعلة ومتصلة بسيرفر المنصة السحابي.
@@ -147,11 +140,6 @@ export default async function MySubscriptionPage() {
                     })}
                   </strong>
                 </span>
-                {tenant?.domain && (
-                  <span className="bg-slate-100 px-3 py-1.5 rounded-xl font-mono" dir="ltr">
-                    {tenant.domain}
-                  </span>
-                )}
               </div>
             </div>
 

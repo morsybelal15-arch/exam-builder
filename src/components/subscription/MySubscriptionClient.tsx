@@ -117,7 +117,23 @@ export default function MySubscriptionClient({
         text: "تمت إعادة ضبط المصنع وتصفير جميع البيانات والاختبارات بنجاح!",
       });
 
-      // Trigger immediate sync for Sidebar & TopHeaderBar
+      // Immediately zero out Sidebar & TopHeaderBar usage counters, then confirm with fresh session fetch
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("tenant-session-sync", {
+            detail: {
+              authenticated: true,
+              usage: {
+                studentsCount: 0,
+                activeStudentsCount: 0,
+                groupsCount: 0,
+                filesBytes: 0,
+              },
+            },
+          })
+        );
+      }
+
       fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
         .then((r) => r.json())
         .then((sessionData) => {
@@ -147,23 +163,17 @@ export default function MySubscriptionClient({
             <Megaphone className="w-6 h-6" />
           </div>
           <div className="space-y-1.5 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm sm:text-base font-black text-amber-950">
-                رسائل وأخبار الإدارة المثبتة
-              </h3>
-              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-amber-200/70 text-amber-900 px-2.5 py-0.5 rounded-full">
-                <Sparkles className="w-3 h-3" />
-                <span>إشعار رسمي من إدارة المنصة</span>
-              </span>
-            </div>
+            <h3 className="text-sm sm:text-base font-black text-amber-950">
+              رسائل وأخبار الإدارة المثبتة
+            </h3>
 
             {pinnedNotice && pinnedNotice.trim() ? (
               <p className="text-xs sm:text-sm font-bold text-amber-900 leading-relaxed whitespace-pre-line bg-white/80 border border-amber-200/70 rounded-2xl p-4 mt-2">
                 {pinnedNotice}
               </p>
             ) : (
-              <p className="text-xs font-semibold text-amber-800/80 leading-relaxed">
-                لا توجد رسائل أو تنبيهات إدارية جديدة حالياً — ستظهر هنا أي أخبار عن تحديثات قادمة، تعديلات في الباقات، أو متابعة طلبات الدعم الفني الخاصة بك.
+              <p className="text-xs font-semibold text-amber-800/80">
+                لا توجد رسائل حالياً
               </p>
             )}
           </div>
@@ -231,10 +241,6 @@ export default function MySubscriptionClient({
               />
             </div>
           </div>
-
-          <p className="text-[11px] font-semibold text-slate-500 pt-1">
-            المساحة المتبقية: <strong className="text-slate-700">{formatUsedStorageArabic(remainingBytes)}</strong> (يحسب تلقائياً بالكيلوبايت للاختبارات والطلاب والـ QR)
-          </p>
         </div>
 
         {/* Card 2: WhatsApp Technical Support (01091713815) */}
@@ -244,12 +250,6 @@ export default function MySubscriptionClient({
               <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center">
                 <MessageCircle className="w-6 h-6" />
               </div>
-              <span
-                className="text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-3 py-1 rounded-xl font-mono"
-                dir="ltr"
-              >
-                01091713815
-              </span>
             </div>
 
             <div>
@@ -267,7 +267,7 @@ export default function MySubscriptionClient({
             className="w-full py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs font-extrabold shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
           >
             <PhoneCall className="w-4 h-4" />
-            <span>تحدث مع الدعم الفني عبر واتساب (01091713815)</span>
+            <span>تحدث مع الدعم الفني عبر واتساب</span>
           </a>
         </div>
 

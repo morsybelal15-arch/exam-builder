@@ -48,8 +48,8 @@ export default function GroupsPage() {
     try {
       setIsLoading(true);
       const [resGroups, resStudents] = await Promise.all([
-        fetch("/api/groups"),
-        fetch("/api/students"),
+        fetch(`/api/groups?t=${Date.now()}`, { cache: "no-store" }),
+        fetch(`/api/students?t=${Date.now()}`, { cache: "no-store" }),
       ]);
 
       const dataGroups = await resGroups.json();
@@ -124,6 +124,10 @@ export default function GroupsPage() {
 
       setIsModalOpen(false);
       fetchData();
+      fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => window.dispatchEvent(new CustomEvent("tenant-session-sync", { detail: d })))
+        .catch(() => {});
     } catch (err: any) {
       setFormError(err.message || "حدث خطأ أثناء الحفظ");
     } finally {
@@ -137,6 +141,10 @@ export default function GroupsPage() {
       if (res.ok) {
         setGroups((prev) => prev.filter((g) => g.id !== id));
         setDeleteConfirmId(null);
+        fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
+          .then((r) => r.json())
+          .then((d) => window.dispatchEvent(new CustomEvent("tenant-session-sync", { detail: d })))
+          .catch(() => {});
       }
     } catch (err) {
       console.error("Failed to delete group:", err);

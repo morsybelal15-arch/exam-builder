@@ -1,38 +1,51 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
 import { purgeTenantLocalDb } from "@/lib/db";
 import { resetTenantManagementStore } from "@/lib/management-db";
-import { updateTenantRecord } from "@/lib/tenants-repository";
+import { findTenantByDomain, updateTenantRecord } from "@/lib/tenants-repository";
 import { prisma, isDatabaseReachable } from "@/lib/prisma";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
     const session = await requireApiSession();
     if (!session || !session.id) {
       return NextResponse.json({ error: "غير مصرح لك بالوصول" }, { status: 401 });
     }
 
-    // 1. Wipe SQLite/JSON exams, uploaded_files, and local upload directory for this tenant
-    purgeTenantLocalDb(session.id);
+    const host = (req.headers.get("host") || "").split(":")[0].trim().toLowerCase();
+    const domainTenant = host ? await findTenantByDomain(host) : null;
+    const targetIds = Array.from(
+      new Set([session.id, domainTenant?.id].filter((id): id is string => Boolean(id)))
+    );
 
-    // 2. Reset management_store.json (students, groups, financials, attendance, QR, exam records) to empty arrays
-    resetTenantManagementStore(session.id);
+    for (const tid of targetIds) {
+      setCurrentTenantId(tid);
+      // 1. Wipe SQLite/JSON exams, uploaded_files, and local upload directory for this tenant
+      purgeTenantLocalDb(tid);
+      // 2. Reset management_store.json (students, groups, financials, attendance, QR, exam records) to empty arrays
+      resetTenantManagementStore(tid);
+      // 3. Reset usedStorageBytes on tenant record to 0
+      await updateTenantRecord(tid, { usedStorageBytes: 0 });
+    }
 
-    // 3. Wipe PostgreSQL exams & uploadedFiles if connected
+    // Also clear any orphan records that may have been written to the fallback "default" store
+    resetTenantManagementStore("default");
+
+    // 4. Wipe PostgreSQL exams & uploadedFiles if connected
     try {
       const reachable = await isDatabaseReachable();
       if (reachable) {
-        await Promise.all([
-          prisma.exam.deleteMany({ where: { tenantId: session.id } }),
-          prisma.uploadedFile.deleteMany({ where: { tenantId: session.id } }),
-        ]);
+        for (const tid of targetIds) {
+          await Promise.all([
+            prisma.exam.deleteMany({ where: { tenantId: tid } }),
+            prisma.uploadedFile.deleteMany({ where: { tenantId: tid } }),
+          ]);
+        }
       }
     } catch {
       // Non-fatal
     }
-
-    // 4. Reset usedStorageBytes on tenant record to 0
-    await updateTenantRecord(session.id, { usedStorageBytes: 0 });
 
     return NextResponse.json({
       success: true,
@@ -45,4 +58,3 @@ export async function POST() {
     );
   }
 }
-

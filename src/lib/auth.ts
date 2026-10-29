@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 import { adminEnabled, getAppMode, getSessionCookieName } from "@/lib/app-mode";
 import { signSessionToken, verifySessionToken } from "@/lib/session-token";
-import { setCurrentTenantId } from "@/lib/tenant-context";
+import { initTenantContextBox, setCurrentTenantId } from "@/lib/tenant-context";
 import {
   findTenantByDomain,
   findTenantById,
@@ -95,6 +95,7 @@ export async function createSessionCookie(user: SessionUser) {
 }
 
 export async function getSessionUser(): Promise<SessionUser | null> {
+  const ctxBox = initTenantContextBox();
   try {
     const cookieStore = await cookies();
     const payload = verifySessionToken(cookieStore.get(getSessionCookieName())?.value);
@@ -118,6 +119,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
         ) {
           return null;
         }
+        ctxBox.tenantId = domainTenant.id;
         setCurrentTenantId(domainTenant.id);
         return {
           id: domainTenant.id,
@@ -129,6 +131,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     }
 
     if (payload.id) {
+      ctxBox.tenantId = payload.id;
       setCurrentTenantId(payload.id);
     }
 
@@ -148,6 +151,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
  * initializing the request's isolated tenant context.
  */
 export async function requireApiSession(): Promise<SessionUser | null> {
+  const ctxBox = initTenantContextBox();
   const session = await getSessionUser();
   if (!session) return null;
 
@@ -158,6 +162,7 @@ export async function requireApiSession(): Promise<SessionUser | null> {
     if (blockReason || !tenant) {
       return null;
     }
+    ctxBox.tenantId = tenant.id;
     setCurrentTenantId(tenant.id);
     return {
       id: tenant.id,
@@ -167,6 +172,10 @@ export async function requireApiSession(): Promise<SessionUser | null> {
     };
   }
 
+  if (session.id) {
+    ctxBox.tenantId = session.id;
+    setCurrentTenantId(session.id);
+  }
   return session;
 }
 

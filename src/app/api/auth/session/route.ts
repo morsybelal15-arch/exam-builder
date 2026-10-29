@@ -8,7 +8,7 @@ import {
   findTenantByDomain,
   getTenantAccessBlock,
 } from "@/lib/tenants-repository";
-import { getStudents, getGroups } from "@/lib/management-db";
+import { getManagementStore } from "@/lib/management-db";
 import { getLocalUploadedFiles, getTenantUsageStats } from "@/lib/db";
 import {
   ALL_FEATURE_IDS,
@@ -68,8 +68,9 @@ export async function GET(req: NextRequest) {
   }
 
   const tenant = isDedicatedTenantDomain ? domainTenant : userTenant || domainTenant;
-  if (tenant?.id) {
-    setCurrentTenantId(tenant.id);
+  const effectiveTenantId = tenant?.id || session.id;
+  if (effectiveTenantId) {
+    setCurrentTenantId(effectiveTenantId);
   }
 
   let studentsCount = 0;
@@ -77,11 +78,12 @@ export async function GET(req: NextRequest) {
   let groupsCount = 0;
   let filesBytes = 0;
   try {
-    const stds = getStudents();
+    const store = getManagementStore(effectiveTenantId);
+    const stds = store.students || [];
     studentsCount = stds.length;
     activeStudentsCount = stds.filter((s) => s.status === "active").length;
-    groupsCount = getGroups().length;
-    filesBytes = tenant?.id ? getTenantUsageStats(tenant.id).usedStorageBytes : 0;
+    groupsCount = (store.groups || []).length;
+    filesBytes = effectiveTenantId ? getTenantUsageStats(effectiveTenantId).usedStorageBytes : 0;
   } catch {
     // non-fatal
   }

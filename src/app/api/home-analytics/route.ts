@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
 import { getHomeAnalytics, AnalyticsFilterMode } from "@/lib/management-db";
+import { setCurrentTenantId } from "@/lib/tenant-context";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const session = await requireApiSession();
   if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
+  setCurrentTenantId(session.id);
 
   try {
     const { searchParams } = new URL(request.url);
