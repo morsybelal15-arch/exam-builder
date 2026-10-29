@@ -128,6 +128,26 @@ export function provisionTenantLocalDatabase(tenantId: string): void {
 const DATA_DIR = path.join(process.cwd(), "data");
 const STORE_FILE = path.join(DATA_DIR, "tenants.json");
 
+const globalForTenantsRepo = globalThis as unknown as {
+  __tenantsStoreCache?: { mtimeMs: number; list: StoredTenant[] };
+  __tenantLookupCache?: Map<string, { tenant: StoredTenant | null; expiresAt: number; mtimeMs: number }>;
+};
+
+function getLookupCache() {
+  if (!globalForTenantsRepo.__tenantLookupCache) {
+    globalForTenantsRepo.__tenantLookupCache = new Map();
+  }
+  return globalForTenantsRepo.__tenantLookupCache;
+}
+
+function getStoreFileMtime(): number {
+  try {
+    return fs.existsSync(STORE_FILE) ? fs.statSync(STORE_FILE).mtimeMs : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function ensureStoreFile(): StoredTenant[] {
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -137,9 +157,17 @@ function ensureStoreFile(): StoredTenant[] {
       fs.writeFileSync(STORE_FILE, JSON.stringify([], null, 2), "utf-8");
       return [];
     }
+    const currentMtime = getStoreFileMtime();
+    if (
+      globalForTenantsRepo.__tenantsStoreCache &&
+      globalForTenantsRepo.__tenantsStoreCache.mtimeMs === currentMtime
+    ) {
+      return globalForTenantsRepo.__tenantsStoreCache.list;
+    }
+
     const raw = fs.readFileSync(STORE_FILE, "utf-8");
     const parsed: StoredTenant[] = JSON.parse(raw);
-    return parsed.map((t) => {
+    const list = parsed.map((t) => {
       const meta = decodeTenantMeta(t.verificationCode, t, t.planType, t.createdAt);
       return {
         ...t,
@@ -148,6 +176,9 @@ function ensureStoreFile(): StoredTenant[] {
         enabledFeatures: meta.enabledFeatures,
       };
     });
+    globalForTenantsRepo.__tenantsStoreCache = { mtimeMs: currentMtime, list };
+    getLookupCache().clear();
+    return list;
   } catch (err) {
     console.error("Error accessing local tenants store:", err);
     return [];
@@ -163,6 +194,8 @@ function saveStoreFile(tenants: StoredTenant[]): void {
     const tmp = `${STORE_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(tenants, null, 2), "utf-8");
     fs.renameSync(tmp, STORE_FILE);
+    globalForTenantsRepo.__tenantsStoreCache = undefined;
+    getLookupCache().clear();
   } catch (err) {
     console.error("Error saving local tenants store:", err);
   }

@@ -15,7 +15,27 @@ import {
 } from "./types/management";
 import { generateUniqueStudentCode } from "./student-code";
 import { sanitizeTenantKey } from "./tenant-context";
+import { setCachedManagementStoreBytes } from "./db";
 export { generateUniqueStudentCode };
+
+const globalForMgmt = globalThis as unknown as {
+  __mgmtStoreCache?: Map<string, any>;
+  __mgmtPendingFlushes?: Map<string, ReturnType<typeof setTimeout>>;
+};
+
+function getMgmtMemoryCache(): Map<string, any> {
+  if (!globalForMgmt.__mgmtStoreCache) {
+    globalForMgmt.__mgmtStoreCache = new Map();
+  }
+  return globalForMgmt.__mgmtStoreCache;
+}
+
+function getPendingFlushes(): Map<string, ReturnType<typeof setTimeout>> {
+  if (!globalForMgmt.__mgmtPendingFlushes) {
+    globalForMgmt.__mgmtPendingFlushes = new Map();
+  }
+  return globalForMgmt.__mgmtPendingFlushes;
+}
 
 const dataDir = path.join(os.homedir(), ".exam_builder");
 if (!fs.existsSync(dataDir)) {
@@ -52,6 +72,14 @@ function resolveStorePath(tenantId?: string): string {
 export function purgeTenantManagementStore(tenantId: string): void {
   const key = sanitizeTenantKey(tenantId);
   if (!key || key === "default") return;
+  const activeStorePath = resolveStorePath(tenantId);
+  getMgmtMemoryCache().delete(activeStorePath);
+  const pending = getPendingFlushes().get(activeStorePath);
+  if (pending) {
+    clearTimeout(pending);
+    getPendingFlushes().delete(activeStorePath);
+  }
+  setCachedManagementStoreBytes(key, 0);
   try {
     const tenantFolder = path.join(tenantsDir, key);
     if (fs.existsSync(tenantFolder)) {
@@ -402,23 +430,69 @@ function getEmptyStore(): ManagementStore {
   };
 }
 
+function computeStoreActiveBytes(store: ManagementStore): number {
+  let totalBytes = 0;
+  const keys: Array<keyof ManagementStore> = [
+    "groups",
+    "students",
+    "financials",
+    "attendance",
+    "sessions",
+    "examRecords",
+    "studentGrades",
+    "savedQrPdfs",
+  ];
+  for (const k of keys) {
+    const arr = store[k];
+    if (Array.isArray(arr) && arr.length > 0) {
+      totalBytes += Buffer.byteLength(JSON.stringify(arr), "utf8");
+    }
+  }
+  return totalBytes;
+}
+
+function flushStoreToDiskSync(activeStorePath: string, store: ManagementStore): void {
+  try {
+    const dir = path.dirname(activeStorePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const serialized = JSON.stringify(store);
+    const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmpPath, serialized, "utf-8");
+    fs.renameSync(tmpPath, activeStorePath);
+  } catch (err) {
+    console.error("Error saving management store:", err);
+  }
+}
+
 export function getManagementStore(tenantId?: string): ManagementStore {
   const key = sanitizeTenantKey(tenantId);
   const activeStorePath = resolveStorePath(tenantId);
+  const memCache = getMgmtMemoryCache();
+  const cached = memCache.get(activeStorePath);
+  if (cached) {
+    return cached;
+  }
+
   try {
     if (fs.existsSync(activeStorePath)) {
       const data = fs.readFileSync(activeStorePath, "utf-8");
-      return JSON.parse(data);
+      const parsed = JSON.parse(data) as ManagementStore;
+      memCache.set(activeStorePath, parsed);
+      setCachedManagementStoreBytes(key, computeStoreActiveBytes(parsed));
+      return parsed;
     }
   } catch (err) {
     console.error("Error reading management store:", err);
-    // Attempt recovery from backup file before falling back to initial store
     const backupPath = `${activeStorePath}.bak`;
     try {
       if (fs.existsSync(backupPath)) {
         const backupData = fs.readFileSync(backupPath, "utf-8");
-        const parsed = JSON.parse(backupData);
+        const parsed = JSON.parse(backupData) as ManagementStore;
         fs.copyFileSync(backupPath, activeStorePath);
+        memCache.set(activeStorePath, parsed);
+        setCachedManagementStoreBytes(key, computeStoreActiveBytes(parsed));
         return parsed;
       }
     } catch (backupErr) {
@@ -428,34 +502,55 @@ export function getManagementStore(tenantId?: string): ManagementStore {
 
   // Every new tenant installation starts 100% zeroed and empty
   const initial = getEmptyStore();
-  saveManagementStore(initial, tenantId);
+  saveManagementStore(initial, tenantId, true);
   return initial;
 }
 
 export function resetTenantManagementStore(tenantId?: string): void {
   const empty = getEmptyStore();
-  saveManagementStore(empty, tenantId);
+  saveManagementStore(empty, tenantId, true);
 }
 
-export function saveManagementStore(store: ManagementStore, tenantId?: string): void {
+export function saveManagementStore(
+  store: ManagementStore,
+  tenantId?: string,
+  immediate: boolean = false
+): void {
+  const key = sanitizeTenantKey(tenantId);
   const activeStorePath = resolveStorePath(tenantId);
-  try {
-    const dir = path.dirname(activeStorePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    const serialized = JSON.stringify(store, null, 2);
-    const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmpPath, serialized, "utf-8");
-    fs.renameSync(tmpPath, activeStorePath);
-    try {
-      fs.writeFileSync(`${activeStorePath}.bak`, serialized, "utf-8");
-    } catch {
-      // Non-fatal backup write
-    }
-  } catch (err) {
-    console.error("Error saving management store:", err);
+  getMgmtMemoryCache().set(activeStorePath, store);
+  setCachedManagementStoreBytes(key, computeStoreActiveBytes(store));
+
+  const flushes = getPendingFlushes();
+  const existingTimer = flushes.get(activeStorePath);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    flushes.delete(activeStorePath);
   }
+
+  if (immediate) {
+    flushStoreToDiskSync(activeStorePath, store);
+    return;
+  }
+
+  // Debounced asynchronous write-behind (1200ms) so 200 rapid QR scans respond in < 1ms from RAM
+  const timer = setTimeout(async () => {
+    flushes.delete(activeStorePath);
+    try {
+      const latest = getMgmtMemoryCache().get(activeStorePath) || store;
+      const dir = path.dirname(activeStorePath);
+      await fs.promises.mkdir(dir, { recursive: true });
+      const serialized = JSON.stringify(latest);
+      const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
+      await fs.promises.writeFile(tmpPath, serialized, "utf-8");
+      await fs.promises.rename(tmpPath, activeStorePath);
+    } catch (err) {
+      console.error("Async management store flush failed, falling back to sync:", err);
+      flushStoreToDiskSync(activeStorePath, store);
+    }
+  }, 1200);
+
+  flushes.set(activeStorePath, timer);
 }
 
 // ==========================================

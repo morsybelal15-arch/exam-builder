@@ -1,4 +1,17 @@
+import { createHash } from "node:crypto";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+
+const globalForGemini = globalThis as unknown as {
+  __geminiKeyCursor?: number;
+  __geminiOcrCache?: Map<string, ExtractionResult>;
+};
+
+function getOcrCache(): Map<string, ExtractionResult> {
+  if (!globalForGemini.__geminiOcrCache) {
+    globalForGemini.__geminiOcrCache = new Map();
+  }
+  return globalForGemini.__geminiOcrCache;
+}
 
 export const CANDIDATE_MODELS = [
   process.env.GEMINI_MODEL,
@@ -37,10 +50,37 @@ export interface ExtractionResult {
   passageTitle?: string;
 }
 
-/** Resolves the API key: request-supplied key (from the settings dialog or header) wins, then env. */
+/**
+ * Returns all available Gemini API keys (supporting comma-separated pools in
+ * requestKey, GEMINI_API_KEYS, GEMINI_API_KEY, and GOOGLE_API_KEY), rotated
+ * in Round-Robin order so multi-project key pools distribute load evenly.
+ */
+export function resolveApiKeyPool(requestKey?: string | null): string[] {
+  const rawSources = [
+    requestKey || "",
+    process.env.GEMINI_API_KEYS || "",
+    process.env.GEMINI_API_KEY || "",
+    process.env.GOOGLE_API_KEY || "",
+  ];
+  const allKeys = Array.from(
+    new Set(
+      rawSources
+        .flatMap((src) => src.split(/[,;\n]+/))
+        .map((k) => k.trim())
+        .filter((k) => k.length > 10)
+    )
+  );
+  if (allKeys.length <= 1) return allKeys;
+
+  const cursor = (globalForGemini.__geminiKeyCursor || 0) % allKeys.length;
+  globalForGemini.__geminiKeyCursor = cursor + 1;
+  return [...allKeys.slice(cursor), ...allKeys.slice(0, cursor)];
+}
+
+/** Resolves the primary API key (rotated across the pool if multiple keys are configured). */
 export function resolveApiKey(requestKey?: string | null): string | null {
-  const key = (requestKey || "").trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  return key ? key : null;
+  const pool = resolveApiKeyPool(requestKey);
+  return pool[0] || null;
 }
 
 function getClient(apiKey: string) {
@@ -322,55 +362,62 @@ async function callGeminiGenerate(
   }
   contents.push(params.prompt);
 
-  for (const model of CANDIDATE_MODELS) {
-    // Try with minimal thinking first (much faster for OCR/structuring); if the model
-    // rejects the thinking config, retry the same model without it.
-    for (const useThinkingConfig of [true, false]) {
-      const remaining = deadline - Date.now();
-      if (remaining < 5_000) {
-        throw lastError || new Error("انتهت مهلة الاتصال بـ Gemini.");
-      }
+  const keyPool = resolveApiKeyPool();
+  const clientsToTry =
+    keyPool.length > 1 ? keyPool.map((k) => getClient(k)) : [client];
 
-      try {
-        const response = await client.models.generateContent({
-          model,
-          contents,
-          config: {
-            systemInstruction: params.systemInstruction,
-            responseMimeType: "application/json",
-            temperature: 0.1,
-            maxOutputTokens: 16384,
-            ...(useThinkingConfig ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {}),
-            abortSignal: AbortSignal.timeout(Math.min(perAttemptTimeoutMs, remaining)),
-          },
-        });
-
-        const text = response.text;
-        if (!text) {
-          throw new Error(`أرجع النموذج ${model} نصاً فارغاً.`);
-        }
-        return text;
-      } catch (err: any) {
-        lastError = err;
-        const msg = String(err?.message || err);
-
-        // Auth errors: no point trying other models
-        if (/api[_ ]?key|API_KEY_INVALID|401|403/i.test(msg)) {
-          throw err;
+  for (const activeClient of clientsToTry) {
+    for (const model of CANDIDATE_MODELS) {
+      // Try with minimal thinking first (much faster for OCR/structuring); if the model
+      // rejects the thinking config, retry the same model without it.
+      for (const useThinkingConfig of [true, false]) {
+        const remaining = deadline - Date.now();
+        if (remaining < 5_000) {
+          throw lastError || new Error("انتهت مهلة الاتصال بـ Gemini.");
         }
 
-        // Model doesn't accept the thinking config → retry same model without it
-        if (useThinkingConfig && /thinking/i.test(msg) && /400|INVALID_ARGUMENT|not supported|unsupported/i.test(msg)) {
-          console.warn(`[gemini] ${model} rejected thinkingConfig, retrying without it...`);
-          continue;
-        }
+        try {
+          const response = await activeClient.models.generateContent({
+            model,
+            contents,
+            config: {
+              systemInstruction: params.systemInstruction,
+              responseMimeType: "application/json",
+              temperature: 0.1,
+              maxOutputTokens: 16384,
+              ...(useThinkingConfig ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {}),
+              abortSignal: AbortSignal.timeout(Math.min(perAttemptTimeoutMs, remaining)),
+            },
+          });
 
-        if (isAbortError(err)) {
-          console.warn(`[gemini] ${model} timed out, trying next candidate...`);
-        } else {
-          console.warn(`[gemini] ${model} failed (${msg.slice(0, 120)}), trying next candidate...`);
+          const text = response.text;
+          if (!text) {
+            throw new Error(`أرجع النموذج ${model} نصاً فارغاً.`);
+          }
+          return text;
+        } catch (err: any) {
+          lastError = err;
+          const msg = String(err?.message || err);
+
+          // Auth errors: if we have another key in the pool, break to next key; otherwise throw
+          if (/api[_ ]?key|API_KEY_INVALID|401|403/i.test(msg)) {
+            if (clientsToTry.length > 1) break;
+            throw err;
+          }
+
+          // Model doesn't accept the thinking config → retry same model without it
+          if (useThinkingConfig && /thinking/i.test(msg) && /400|INVALID_ARGUMENT|not supported|unsupported/i.test(msg)) {
+            console.warn(`[gemini] ${model} rejected thinkingConfig, retrying without it...`);
+            continue;
+          }
+
+          if (isAbortError(err)) {
+            console.warn(`[gemini] ${model} timed out, trying next candidate...`);
+          } else {
+            console.warn(`[gemini] ${model} failed (${msg.slice(0, 120)}), trying next candidate...`);
+          }
+          break; // move on to the next model
         }
-        break; // move on to the next model
       }
     }
   }
@@ -384,11 +431,22 @@ export async function extractQuestionsFromImage(
   apiKey: string,
   ocrHint?: string
 ): Promise<ExtractionResult> {
-  const client = getClient(apiKey);
   const { data, mimeType } = stripDataUrl(imageBase64);
+  const imageHash = createHash("sha256")
+    .update(data)
+    .update(ocrHint || "")
+    .digest("hex");
+
+  const ocrCache = getOcrCache();
+  const cachedResult = ocrCache.get(imageHash);
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  const client = getClient(apiKey);
 
   const prompt = ocrHint
-    ? `اقرأ الصورة واستخرج الأسئلة الموجودة فيها بدقة تامة. هذا نص مساعد من قارئ أولي:\n${ocrHint}\n\nأعد الأسئلة بصيغة JSON.`
+    ? `اقرأ الصورة واستخرج الأسئلة الموجودة فيها بدقة تامة. هذا نص مساعد من قارئ أولي:\n${ocrHint}\n\nأعد الأسئلة بصصيغة JSON.`
     : "اقرأ الصورة المرفقة واستخرج جميع الأسئلة والخيارات والمعادلات الظاهرة فيها بتنسيق JSON المطلوب.";
 
   const rawJson = await callGeminiGenerate(client, {
@@ -429,13 +487,23 @@ export async function extractQuestionsFromImage(
     .map(normalizeQuestion)
     .filter((q) => q.text.length > 0 || q.options.length > 0 || q.passageText);
 
-  return {
+  const finalResult: ExtractionResult = {
     questions,
     rawText: parsed.rawText || topPassageText || "",
     passageText: topPassageText,
     passageTitle: topPassageTitle,
     engine: "gemini",
   };
+
+  if (questions.length > 0 || topPassageText) {
+    if (ocrCache.size >= 250) {
+      const oldestKey = ocrCache.keys().next().value;
+      if (oldestKey) ocrCache.delete(oldestKey);
+    }
+    ocrCache.set(imageHash, finalResult);
+  }
+
+  return finalResult;
 }
 
 const REFINE_AGENT_INSTRUCTION = `أنت وكيل ذكي ومساعد تعليمي خبير (Gemini Exam Agent).

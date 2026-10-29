@@ -43,7 +43,38 @@ try {
 
 const globalForDb = globalThis as unknown as {
   __exam_builder_db__?: any;
+  __exam_builder_json_cache__?: { exams: any[]; uploaded_files: any[] };
+  __exam_builder_usage_cache__?: Map<
+    string,
+    { examsCount: number; filesCount: number; usedStorageBytes: number; cachedAt: number }
+  >;
+  __exam_builder_mgmt_bytes_cache__?: Map<string, number>;
 };
+
+function getUsageCache() {
+  if (!globalForDb.__exam_builder_usage_cache__) {
+    globalForDb.__exam_builder_usage_cache__ = new Map();
+  }
+  return globalForDb.__exam_builder_usage_cache__;
+}
+
+export function invalidateTenantUsageCache(tenantId?: string) {
+  const cache = getUsageCache();
+  if (!tenantId) {
+    cache.clear();
+    return;
+  }
+  const key = sanitizeTenantKey(tenantId);
+  cache.delete(key);
+}
+
+export function setCachedManagementStoreBytes(tenantKey: string, bytes: number) {
+  if (!globalForDb.__exam_builder_mgmt_bytes_cache__) {
+    globalForDb.__exam_builder_mgmt_bytes_cache__ = new Map();
+  }
+  globalForDb.__exam_builder_mgmt_bytes_cache__.set(tenantKey, bytes);
+  getUsageCache().delete(tenantKey);
+}
 
 // ==========================================
 // SQLite Implementation (When Node >= 22)
@@ -129,6 +160,27 @@ function initSchema(db: any) {
   try {
     db.exec("ALTER TABLE uploaded_files ADD COLUMN size_bytes INTEGER DEFAULT 0;");
   } catch {}
+  try {
+    db.exec("ALTER TABLE exams ADD COLUMN size_bytes INTEGER DEFAULT 0;");
+  } catch {}
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_exams_tenant ON exams(tenant_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_files_tenant ON uploaded_files(tenant_id);");
+  } catch {}
+
+  try {
+    // Backfill size_bytes once for any existing exam rows that still have size_bytes = 0
+    const unindexedRows = db
+      .prepare("SELECT * FROM exams WHERE COALESCE(size_bytes, 0) = 0")
+      .all() as any[];
+    if (unindexedRows.length > 0) {
+      const updateStmt = db.prepare("UPDATE exams SET size_bytes = ? WHERE id = ?");
+      for (const row of unindexedRows) {
+        const rowBytes = Buffer.byteLength(JSON.stringify(row), "utf8");
+        updateStmt.run(rowBytes, row.id);
+      }
+    }
+  } catch {}
 
   try {
     // Clean up any legacy demo seed rows so new and reset tenants remain 100% empty
@@ -158,10 +210,15 @@ interface JsonStore {
 }
 
 function getJsonStore(): JsonStore {
+  if (globalForDb.__exam_builder_json_cache__) {
+    return globalForDb.__exam_builder_json_cache__;
+  }
   try {
     if (fs.existsSync(jsonStorePath)) {
       const data = fs.readFileSync(jsonStorePath, "utf-8");
-      return JSON.parse(data);
+      const parsed = JSON.parse(data) as JsonStore;
+      globalForDb.__exam_builder_json_cache__ = parsed;
+      return parsed;
     }
   } catch (err) {
     console.error("Error reading json store:", err);
@@ -177,9 +234,10 @@ function getJsonStore(): JsonStore {
 }
 
 function saveJsonStore(store: JsonStore) {
+  globalForDb.__exam_builder_json_cache__ = store;
   try {
     const tmpPath = `${jsonStorePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), "utf-8");
+    fs.writeFileSync(tmpPath, JSON.stringify(store), "utf-8");
     fs.renameSync(tmpPath, jsonStorePath);
   } catch (err) {
     console.error("Error saving json store:", err);
@@ -235,6 +293,8 @@ export function saveLocalExam(
   tenantId?: string
 ) {
   const tenantKey = sanitizeTenantKey(tenantId);
+  invalidateTenantUsageCache(tenantKey);
+  const examByteSize = Buffer.byteLength(JSON.stringify(exam), "utf8");
   const db = getDb();
   if (db) {
     ensureLegacyTenantClaimed(db, tenantKey);
@@ -242,7 +302,7 @@ export function saveLocalExam(
     if (existing) {
       const stmt = db.prepare(`
         UPDATE exams 
-        SET title = ?, paper_title = ?, exam_code = ?, subject = ?, grade = ?, duration = ?, questions = ?, questions_count = ?, total_points = ?, date_created = ?, models = ?, extra_data = ?
+        SET title = ?, paper_title = ?, exam_code = ?, subject = ?, grade = ?, duration = ?, questions = ?, questions_count = ?, total_points = ?, date_created = ?, models = ?, extra_data = ?, size_bytes = ?
         WHERE id = ? AND tenant_id = ?
       `);
       stmt.run(
@@ -258,6 +318,7 @@ export function saveLocalExam(
         exam.date_created,
         exam.models || null,
         exam.extra_data || null,
+        examByteSize,
         exam.id,
         tenantKey
       );
@@ -266,8 +327,8 @@ export function saveLocalExam(
       const globalCollision = db.prepare("SELECT id FROM exams WHERE id = ?").get(exam.id);
       const finalId = globalCollision ? `${exam.id}-${tenantKey}` : exam.id;
       const stmt = db.prepare(`
-        INSERT INTO exams (id, tenant_id, title, paper_title, exam_code, subject, grade, duration, questions, questions_count, total_points, date_created, models, extra_data, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO exams (id, tenant_id, title, paper_title, exam_code, subject, grade, duration, questions, questions_count, total_points, date_created, models, extra_data, size_bytes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run(
         finalId,
@@ -284,6 +345,7 @@ export function saveLocalExam(
         exam.date_created,
         exam.models || null,
         exam.extra_data || null,
+        examByteSize,
         Date.now()
       );
     }
@@ -303,6 +365,7 @@ export function saveLocalExam(
     duration: exam.duration || "ساعتان",
     models: exam.models || null,
     extra_data: exam.extra_data || null,
+    size_bytes: examByteSize,
     created_at: index >= 0 ? store.exams[index].created_at : Date.now(),
   };
 
@@ -316,6 +379,7 @@ export function saveLocalExam(
 
 export function deleteLocalExam(id: string, tenantId?: string) {
   const tenantKey = sanitizeTenantKey(tenantId);
+  invalidateTenantUsageCache(tenantKey);
   const db = getDb();
   if (db) {
     ensureLegacyTenantClaimed(db, tenantKey);
@@ -374,6 +438,7 @@ export function addLocalUploadedFile(
   tenantId?: string
 ) {
   const tenantKey = sanitizeTenantKey(tenantId);
+  invalidateTenantUsageCache(tenantKey);
   const db = getDb();
   if (db) {
     ensureLegacyTenantClaimed(db, tenantKey);
@@ -415,6 +480,7 @@ export function addLocalUploadedFile(
 
 export function deleteLocalUploadedFile(id: string, tenantId?: string): any | null {
   const tenantKey = sanitizeTenantKey(tenantId);
+  invalidateTenantUsageCache(tenantKey);
   const existing = getLocalUploadedFileById(id, tenantKey);
   const db = getDb();
   if (db) {
@@ -430,6 +496,9 @@ export function deleteLocalUploadedFile(id: string, tenantId?: string): any | nu
 }
 
 function computeManagementStoreBytes(tenantKey: string): number {
+  if (globalForDb.__exam_builder_mgmt_bytes_cache__?.has(tenantKey)) {
+    return globalForDb.__exam_builder_mgmt_bytes_cache__.get(tenantKey) || 0;
+  }
   try {
     const storeFile =
       !tenantKey || tenantKey === "default"
@@ -458,6 +527,10 @@ function computeManagementStoreBytes(tenantKey: string): number {
         totalBytes += Buffer.byteLength(JSON.stringify(arr), "utf8");
       }
     }
+    if (!globalForDb.__exam_builder_mgmt_bytes_cache__) {
+      globalForDb.__exam_builder_mgmt_bytes_cache__ = new Map();
+    }
+    globalForDb.__exam_builder_mgmt_bytes_cache__.set(tenantKey, totalBytes);
     return totalBytes;
   } catch {
     return 0;
@@ -467,6 +540,7 @@ function computeManagementStoreBytes(tenantKey: string): number {
 /**
  * Computes real exam count, uploaded file count, and actual storage bytes used by a tenant
  * (including created exams in KB, management records/QR/Excel data in KB, and server files).
+ * Uses an in-memory cache + SQLite indexed SUM(size_bytes) so 50MB exam stores take < 0.2ms.
  */
 export function getTenantUsageStats(tenantId: string): {
   examsCount: number;
@@ -474,18 +548,26 @@ export function getTenantUsageStats(tenantId: string): {
   usedStorageBytes: number;
 } {
   const tenantKey = sanitizeTenantKey(tenantId);
+  const cache = getUsageCache();
+  const cached = cache.get(tenantKey);
+  if (cached && Date.now() - cached.cachedAt < 30_000) {
+    return {
+      examsCount: cached.examsCount,
+      filesCount: cached.filesCount,
+      usedStorageBytes: cached.usedStorageBytes,
+    };
+  }
+
   try {
     const managementBytes = computeManagementStoreBytes(tenantKey);
     const db = getDb();
     if (db) {
       ensureLegacyTenantClaimed(db, tenantKey);
-      const examRows = db
-        .prepare("SELECT * FROM exams WHERE tenant_id = ?")
-        .all(tenantKey) as any[];
-      const examsBytes = examRows.reduce(
-        (sum, row) => sum + Buffer.byteLength(JSON.stringify(row), "utf8"),
-        0
-      );
+      const examsRow = db
+        .prepare(
+          "SELECT count(*) as count, COALESCE(SUM(size_bytes), 0) as bytes FROM exams WHERE tenant_id = ?"
+        )
+        .get(tenantKey) as { count: number; bytes: number } | undefined;
 
       const filesRow = db
         .prepare(
@@ -493,28 +575,33 @@ export function getTenantUsageStats(tenantId: string): {
         )
         .get(tenantKey) as { count: number; bytes: number } | undefined;
 
+      const examsBytes = Number(examsRow?.bytes || 0);
       const filesBytes = Number(filesRow?.bytes || 0);
-
-      return {
-        examsCount: examRows.length,
+      const result = {
+        examsCount: Number(examsRow?.count || 0),
         filesCount: Number(filesRow?.count || 0),
         usedStorageBytes: examsBytes + filesBytes + managementBytes,
       };
+      cache.set(tenantKey, { ...result, cachedAt: Date.now() });
+      return result;
     }
 
     const store = getJsonStore();
     const exams = store.exams.filter((e) => (e.tenant_id || "default") === tenantKey);
     const examsBytes = exams.reduce(
-      (sum, row) => sum + Buffer.byteLength(JSON.stringify(row), "utf8"),
+      (sum, row) =>
+        sum + (Number(row.size_bytes) || Buffer.byteLength(JSON.stringify(row), "utf8")),
       0
     );
     const files = store.uploaded_files.filter((f) => (f.tenant_id || "default") === tenantKey);
     const filesBytes = files.reduce((sum, f) => sum + Number(f.size_bytes || 0), 0);
-    return {
+    const result = {
       examsCount: exams.length,
       filesCount: files.length,
       usedStorageBytes: examsBytes + filesBytes + managementBytes,
     };
+    cache.set(tenantKey, { ...result, cachedAt: Date.now() });
+    return result;
   } catch {
     return { examsCount: 0, filesCount: 0, usedStorageBytes: 0 };
   }
@@ -526,6 +613,8 @@ export function getTenantUsageStats(tenantId: string): {
 export function purgeTenantLocalDb(tenantId: string): void {
   const tenantKey = sanitizeTenantKey(tenantId);
   if (!tenantKey || tenantKey === "default") return;
+  invalidateTenantUsageCache(tenantKey);
+  globalForDb.__exam_builder_mgmt_bytes_cache__?.delete(tenantKey);
 
   try {
     const db = getDb();

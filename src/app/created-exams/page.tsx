@@ -50,6 +50,7 @@ interface ExamCardItem {
   total_points?: number;
   totalPoints?: number;
   models?: any;
+  _fullLoaded?: boolean;
   questions?: Array<{
     id: string;
     type?: string;
@@ -153,9 +154,28 @@ export default function CreatedExamsPage() {
     }
   };
 
-  const handlePrintClick = (exam: ExamCardItem) => {
-    setPrintModalExam(exam);
-    if (exam.models && (exam.models.modelCount > 1 || exam.models.models?.B)) {
+  const handlePrintClick = async (exam: ExamCardItem) => {
+    let targetExam = exam;
+    if (!exam._fullLoaded) {
+      try {
+        const res = await fetch(`/api/exams?id=${encodeURIComponent(exam.id)}`, {
+          cache: "no-store",
+        });
+        const data = await res.json();
+        if (data.success && data.exam) {
+          targetExam = { ...exam, ...data.exam, _fullLoaded: true };
+          setExams((prev) => prev.map((e) => (e.id === exam.id ? targetExam : e)));
+        }
+      } catch (err) {
+        console.error("Failed to load full exam for print:", err);
+      }
+    }
+
+    setPrintModalExam(targetExam);
+    if (
+      targetExam.models &&
+      (targetExam.models.modelCount > 1 || targetExam.models.models?.B)
+    ) {
       setSelectedPrintModel("ALL");
     } else {
       setSelectedPrintModel("A");

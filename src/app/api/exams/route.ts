@@ -28,12 +28,55 @@ export async function GET(req: NextRequest) {
     }
 
     const exams = getLocalExams(session.id);
-    const formatted = exams.map((e: any) => ({
-      ...e,
-      questions: JSON.parse(e.questions || "[]"),
-      models: e.models ? JSON.parse(e.models) : null,
-      extraData: e.extra_data ? JSON.parse(e.extra_data) : null,
-    }));
+    const full = searchParams.get("full") === "1" || searchParams.get("full") === "true";
+
+    const formatted = exams.map((e: any) => {
+      const parsedQuestions = JSON.parse(e.questions || "[]");
+      const parsedModels = e.models ? JSON.parse(e.models) : null;
+
+      if (full) {
+        return {
+          ...e,
+          questions: parsedQuestions,
+          models: parsedModels,
+          extraData: e.extra_data ? JSON.parse(e.extra_data) : null,
+          _fullLoaded: true,
+        };
+      }
+
+      // Lightweight summary payload for /created-exams cards (strips heavy Base64 images & full models)
+      const previewQuestions = Array.isArray(parsedQuestions)
+        ? parsedQuestions.slice(0, 3).map((q: any) => ({
+            id: q.id,
+            type: q.type,
+            text: q.text,
+            options: Array.isArray(q.options) ? q.options.slice(0, 4) : [],
+            correctOptionIndex: q.correctOptionIndex,
+            points: q.points,
+          }))
+        : [];
+
+      const modelCount =
+        parsedModels?.modelCount ||
+        (parsedModels?.models?.C ? 3 : parsedModels?.models?.B ? 2 : 1);
+
+      return {
+        id: e.id,
+        title: e.title,
+        paper_title: e.paper_title,
+        exam_code: e.exam_code,
+        subject: e.subject,
+        grade: e.grade,
+        duration: e.duration,
+        questions_count: e.questions_count,
+        total_points: e.total_points,
+        date_created: e.date_created,
+        created_at: e.created_at,
+        questions: previewQuestions,
+        models: modelCount > 1 ? { modelCount } : null,
+        _fullLoaded: false,
+      };
+    });
     return NextResponse.json({ success: true, exams: formatted });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

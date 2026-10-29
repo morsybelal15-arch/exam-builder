@@ -99,7 +99,7 @@ export default function SubscriptionGuard() {
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
-    const interval = window.setInterval(check, 12_000);
+    const interval = window.setInterval(check, 25_000);
 
     return () => {
       cancelled = true;
