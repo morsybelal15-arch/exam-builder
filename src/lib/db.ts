@@ -131,66 +131,13 @@ function initSchema(db: any) {
   } catch {}
 
   try {
-    const examsCount = db.prepare("SELECT count(*) as count FROM exams").get() as { count: number };
-    if (examsCount && examsCount.count === 0) {
-      const insertExam = db.prepare(`
-        INSERT INTO exams (id, tenant_id, title, subject, grade, duration, questions, questions_count, total_points, date_created, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      insertExam.run(
-        "exam-1",
-        "default",
-        "اختبار العلوم والبيئة - الدور الأول",
-        "العلوم والبيئة",
-        "الصف الثالث الثانوي",
-        "ساعتان",
-        JSON.stringify([
-          {
-            id: "q-seed-1",
-            type: "choice",
-            text: "أي من الخيارات التالية يُعد الوحدة الأساسية لبناء الكائنات الحية وتكاثرها؟",
-            options: ["الخلية", "النسيج", "العضو", "الجهاز الحيوي"],
-            correctOptionIndex: 0,
-            points: 2,
-          },
-          {
-            id: "q-seed-2",
-            type: "trueFalse",
-            text: "تتحرك الصفائح التكتونية في القشرة الأرضية بفعل تيارات الحمل الحراري في طبقة الوشاح.",
-            options: ["صح", "خطأ"],
-            correctOptionIndex: 0,
-            points: 1,
-          },
-        ]),
-        2,
-        3,
-        "١٠ أكتوبر ٢٠٢٦",
-        Date.now()
-      );
-    }
-
-    const filesCount = db.prepare("SELECT count(*) as count FROM uploaded_files").get() as { count: number };
-    if (filesCount && filesCount.count === 0) {
-      const insertFile = db.prepare(`
-        INSERT INTO uploaded_files (id, tenant_id, name, type, size, size_bytes, date, filepath, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      insertFile.run(
-        "f-1",
-        "default",
-        "كتاب الأحياء والبيئة - الفصل الثالث.pdf",
-        "pdf",
-        "١٤.٢ ميجابايت",
-        0,
-        "١٠ أكتوبر ٢٠٢٦",
-        "/sample-textbook.svg",
-        Date.now()
-      );
-    }
+    // Clean up any legacy demo seed rows so new and reset tenants remain 100% empty
+    db.exec(
+      "DELETE FROM exams WHERE id = 'exam-1' AND title = 'اختبار العلوم والبيئة - الدور الأول';"
+    );
+    db.exec("DELETE FROM uploaded_files WHERE id = 'f-1' AND filepath = '/sample-textbook.svg';");
   } catch {
-    // Ignore seed race conditions
+    // Ignore cleanup errors
   }
 }
 
@@ -220,55 +167,9 @@ function getJsonStore(): JsonStore {
     console.error("Error reading json store:", err);
   }
 
-  // Initial seed
   const initial: JsonStore = {
-    exams: [
-      {
-        id: "exam-1",
-        tenant_id: "default",
-        title: "اختبار العلوم والبيئة - الدور الأول",
-        paper_title: "اختبار العلوم والبيئة - الدور الأول",
-        exam_code: "X7K2",
-        subject: "العلوم والبيئة",
-        grade: "الصف الثالث الثانوي",
-        duration: "ساعتان",
-        questions: JSON.stringify([
-          {
-            id: "q-seed-1",
-            type: "choice",
-            text: "أي من الخيارات التالية يُعد الوحدة الأساسية لبناء الكائنات الحية وتكاثرها؟",
-            options: ["الخلية", "النسيج", "العضو", "الجهاز الحيوي"],
-            correctOptionIndex: 0,
-            points: 2,
-          },
-          {
-            id: "q-seed-2",
-            type: "trueFalse",
-            text: "تتحرك الصفائح التكتونية في القشرة الأرضية بفعل تيارات الحمل الحراري في طبقة الوشاح.",
-            options: ["صح", "خطأ"],
-            correctOptionIndex: 0,
-            points: 1,
-          },
-        ]),
-        questions_count: 2,
-        total_points: 3,
-        date_created: "١٠ أكتوبر ٢٠٢٦",
-        created_at: Date.now(),
-      },
-    ],
-    uploaded_files: [
-      {
-        id: "f-1",
-        tenant_id: "default",
-        name: "كتاب الأحياء والبيئة - الفصل الثالث.pdf",
-        type: "pdf",
-        size: "١٤.٢ ميجابايت",
-        size_bytes: 0,
-        date: "١٠ أكتوبر ٢٠٢٦",
-        filepath: "/sample-textbook.svg",
-        created_at: Date.now(),
-      },
-    ],
+    exams: [],
+    uploaded_files: [],
   };
 
   saveJsonStore(initial);
@@ -528,8 +429,44 @@ export function deleteLocalUploadedFile(id: string, tenantId?: string): any | nu
   return existing;
 }
 
+function computeManagementStoreBytes(tenantKey: string): number {
+  try {
+    const storeFile =
+      !tenantKey || tenantKey === "default"
+        ? path.join(dataDir, "management_store.json")
+        : path.join(dataDir, "tenants", tenantKey, "management_store.json");
+    if (!fs.existsSync(storeFile)) return 0;
+
+    const raw = fs.readFileSync(storeFile, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return 0;
+
+    let totalBytes = 0;
+    const keys = [
+      "groups",
+      "students",
+      "financials",
+      "attendance",
+      "sessions",
+      "examRecords",
+      "studentGrades",
+      "savedQrPdfs",
+    ];
+    for (const k of keys) {
+      const arr = parsed[k];
+      if (Array.isArray(arr) && arr.length > 0) {
+        totalBytes += Buffer.byteLength(JSON.stringify(arr), "utf8");
+      }
+    }
+    return totalBytes;
+  } catch {
+    return 0;
+  }
+}
+
 /**
- * Computes real exam count, uploaded file count, and storage bytes used by a tenant in local SQLite/JSON.
+ * Computes real exam count, uploaded file count, and actual storage bytes used by a tenant
+ * (including created exams in KB, management records/QR/Excel data in KB, and server files).
  */
 export function getTenantUsageStats(tenantId: string): {
   examsCount: number;
@@ -538,33 +475,45 @@ export function getTenantUsageStats(tenantId: string): {
 } {
   const tenantKey = sanitizeTenantKey(tenantId);
   try {
+    const managementBytes = computeManagementStoreBytes(tenantKey);
     const db = getDb();
     if (db) {
       ensureLegacyTenantClaimed(db, tenantKey);
-      const examsRow = db
-        .prepare("SELECT count(*) as count FROM exams WHERE tenant_id = ?")
-        .get(tenantKey) as { count: number } | undefined;
+      const examRows = db
+        .prepare("SELECT * FROM exams WHERE tenant_id = ?")
+        .all(tenantKey) as any[];
+      const examsBytes = examRows.reduce(
+        (sum, row) => sum + Buffer.byteLength(JSON.stringify(row), "utf8"),
+        0
+      );
+
       const filesRow = db
         .prepare(
           "SELECT count(*) as count, COALESCE(SUM(size_bytes), 0) as bytes FROM uploaded_files WHERE tenant_id = ?"
         )
         .get(tenantKey) as { count: number; bytes: number } | undefined;
 
+      const filesBytes = Number(filesRow?.bytes || 0);
+
       return {
-        examsCount: Number(examsRow?.count || 0),
+        examsCount: examRows.length,
         filesCount: Number(filesRow?.count || 0),
-        usedStorageBytes: Number(filesRow?.bytes || 0),
+        usedStorageBytes: examsBytes + filesBytes + managementBytes,
       };
     }
 
     const store = getJsonStore();
     const exams = store.exams.filter((e) => (e.tenant_id || "default") === tenantKey);
+    const examsBytes = exams.reduce(
+      (sum, row) => sum + Buffer.byteLength(JSON.stringify(row), "utf8"),
+      0
+    );
     const files = store.uploaded_files.filter((f) => (f.tenant_id || "default") === tenantKey);
-    const usedStorageBytes = files.reduce((sum, f) => sum + Number(f.size_bytes || 0), 0);
+    const filesBytes = files.reduce((sum, f) => sum + Number(f.size_bytes || 0), 0);
     return {
       examsCount: exams.length,
       filesCount: files.length,
-      usedStorageBytes,
+      usedStorageBytes: examsBytes + filesBytes + managementBytes,
     };
   } catch {
     return { examsCount: 0, filesCount: 0, usedStorageBytes: 0 };

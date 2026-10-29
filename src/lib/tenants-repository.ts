@@ -2,7 +2,11 @@ import fs from "fs";
 import path from "path";
 import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getTenantUsageStats, getUploadsDir, purgeTenantLocalDb } from "@/lib/db";
-import { getManagementStore, purgeTenantManagementStore } from "@/lib/management-db";
+import {
+  getManagementStore,
+  purgeTenantManagementStore,
+  resetTenantManagementStore,
+} from "@/lib/management-db";
 import {
   ALL_FEATURE_IDS,
   SubscriptionCategory,
@@ -109,12 +113,13 @@ function decodeTenantMeta(
 }
 
 /**
- * Ensures the isolated SQLite & JSON database stores are created for a tenant ID.
+ * Ensures the isolated SQLite & JSON database stores are created and zeroed for a new tenant ID.
  */
 export function provisionTenantLocalDatabase(tenantId: string): void {
   try {
+    purgeTenantLocalDb(tenantId);
     getUploadsDir(tenantId);
-    getManagementStore(tenantId);
+    resetTenantManagementStore(tenantId);
   } catch (err) {
     console.warn(`Warning initializing isolated DB for ${tenantId}:`, err);
   }
@@ -219,7 +224,7 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
           subscriptionStartDate: meta.subscriptionStartDate,
           enabledFeatures: meta.enabledFeatures,
           storageLimitBytes: Number(t.storageLimitBytes),
-          usedStorageBytes: Math.max(prismaUsed, localUsage.usedStorageBytes),
+          usedStorageBytes: localUsage.usedStorageBytes,
           subscriptionDueDate: t.subscriptionDueDate ? t.subscriptionDueDate.toISOString() : null,
           createdAt: createdIso,
           updatedAt: t.updatedAt.toISOString(),
@@ -241,10 +246,10 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
       const localUsage = getTenantUsageStats(t.id);
       return {
         ...t,
-        usedStorageBytes: Math.max(Number(t.usedStorageBytes || 0), localUsage.usedStorageBytes),
+        usedStorageBytes: localUsage.usedStorageBytes,
         _count: {
-          exams: Math.max(t._count?.exams || 0, localUsage.examsCount),
-          uploadedFiles: Math.max(t._count?.uploadedFiles || 0, localUsage.filesCount),
+          exams: localUsage.examsCount,
+          uploadedFiles: localUsage.filesCount,
         },
       };
     });
@@ -618,6 +623,7 @@ export async function updateTenantRecord(
     subscriptionDueDate: Date;
     enabledFeatures: string[];
     storageLimitBytes: bigint | number;
+    usedStorageBytes: bigint | number;
     examsLimit: number;
     filesLimit: number;
     password?: string;
@@ -671,6 +677,9 @@ export async function updateTenantRecord(
       if (normalizedDueDate !== undefined) payload.subscriptionDueDate = normalizedDueDate;
       if (data.storageLimitBytes !== undefined) {
         payload.storageLimitBytes = BigInt(data.storageLimitBytes);
+      }
+      if (data.usedStorageBytes !== undefined) {
+        payload.usedStorageBytes = BigInt(data.usedStorageBytes);
       }
       if (data.examsLimit !== undefined) payload.examsLimit = data.examsLimit;
       if (data.filesLimit !== undefined) payload.filesLimit = data.filesLimit;
@@ -734,6 +743,10 @@ export async function updateTenantRecord(
       data.storageLimitBytes !== undefined
         ? Number(data.storageLimitBytes)
         : current.storageLimitBytes,
+    usedStorageBytes:
+      data.usedStorageBytes !== undefined
+        ? Number(data.usedStorageBytes)
+        : current.usedStorageBytes,
     examsLimit: data.examsLimit !== undefined ? data.examsLimit : current.examsLimit,
     filesLimit: data.filesLimit !== undefined ? data.filesLimit : current.filesLimit,
     verificationCode: metaEncoded,

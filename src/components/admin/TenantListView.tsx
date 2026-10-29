@@ -45,17 +45,16 @@ import {
   APP_FEATURES_REGISTRY,
   normalizeEnabledFeatures,
 } from "@/lib/app-features";
+import {
+  DEFAULT_STORAGE_LIMIT_BYTES,
+  formatUsedStorageShortArabic,
+  formatStorageLimitMbArabic,
+  computeStoragePercent,
+} from "@/lib/storage-format";
 
 interface TenantListViewProps {
   initialTenants: TenantData[];
   onOpenCreateModal?: () => void;
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return "0 MB";
-  const mb = bytes / (1024 * 1024);
-  if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  return `${(mb / 1024).toFixed(2)} GB`;
 }
 
 function getDaysRemaining(dueDateStr?: string | Date | null): {
@@ -402,11 +401,13 @@ export default function TenantListView({
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
                 {filteredTenants.map((tenant) => {
                   const usedBytesNum = Number(tenant.usedStorageBytes) || 0;
-                  const limitBytesNum = Number(tenant.storageLimitBytes) || 1073741824;
-                  const storagePercent = Math.min(
-                    100,
-                    Math.round((usedBytesNum / limitBytesNum) * 100)
-                  );
+                  const limitBytesNum =
+                    Number(tenant.storageLimitBytes) || DEFAULT_STORAGE_LIMIT_BYTES;
+                  const {
+                    exactPercent: storagePercent,
+                    barWidthPercent,
+                    displayPercent,
+                  } = computeStoragePercent(usedBytesNum, limitBytesNum);
                   const examsLimit = tenant.examsLimit || 150;
                   const examsCount = tenant._count?.exams || 0;
                   const filesLimit = tenant.filesLimit || 200;
@@ -462,6 +463,14 @@ export default function TenantListView({
                               >
                                 <span>اشتراك {subType}</span>
                               </span>
+                              {tenant.notes && tenant.notes.trim() && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200"
+                                  title={tenant.notes}
+                                >
+                                  <span>📌 رسالة مثبتة</span>
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -585,15 +594,15 @@ export default function TenantListView({
                       </td>
 
                       {/* 5. Resource Limits & Quotas */}
-                      <td className="py-4 px-5 min-w-[160px]">
+                      <td className="py-4 px-5 min-w-[175px]">
                         <div>
-                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mb-1">
+                          <div className="flex items-center justify-between text-[10px] text-slate-600 font-bold mb-1 gap-2">
                             <span className="flex items-center gap-1">
-                              <HardDrive className="w-3 h-3 text-slate-400" />
-                              <span>التخزين:</span>
+                              <HardDrive className="w-3 h-3 text-purple-500" />
+                              <span>{formatUsedStorageShortArabic(usedBytesNum)}</span>
                             </span>
-                            <span dir="ltr">
-                              {formatBytes(usedBytesNum)} / {formatBytes(limitBytesNum)}
+                            <span className="text-slate-400">
+                              / {formatStorageLimitMbArabic(limitBytesNum)} ({displayPercent})
                             </span>
                           </div>
                           <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
@@ -604,7 +613,7 @@ export default function TenantListView({
                                     ? "bg-amber-500"
                                     : "bg-blue-600"
                                 }`}
-                              style={{ width: `${storagePercent}%` }}
+                              style={{ width: `${barWidthPercent}%` }}
                             />
                           </div>
                         </div>

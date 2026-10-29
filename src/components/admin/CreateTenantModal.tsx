@@ -71,10 +71,11 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
   // 5. Modular Sidebar Features Installer
   const [enabledFeatures, setEnabledFeatures] = useState<string[]>(() => [...ALL_FEATURE_IDS]);
 
-  // Quotas
-  const [storageLimitGb, setStorageLimitGb] = useState(2);
+  // Quotas (in MB) & Optional Pinned Notice
+  const [storageLimitMb, setStorageLimitMb] = useState(100);
   const [examsLimit, setExamsLimit] = useState(300);
   const [filesLimit, setFilesLimit] = useState(300);
+  const [notes, setNotes] = useState("");
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [createdResult, setCreatedResult] = useState<any | null>(null);
@@ -151,9 +152,10 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
         subscriptionStartDate: startDateStr,
         subscriptionDueDate: dueDateStr,
         enabledFeatures,
-        storageLimitGb,
+        storageLimitMb,
         examsLimit,
         filesLimit,
+        notes: notes || undefined,
       });
 
       if (res.error) {
@@ -823,20 +825,56 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                     </div>
                   </div>
 
-                  {/* Storage Quota Only */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
-                      <HardDrive className="w-3.5 h-3.5 text-purple-600" />
-                      <span>حد مساحة التخزين السحابية (GB)</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      value={storageLimitGb}
-                      onChange={(e) => setStorageLimitGb(Number(e.target.value))}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none"
-                    />
+                  {/* Storage Quota in MB & Pinned Admin Message */}
+                  <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                          <HardDrive className="w-4 h-4 text-purple-600" />
+                          <span>حد مساحة التخزين السحابية بالميجابايت (MB)</span>
+                        </label>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[25, 50, 100, 250, 500, 1024].map((mbVal) => (
+                            <button
+                              key={mbVal}
+                              type="button"
+                              onClick={() => setStorageLimitMb(mbVal)}
+                              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-colors cursor-pointer ${
+                                storageLimitMb === mbVal
+                                  ? "bg-purple-600 text-white border-purple-600"
+                                  : "bg-white text-slate-700 border-slate-200 hover:bg-purple-50"
+                              }`}
+                            >
+                              {mbVal} MB
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        min="1"
+                        max="102400"
+                        value={storageLimitMb}
+                        onChange={(e) => setStorageLimitMb(Math.max(1, Number(e.target.value)))}
+                        className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-purple-600"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        يبدأ التطبيق بصفر بيانات تماماً (0 كيلوبايت) ويتم حساب الاستهلاك الفعلي بالكيلوبايت (KB) للاختبارات وسجلات الطلاب والـ QR.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5 pt-2 border-t border-slate-200/70">
+                      <label className="block text-xs font-black text-slate-800">
+                        رسالة أو خبر مثبت يظهر للعميل في تبويبة الاشتراك (اختياري)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="مثال: مرحباً بك في منصتك التعليمية! لا تتردد في التواصل مع الدعم الفني لأي استفسار..."
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-blue-600"
+                      />
+                    </div>
                   </div>
 
                   {/* Submit Button */}

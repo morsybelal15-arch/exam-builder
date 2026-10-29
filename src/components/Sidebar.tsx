@@ -30,6 +30,12 @@ import {
   normalizeEnabledFeatures,
   getFirstAllowedRoute,
 } from "@/lib/app-features";
+import {
+  DEFAULT_STORAGE_LIMIT_BYTES,
+  formatUsedStorageShortArabic,
+  formatStorageLimitMbArabic,
+  computeStoragePercent,
+} from "@/lib/storage-format";
 
 const ICON_MAP: Record<string, any> = {
   Home,
@@ -51,7 +57,7 @@ export default function Sidebar() {
   const [clientName, setClientName] = useState<string>("السنتر");
   const [subscriptionType, setSubscriptionType] = useState<SubscriptionCategory>("سنتر");
   const [enabledFeatures, setEnabledFeatures] = useState<string[]>(ALL_FEATURE_IDS);
-  const [storageLimitBytes, setStorageLimitBytes] = useState<number>(1073741824);
+  const [storageLimitBytes, setStorageLimitBytes] = useState<number>(DEFAULT_STORAGE_LIMIT_BYTES);
   const [usage, setUsage] = useState<{
     studentsCount: number;
     activeStudentsCount: number;
@@ -75,7 +81,7 @@ export default function Sidebar() {
       setEnabledFeatures(normalizeEnabledFeatures(data.enabledFeatures));
     }
     if (data.storageLimitBytes) {
-      setStorageLimitBytes(Number(data.storageLimitBytes) || 1073741824);
+      setStorageLimitBytes(Number(data.storageLimitBytes) || DEFAULT_STORAGE_LIMIT_BYTES);
     }
     if (data.usage) setUsage(data.usage);
   };
@@ -138,19 +144,19 @@ export default function Sidebar() {
     return null;
   }
 
-  const usedMb = (usage.filesBytes / (1024 * 1024)).toFixed(2);
-  const limitGb = Math.max(1, Math.round(storageLimitBytes / 1073741824));
-  const storagePct = Math.min(
-    100,
-    Math.max(6, Math.round((usage.filesBytes / Math.max(1, storageLimitBytes)) * 100))
+  const usedFormatted = formatUsedStorageShortArabic(usage.filesBytes);
+  const limitFormatted = formatStorageLimitMbArabic(storageLimitBytes);
+  const { barWidthPercent: storagePct } = computeStoragePercent(
+    usage.filesBytes,
+    storageLimitBytes
   );
   const activeRatioPct =
     usage.studentsCount > 0
       ? Math.min(
           100,
-          Math.max(8, Math.round((usage.activeStudentsCount / usage.studentsCount) * 100))
+          Math.max(4, Math.round((usage.activeStudentsCount / usage.studentsCount) * 100))
         )
-      : 20;
+      : 0;
 
   // Build visible sections dynamically from APP_FEATURES_REGISTRY filtered by enabledFeatures
   const visibleSections = SIDEBAR_SECTIONS_ORDER.map((sectionTitle) => ({
@@ -326,7 +332,7 @@ export default function Sidebar() {
                 />
               </div>
               <p className="text-[10px] text-white/90">
-                تم استخدام {usedMb} ميجابايت من {limitGb} جيجابايت
+                تم استخدام {usedFormatted} من {limitFormatted}
               </p>
             </div>
           </div>

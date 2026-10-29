@@ -426,10 +426,15 @@ export function getManagementStore(tenantId?: string): ManagementStore {
     }
   }
 
-  // Real tenants start with a clean empty store; only the legacy default fallback uses sample seed data
-  const initial = key && key !== "default" ? getEmptyStore() : getInitialStore();
+  // Every new tenant installation starts 100% zeroed and empty
+  const initial = getEmptyStore();
   saveManagementStore(initial, tenantId);
   return initial;
+}
+
+export function resetTenantManagementStore(tenantId?: string): void {
+  const empty = getEmptyStore();
+  saveManagementStore(empty, tenantId);
 }
 
 export function saveManagementStore(store: ManagementStore, tenantId?: string): void {

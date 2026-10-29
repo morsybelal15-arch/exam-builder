@@ -36,7 +36,8 @@ export interface CreateTenantInput {
   durationMonths?: number;
   enabledFeatures: string[];
   planType?: string;
-  storageLimitGb: number;
+  storageLimitMb?: number;
+  storageLimitGb?: number;
   examsLimit: number;
   filesLimit: number;
   notes?: string;
@@ -79,9 +80,12 @@ export async function createTenantAction(data: CreateTenantInput) {
       : getDefaultFeaturesForCategory(subscriptionType)
   );
 
-  // Convert storage limit from GB to bytes
-  const storageLimitGb = Math.max(1, Number(data.storageLimitGb) || 1);
-  const storageBytes = BigInt(storageLimitGb) * BigInt(1073741824);
+  // Convert storage limit from MB (or legacy GB fallback) to bytes
+  const storageLimitMb =
+    data.storageLimitMb !== undefined && Number(data.storageLimitMb) > 0
+      ? Math.max(1, Number(data.storageLimitMb))
+      : Math.max(1, Number(data.storageLimitGb || 1)) * 1024;
+  const storageBytes = BigInt(Math.round(storageLimitMb * 1024 * 1024));
 
   const hashedPassword = await hashPassword(data.password);
   const cleanDomain =
@@ -165,6 +169,7 @@ export interface UpdateSubscriptionInput {
   subscriptionStartDate?: string;
   subscriptionDueDate?: string;
   enabledFeatures?: string[];
+  storageLimitMb?: number;
   storageLimitGb?: number;
   examsLimit?: number;
   filesLimit?: number;
@@ -231,7 +236,11 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
       updatePayload.enabledFeatures = normalizeEnabledFeatures(data.enabledFeatures);
     }
 
-    if (data.storageLimitGb) {
+    if (data.storageLimitMb !== undefined && Number(data.storageLimitMb) > 0) {
+      updatePayload.storageLimitBytes = BigInt(
+        Math.round(Math.max(1, Number(data.storageLimitMb)) * 1024 * 1024)
+      );
+    } else if (data.storageLimitGb) {
       updatePayload.storageLimitBytes =
         BigInt(Math.max(1, data.storageLimitGb)) * BigInt(1073741824);
     }

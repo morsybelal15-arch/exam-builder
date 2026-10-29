@@ -119,7 +119,7 @@ const fallbackExams: ExamCardItem[] = [
 ];
 
 export default function CreatedExamsPage() {
-  const [exams, setExams] = useState<ExamCardItem[]>(fallbackExams);
+  const [exams, setExams] = useState<ExamCardItem[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [printModalExam, setPrintModalExam] = useState<ExamCardItem | null>(null);
@@ -134,7 +134,7 @@ export default function CreatedExamsPage() {
     try {
       const res = await fetch("/api/exams");
       const data = await res.json();
-      if (data.success && data.exams && data.exams.length > 0) {
+      if (data.success && Array.isArray(data.exams)) {
         setExams(data.exams);
       }
     } catch (err) {

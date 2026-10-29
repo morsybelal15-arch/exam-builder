@@ -211,6 +211,25 @@ export async function deleteLocalPcFile(id: string): Promise<void> {
 }
 
 /**
+ * Clears all files from the tenant's local PC store (used during Factory Reset).
+ */
+export async function clearAllLocalPcFiles(): Promise<void> {
+  try {
+    const db = await openLocalPcDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.clear();
+
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.error("Failed to clear local PC files:", err);
+  }
+}
+
+/**
  * Triggers an immediate browser download of a Blob/File to the tenant's PC.
  */
 export function triggerImmediatePcDownload(blob: Blob, fileName: string): void {

@@ -12,6 +12,7 @@ import { getTenantsList, getTenantCounts } from "@/lib/tenants-repository";
 import { getLatestCommitInfo } from "@/app/actions/auto-update";
 import { isDatabaseReachable } from "@/lib/prisma";
 import { tenantEnabled } from "@/lib/app-mode";
+import { formatUsedStorageShortArabic } from "@/lib/storage-format";
 import {
   Users,
   CheckCircle2,
@@ -265,7 +266,7 @@ export default async function AdminDashboardPage() {
                 </p>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <h3 className="text-xl font-black text-slate-900 tracking-tight">
-                    {formatBytes(totalStorageUsedBytes)}
+                    {formatUsedStorageShortArabic(totalStorageUsedBytes)}
                   </h3>
                   <span className="text-[11px] font-semibold text-slate-500">مستخدم</span>
                 </div>

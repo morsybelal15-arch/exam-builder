@@ -81,13 +81,7 @@ export async function GET(req: NextRequest) {
     studentsCount = stds.length;
     activeStudentsCount = stds.filter((s) => s.status === "active").length;
     groupsCount = getGroups().length;
-    const files = getLocalUploadedFiles(tenant?.id);
-    const localBytes = files.reduce(
-      (acc: number, f: any) => acc + (Number(f.size_bytes) || 0),
-      0
-    );
-    const statsBytes = tenant?.id ? getTenantUsageStats(tenant.id).usedStorageBytes : 0;
-    filesBytes = Math.max(localBytes, statsBytes, Number(tenant?.usedStorageBytes || 0));
+    filesBytes = tenant?.id ? getTenantUsageStats(tenant.id).usedStorageBytes : 0;
   } catch {
     // non-fatal
   }
@@ -101,7 +95,8 @@ export async function GET(req: NextRequest) {
         subscriptionType: "سنتر",
         enabledFeatures: ALL_FEATURE_IDS,
         firstAllowedRoute: "/",
-        storageLimitBytes: 10 * 1073741824,
+        storageLimitBytes: 100 * 1024 * 1024,
+        notes: null,
         usage: {
           studentsCount,
           activeStudentsCount,
@@ -155,7 +150,8 @@ export async function GET(req: NextRequest) {
       subscriptionDueDate: tenant?.subscriptionDueDate ?? null,
       enabledFeatures,
       firstAllowedRoute: getFirstAllowedRoute(enabledFeatures),
-      storageLimitBytes: Number(tenant?.storageLimitBytes || 1073741824),
+      storageLimitBytes: Number(tenant?.storageLimitBytes || 100 * 1024 * 1024),
+      notes: tenant?.notes || null,
       usage: {
         studentsCount,
         activeStudentsCount,

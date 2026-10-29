@@ -1,41 +1,23 @@
 import React from "react";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { findTenantById, findTenantByPhone, findTenantByDomain } from "@/lib/tenants-repository";
 import { getTenantUsageStats } from "@/lib/db";
-import {
-  APP_FEATURES_REGISTRY,
-  SIDEBAR_SECTIONS_ORDER,
-  normalizeEnabledFeatures,
-} from "@/lib/app-features";
+import { DEFAULT_STORAGE_LIMIT_BYTES } from "@/lib/storage-format";
+import MySubscriptionClient from "@/components/subscription/MySubscriptionClient";
 import {
   CreditCard,
   Calendar,
-  HardDrive,
-  FileText,
-  FolderUp,
   CheckCircle2,
   AlertTriangle,
   Sparkles,
-  ShieldCheck,
-  Zap,
   Clock,
   Building2,
   GraduationCap,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
-
-function formatBytes(bytes: bigint | number): string {
-  const num = typeof bytes === "bigint" ? Number(bytes) : bytes;
-  if (!num || num === 0) return "0 ميجابايت";
-  const k = 1024;
-  const sizes = ["بايت", "كيلوبايت", "ميجابايت", "جيجابايت", "تيرابايت"];
-  const i = Math.floor(Math.log(num) / Math.log(k));
-  return `${(num / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-}
 
 export default async function MySubscriptionPage() {
   const session = await getSessionUser();
@@ -44,10 +26,6 @@ export default async function MySubscriptionPage() {
   }
 
   let tenant: any = null;
-  let examsCount = 0;
-  let filesCount = 0;
-  const localUsage = getTenantUsageStats(session.id);
-
   try {
     const h = await headers();
     const host = (h.get("host") || "").split(":")[0].trim().toLowerCase();
@@ -62,27 +40,12 @@ export default async function MySubscriptionPage() {
     const userTenant =
       (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
     tenant = isDedicatedTenantDomain ? domainTenant : userTenant || domainTenant;
-    const isReachable = await isDatabaseReachable();
-    if (isReachable) {
-      const [examsTotal, filesTotal] = await Promise.all([
-        prisma.exam.count({
-          where: { tenantId: session.id },
-        }),
-        prisma.uploadedFile.count({
-          where: { tenantId: session.id },
-        }),
-      ]);
-
-      examsCount = Math.max(examsTotal, localUsage.examsCount);
-      filesCount = Math.max(filesTotal, localUsage.filesCount);
-    } else {
-      examsCount = localUsage.examsCount;
-      filesCount = localUsage.filesCount;
-    }
   } catch {
-    examsCount = localUsage.examsCount;
-    filesCount = localUsage.filesCount;
+    // non-fatal
   }
+
+  const effectiveTenantId = tenant?.id || session.id;
+  const localUsage = getTenantUsageStats(effectiveTenantId);
 
   const clientName = tenant?.name || session.name || "العميل المشترك";
   const subscriptionType = tenant?.subscriptionType === "معلم" ? "معلم" : "سنتر";
@@ -91,7 +54,6 @@ export default async function MySubscriptionPage() {
     (subscriptionType === "سنتر" ? "باقة إدارة السنتر المتكاملة" : "باقة المعلم الذكي");
   const status = tenant?.subscriptionStatus || "ACTIVE";
   const isActive = status === "ACTIVE";
-  const enabledFeatures = normalizeEnabledFeatures(tenant?.enabledFeatures);
 
   // Start Date & Due Date
   const createdAt = tenant?.createdAt ? new Date(tenant.createdAt) : new Date();
@@ -106,21 +68,12 @@ export default async function MySubscriptionPage() {
   const diffTime = dueDate.getTime() - now.getTime();
   const diffDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
-  // Storage calculation
-  const storageLimitBytes = tenant?.storageLimitBytes ?? 1073741824; // 1GB
-  const usedStorageBytes = Math.max(
-    Number(tenant?.usedStorageBytes ?? 0),
-    localUsage.usedStorageBytes
-  );
-  const storageLimitNum = Number(storageLimitBytes);
-  const usedStorageNum = Number(usedStorageBytes);
-  const storagePercent = Math.min(
-    100,
-    storageLimitNum > 0 ? Math.round((usedStorageNum / storageLimitNum) * 100) : 0
-  );
+  const storageLimitBytes = Number(tenant?.storageLimitBytes || DEFAULT_STORAGE_LIMIT_BYTES);
+  const usedStorageBytes = localUsage.usedStorageBytes;
+  const pinnedNotice = tenant?.notes || null;
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-50 p-6 sm:p-10" dir="rtl">
+    <div className="h-full overflow-y-auto bg-slate-50 p-6 sm:p-10 pb-20" dir="rtl">
       <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-200">
         {/* Page Title */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -130,7 +83,7 @@ export default async function MySubscriptionPage() {
               <span>تفاصيل اشتراك: {clientName}</span>
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              معلومات الباقة، فترة الاشتراك، وسعة المساحة السحابية
+              معلومات الباقة، رسائل الإدارة، فترة الاشتراك، المساحة السحابية، والدعم الفني
             </p>
           </div>
 
@@ -225,48 +178,13 @@ export default async function MySubscriptionPage() {
           </div>
         </div>
 
-        {/* Section 2: Storage Limit Only */}
-        <div className="space-y-4">
-          <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-blue-600" />
-            <span>سعة المساحة السحابية (Storage Capacity)</span>
-          </h3>
-
-          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4 max-w-md">
-            <div className="flex items-center justify-between">
-              <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
-                <HardDrive className="w-6 h-6" />
-              </div>
-              <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-1 rounded-xl">
-                {storagePercent}%
-              </span>
-            </div>
-
-            <div>
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                سعة التخزين (Storage Limit)
-              </h4>
-              <div className="flex items-baseline gap-1 mt-1">
-                <span className="text-xl font-black text-slate-900">
-                  {formatBytes(usedStorageBytes)}
-                </span>
-                <span className="text-xs text-slate-400 font-semibold">
-                  / {formatBytes(storageLimitBytes)}
-                </span>
-              </div>
-            </div>
-
-            <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-              <div
-                className="bg-purple-600 h-2.5 rounded-full transition-all duration-500"
-                style={{ width: `${storagePercent}%` }}
-              />
-            </div>
-            <p className="text-[11px] text-slate-400">
-              المتبقي: {formatBytes(BigInt(Math.max(0, storageLimitNum - usedStorageNum)))}
-            </p>
-          </div>
-        </div>
+        {/* Section 2: Pinned Admin Messages, Real KB/MB Storage, WhatsApp Support & Factory Reset */}
+        <MySubscriptionClient
+          clientName={clientName}
+          initialUsedStorageBytes={usedStorageBytes}
+          initialStorageLimitBytes={storageLimitBytes}
+          initialPinnedNotice={pinnedNotice}
+        />
       </div>
     </div>
   );

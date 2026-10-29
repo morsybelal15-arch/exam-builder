@@ -28,6 +28,15 @@ export default function RootLayout({
           <TopHeaderBar />
           {children}
         </main>
+
+        {/* Pinned bottom-left developer attribution */}
+        <div
+          dir="rtl"
+          className="fixed bottom-2.5 left-3 z-30 pointer-events-none select-none print:hidden bg-white/90 backdrop-blur-xs border border-slate-200/80 shadow-xs px-3 py-1 rounded-full text-[11px] font-extrabold text-slate-600 flex items-center gap-1.5"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+          <span>تم التطوير بواسطة عقاب للحلول الرقمية</span>
+        </div>
       </body>
     </html>
   );
