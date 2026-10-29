@@ -19,14 +19,14 @@ export async function GET(req: NextRequest) {
 
     const safeName = path.basename(name);
     const candidatePaths = [
-      path.join(getUploadsDir(session.id), safeName),
-      path.join(getUploadsDir("default"), safeName),
-      path.join(process.cwd(), "public", safeName),
+      path.join(/*turbopackIgnore: true*/ getUploadsDir(session.id), safeName),
+      path.join(/*turbopackIgnore: true*/ getUploadsDir("default"), safeName),
+      path.join(/*turbopackIgnore: true*/ process.cwd(), "public", safeName),
     ];
 
     for (const filePath of candidatePaths) {
-      if (fs.existsSync(filePath)) {
-        const buffer = fs.readFileSync(filePath);
+      if (fs.existsSync(/*turbopackIgnore: true*/ filePath)) {
+        const buffer = fs.readFileSync(/*turbopackIgnore: true*/ filePath);
         const ext = path.extname(safeName).toLowerCase();
         const contentType =
           ext === ".svg" ? "image/svg+xml" :
