@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import gsap from "gsap";
 import {
   Home,
   PenTool,
@@ -36,6 +35,11 @@ import {
   formatStorageLimitMbArabic,
   computeStoragePercent,
 } from "@/lib/storage-format";
+import {
+  getCachedSession,
+  setCachedSession,
+  clearCachedSession,
+} from "@/lib/client-session-cache";
 
 const ICON_MAP: Record<string, any> = {
   Home,
@@ -52,7 +56,6 @@ const ICON_MAP: Record<string, any> = {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const navListRef = useRef<HTMLElement>(null);
   const [role, setRole] = useState<string>("TENANT");
   const [clientName, setClientName] = useState<string>("السنتر");
   const [subscriptionType, setSubscriptionType] = useState<SubscriptionCategory>("سنتر");
@@ -86,43 +89,24 @@ export default function Sidebar() {
     if (data.usage) setUsage(data.usage);
   };
 
-  useEffect(() => {
-    fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => applySessionPayload(data))
-      .catch(() => {});
-  }, [pathname]);
+  // Hydrate immediately before paint from local session cache so refresh has zero placeholder flicker
+  useLayoutEffect(() => {
+    const cached = getCachedSession();
+    if (cached) {
+      applySessionPayload(cached);
+    }
+  }, []);
 
   useEffect(() => {
     const onSync = (e: Event) => {
       const custom = e as CustomEvent;
       if (custom.detail) {
+        setCachedSession(custom.detail);
         applySessionPayload(custom.detail);
       }
     };
     window.addEventListener("tenant-session-sync", onSync);
     return () => window.removeEventListener("tenant-session-sync", onSync);
-  }, []);
-
-  // Lightweight GSAP entrance for sidebar navigation items (post-hydration safe)
-  useEffect(() => {
-    const rafId = requestAnimationFrame(() => {
-      if (!navListRef.current) return;
-      const links = navListRef.current.querySelectorAll("a");
-      gsap.fromTo(
-        links,
-        { opacity: 0, x: 14 },
-        {
-          opacity: 1,
-          x: 0,
-          duration: 0.35,
-          stagger: 0.03,
-          ease: "power2.out",
-          clearProps: "transform,opacity",
-        }
-      );
-    });
-    return () => cancelAnimationFrame(rafId);
   }, []);
 
   // Strictly render Sidebar only on valid tenant pages (never on login, admin, parent portal, denied, or 404 routes)
@@ -214,7 +198,7 @@ export default function Sidebar() {
           )}
 
           {/* Navigation Links Grouped by Section (السنتر - الاختبارات - الإعدادات) */}
-          <nav ref={navListRef} className="space-y-3">
+          <nav className="space-y-3">
             {visibleSections.map((section, sectionIdx) => (
               <div key={section.title} className="space-y-1">
                 {sectionIdx > 0 && (
@@ -339,7 +323,11 @@ export default function Sidebar() {
 
           {/* Logout Button (Danger Red) */}
           <div className="px-1 pt-1 flex items-center justify-end gap-2">
-            <form action={logoutAction} className="w-full">
+            <form
+              action={logoutAction}
+              onSubmit={() => clearCachedSession()}
+              className="w-full"
+            >
               <button
                 type="submit"
                 className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-extrabold text-white bg-red-600 hover:bg-red-700 px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer"

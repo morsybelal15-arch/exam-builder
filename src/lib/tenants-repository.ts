@@ -309,7 +309,16 @@ export async function getTenantCounts(): Promise<{
 
 export async function findTenantByPhone(phone: string): Promise<StoredTenant | null> {
   const cleanPhone = phone.trim();
+  if (!cleanPhone) return null;
+
   const localList = ensureStoreFile();
+  const currentMtime = getStoreFileMtime();
+  const cacheKey = `phone:${cleanPhone}`;
+  const cached = getLookupCache().get(cacheKey);
+  if (cached && cached.mtimeMs === currentMtime && Date.now() < cached.expiresAt) {
+    return cached.tenant;
+  }
+
   const localMatch = localList.find((t) => t.phone === cleanPhone) || null;
 
   try {
@@ -326,7 +335,7 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
           dbTenant.planType,
           createdIso
         );
-        return {
+        const resolved: StoredTenant = {
           ...dbTenant,
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
@@ -339,17 +348,36 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
           createdAt: createdIso,
           updatedAt: dbTenant.updatedAt.toISOString(),
         };
+        getLookupCache().set(cacheKey, {
+          tenant: resolved,
+          expiresAt: Date.now() + 15_000,
+          mtimeMs: currentMtime,
+        });
+        return resolved;
       }
     }
   } catch (err) {
     console.warn("Database unreachable for findTenantByPhone, using local store:", err);
   }
 
+  getLookupCache().set(cacheKey, {
+    tenant: localMatch,
+    expiresAt: Date.now() + 15_000,
+    mtimeMs: currentMtime,
+  });
   return localMatch;
 }
 
 export async function findTenantById(id: string): Promise<StoredTenant | null> {
+  if (!id) return null;
   const localList = ensureStoreFile();
+  const currentMtime = getStoreFileMtime();
+  const cacheKey = `id:${id}`;
+  const cached = getLookupCache().get(cacheKey);
+  if (cached && cached.mtimeMs === currentMtime && Date.now() < cached.expiresAt) {
+    return cached.tenant;
+  }
+
   const localMatch = localList.find((t) => t.id === id) || null;
 
   try {
@@ -364,7 +392,7 @@ export async function findTenantById(id: string): Promise<StoredTenant | null> {
           dbTenant.planType,
           createdIso
         );
-        return {
+        const resolved: StoredTenant = {
           ...dbTenant,
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
@@ -377,11 +405,23 @@ export async function findTenantById(id: string): Promise<StoredTenant | null> {
           createdAt: createdIso,
           updatedAt: dbTenant.updatedAt.toISOString(),
         };
+        getLookupCache().set(cacheKey, {
+          tenant: resolved,
+          expiresAt: Date.now() + 15_000,
+          mtimeMs: currentMtime,
+        });
+        return resolved;
       }
     }
   } catch {
     // fall through to local store
   }
+
+  getLookupCache().set(cacheKey, {
+    tenant: localMatch,
+    expiresAt: Date.now() + 15_000,
+    mtimeMs: currentMtime,
+  });
   return localMatch;
 }
 
@@ -423,7 +463,15 @@ export function getTenantAccessBlock(
 export async function findTenantByDomain(domain: string): Promise<StoredTenant | null> {
   const cleanDomain = domain.trim().toLowerCase().split(":")[0];
   if (!cleanDomain || cleanDomain === "localhost" || cleanDomain === "127.0.0.1") return null;
+
   const localList = ensureStoreFile();
+  const currentMtime = getStoreFileMtime();
+  const cacheKey = `domain:${cleanDomain}`;
+  const cached = getLookupCache().get(cacheKey);
+  if (cached && cached.mtimeMs === currentMtime && Date.now() < cached.expiresAt) {
+    return cached.tenant;
+  }
+
   const localMatch = localList.find((t) => (t.domain || "").toLowerCase() === cleanDomain) || null;
 
   try {
@@ -440,7 +488,7 @@ export async function findTenantByDomain(domain: string): Promise<StoredTenant |
           dbTenant.planType,
           createdIso
         );
-        return {
+        const resolved: StoredTenant = {
           ...dbTenant,
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
@@ -453,11 +501,23 @@ export async function findTenantByDomain(domain: string): Promise<StoredTenant |
           createdAt: createdIso,
           updatedAt: dbTenant.updatedAt.toISOString(),
         };
+        getLookupCache().set(cacheKey, {
+          tenant: resolved,
+          expiresAt: Date.now() + 15_000,
+          mtimeMs: currentMtime,
+        });
+        return resolved;
       }
     }
   } catch {
     // fall through to local store
   }
+
+  getLookupCache().set(cacheKey, {
+    tenant: localMatch,
+    expiresAt: Date.now() + 15_000,
+    mtimeMs: currentMtime,
+  });
   return localMatch;
 }
 

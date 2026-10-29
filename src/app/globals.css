@@ -366,6 +366,7 @@
    ============================================================================ */
 
 /* 1. Main Page & App Backgrounds */
+html[data-theme="dark"],
 [data-theme="dark"] body,
 [data-theme="dark"] main,
 [data-theme="dark"] .bg-\[\#F4F6FA\] {

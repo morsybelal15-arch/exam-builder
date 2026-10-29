@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -13,6 +13,7 @@ import {
   Check,
   Palette,
 } from "lucide-react";
+import { getCachedSession, setCachedSession } from "@/lib/client-session-cache";
 
 interface QuickStudent {
   id: string;
@@ -90,18 +91,33 @@ export default function TopHeaderBar() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
 
-  // Restore saved theme on mount
-  useEffect(() => {
+  // Restore saved theme & cached user info synchronously before paint
+  useLayoutEffect(() => {
     try {
-      const saved = localStorage.getItem("app_theme_preset") || "default";
+      const saved =
+        document.documentElement.getAttribute("data-theme") ||
+        localStorage.getItem("app_theme_preset") ||
+        "default";
       setActiveTheme(saved);
       if (saved === "default") {
         document.documentElement.removeAttribute("data-theme");
+        document.documentElement.style.backgroundColor = "";
+        document.documentElement.style.colorScheme = "";
       } else {
         document.documentElement.setAttribute("data-theme", saved);
+        if (saved === "dark") {
+          document.documentElement.style.backgroundColor = "#0b1120";
+          document.documentElement.style.colorScheme = "dark";
+        }
       }
     } catch {
       // ignore storage errors
+    }
+
+    const cached = getCachedSession();
+    if (cached && cached.authenticated) {
+      if (cached.name) setUserName(cached.name);
+      if (cached.subscriptionType) setSubscriptionType(cached.subscriptionType);
     }
   }, []);
 
@@ -109,33 +125,32 @@ export default function TopHeaderBar() {
     setActiveTheme(themeId);
     try {
       localStorage.setItem("app_theme_preset", themeId);
+      document.cookie = `app_theme_preset=${encodeURIComponent(themeId)}; path=/; max-age=31536000; SameSite=Lax`;
     } catch {
       // ignore
     }
     if (themeId === "default") {
       document.documentElement.removeAttribute("data-theme");
+      document.documentElement.style.backgroundColor = "";
+      document.documentElement.style.colorScheme = "";
     } else {
       document.documentElement.setAttribute("data-theme", themeId);
+      if (themeId === "dark") {
+        document.documentElement.style.backgroundColor = "#0b1120";
+        document.documentElement.style.colorScheme = "dark";
+      } else {
+        document.documentElement.style.backgroundColor = "";
+        document.documentElement.style.colorScheme = "";
+      }
     }
   };
-
-  useEffect(() => {
-    fetch("/api/auth/session", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.authenticated) {
-          if (data.name) setUserName(data.name);
-          if (data.subscriptionType) setSubscriptionType(data.subscriptionType);
-        }
-      })
-      .catch(() => { });
-  }, [pathname]);
 
   useEffect(() => {
     const onSync = (e: Event) => {
       const custom = e as CustomEvent;
       const data = custom.detail;
       if (data && data.authenticated) {
+        setCachedSession(data);
         if (data.name) setUserName(data.name);
         if (data.subscriptionType) setSubscriptionType(data.subscriptionType);
       }

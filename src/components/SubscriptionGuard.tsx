@@ -6,6 +6,12 @@ import {
   isPathnameAllowedForFeatures,
   getFirstAllowedRoute,
 } from "@/lib/app-features";
+import {
+  getCachedSession,
+  getLastSessionFetchTime,
+  setCachedSession,
+  clearCachedSession,
+} from "@/lib/client-session-cache";
 
 const PUBLIC_PATHS = ["/login", "/denied", "/s"];
 
@@ -18,13 +24,8 @@ function isPublicOrAdminPath(path: string): boolean {
 
 /**
  * Re-validates the tenant's subscription and installed features with the server
- * on navigation, window focus, and periodic polling (every 12 seconds).
- *
- * - If the Super Admin stopped / expired / deleted the account, the user is logged out immediately.
- * - If the Super Admin updated client name, subscription type, or installed features, dispatches
- *   `tenant-session-sync` so `Sidebar` and `TopHeaderBar` update live without page reload.
- * - If the user is on a route whose feature is not installed (`enabledFeatures`), redirects
- *   immediately to their first installed feature.
+ * on initial load, window focus, and periodic polling (every 25 seconds),
+ * while using a 0ms client cache during in-app route transitions.
  */
 export default function SubscriptionGuard() {
   const pathname = usePathname();
@@ -40,11 +41,32 @@ export default function SubscriptionGuard() {
 
     let cancelled = false;
 
-    const check = async () => {
+    const enforceRouteFeatures = (enabledFeatures: unknown) => {
+      if (typeof window === "undefined" || !Array.isArray(enabledFeatures)) return;
+      const currentPath = window.location.pathname;
+      if (!isPathnameAllowedForFeatures(currentPath, enabledFeatures)) {
+        const fallbackRoute = getFirstAllowedRoute(enabledFeatures);
+        if (fallbackRoute && fallbackRoute !== currentPath) {
+          router.replace(fallbackRoute);
+        }
+      }
+    };
+
+    // 1. Instant 0ms check from cached session on route change
+    const cached = getCachedSession();
+    if (cached && cached.authenticated) {
+      enforceRouteFeatures(cached.enabledFeatures);
+    }
+
+    const check = async (force = false) => {
       if (typeof window !== "undefined" && isPublicOrAdminPath(window.location.pathname)) {
         return;
       }
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      // Throttle network re-fetches during rapid sidebar navigation (unless forced)
+      if (!force && Date.now() - getLastSessionFetchTime() < 12_000) {
         return;
       }
 
@@ -58,6 +80,7 @@ export default function SubscriptionGuard() {
         if (cancelled) return;
 
         if (data.blocked) {
+          clearCachedSession();
           if (typeof window !== "undefined" && window.location.pathname.startsWith("/login")) {
             return;
           }
@@ -75,31 +98,23 @@ export default function SubscriptionGuard() {
         }
 
         if (data.authenticated && typeof window !== "undefined") {
+          setCachedSession(data);
           window.dispatchEvent(new CustomEvent("tenant-session-sync", { detail: data }));
-
-          if (Array.isArray(data.enabledFeatures)) {
-            const currentPath = window.location.pathname;
-            if (!isPathnameAllowedForFeatures(currentPath, data.enabledFeatures)) {
-              const fallbackRoute = getFirstAllowedRoute(data.enabledFeatures);
-              if (fallbackRoute && fallbackRoute !== currentPath) {
-                router.replace(fallbackRoute);
-              }
-            }
-          }
+          enforceRouteFeatures(data.enabledFeatures);
         }
       } catch {
         // Network hiccup — don't log the user out
       }
     };
 
-    check();
-    const onFocus = () => check();
+    check(false);
+    const onFocus = () => check(true);
     const onVisibility = () => {
-      if (document.visibilityState === "visible") check();
+      if (document.visibilityState === "visible") check(true);
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
-    const interval = window.setInterval(check, 25_000);
+    const interval = window.setInterval(() => check(true), 25_000);
 
     return () => {
       cancelled = true;

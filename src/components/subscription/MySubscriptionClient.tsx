@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { clearAllLocalPcFiles } from "@/lib/local-pc-files";
+import { clearCachedSession } from "@/lib/client-session-cache";
 import {
   formatUsedStorageArabic,
   formatStorageLimitMbArabic,
@@ -104,6 +105,7 @@ export default function MySubscriptionClient({
         // ignore
       }
       try {
+        clearCachedSession();
         sessionStorage.removeItem("eb_exam_builder_viewer_freeze_v1");
         localStorage.removeItem("exam_builder_draft");
       } catch {

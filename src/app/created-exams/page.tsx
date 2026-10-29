@@ -18,6 +18,10 @@ import {
   X,
   ExternalLink,
 } from "lucide-react";
+import {
+  getCachedPageData,
+  setCachedPageData,
+} from "@/lib/client-session-cache";
 
 function sanitizeFormattedText(raw?: string): string {
   if (!raw) return "";
@@ -126,8 +130,13 @@ export default function CreatedExamsPage() {
   const [printModalExam, setPrintModalExam] = useState<ExamCardItem | null>(null);
   const [selectedPrintModel, setSelectedPrintModel] = useState<"ALL" | "A" | "B" | "C">("ALL");
 
-  // Load exams from local SQLite database
+  // Load exams from local SQLite database with 0ms client cache hydration
   useEffect(() => {
+    const cached = getCachedPageData<ExamCardItem[]>("created_exams");
+    if (cached) {
+      setExams(cached);
+      setIsLoading(false);
+    }
     fetchExamsFromDb();
   }, []);
 
@@ -137,6 +146,7 @@ export default function CreatedExamsPage() {
       const data = await res.json();
       if (data.success && Array.isArray(data.exams)) {
         setExams(data.exams);
+        setCachedPageData("created_exams", data.exams);
       }
     } catch (err) {
       console.error("Failed to fetch exams from local DB", err);
@@ -147,7 +157,11 @@ export default function CreatedExamsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      setExams((prev) => prev.filter((e) => e.id !== id));
+      setExams((prev) => {
+        const next = prev.filter((e) => e.id !== id);
+        setCachedPageData("created_exams", next);
+        return next;
+      });
       await fetch(`/api/exams?id=${id}`, { method: "DELETE" });
     } catch (err) {
       console.error(err);

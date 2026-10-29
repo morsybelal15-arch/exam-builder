@@ -17,6 +17,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("app_theme_preset");if(!t){var m=document.cookie.match(/(?:^|;\\s*)app_theme_preset=([^;]+)/);if(m)t=decodeURIComponent(m[1]);}if(t&&t!=="default"){document.documentElement.setAttribute("data-theme",t);if(t==="dark"){document.documentElement.style.backgroundColor="#0b1120";document.documentElement.style.colorScheme="dark";}}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body
         suppressHydrationWarning
         className="h-screen w-screen overflow-hidden bg-[#F4F6FA] text-slate-800 antialiased flex flex-row print:block print:h-auto print:w-full print:overflow-visible print:m-0 print:p-0"

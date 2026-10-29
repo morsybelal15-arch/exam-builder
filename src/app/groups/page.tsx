@@ -18,6 +18,11 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Group } from "@/lib/types/management";
+import {
+  getCachedPageData,
+  setCachedPageData,
+  invalidateCachedPageData,
+} from "@/lib/client-session-cache";
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -41,12 +46,21 @@ export default function GroupsPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    fetchData();
+    const cached = getCachedPageData<{
+      groups: Group[];
+      counts: Record<string, number>;
+    }>("groups_page");
+    if (cached) {
+      setGroups(cached.groups || []);
+      setStudentsCount(cached.counts || {});
+      setIsLoading(false);
+    }
+    fetchData(Boolean(cached));
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const [resGroups, resStudents] = await Promise.all([
         fetch(`/api/groups?t=${Date.now()}`, { cache: "no-store" }),
         fetch(`/api/students?t=${Date.now()}`, { cache: "no-store" }),
@@ -55,17 +69,22 @@ export default function GroupsPage() {
       const dataGroups = await resGroups.json();
       const dataStudents = await resStudents.json();
 
-      if (dataGroups.success) {
-        setGroups(dataGroups.groups || []);
-      }
-
+      const nextGroups: Group[] = dataGroups.success ? dataGroups.groups || [] : [];
+      const counts: Record<string, number> = {};
       if (dataStudents.success && Array.isArray(dataStudents.students)) {
-        const counts: Record<string, number> = {};
         dataStudents.students.forEach((s: any) => {
           counts[s.groupId] = (counts[s.groupId] || 0) + 1;
         });
+      }
+
+      if (dataGroups.success) {
+        setGroups(nextGroups);
+      }
+      if (dataStudents.success) {
         setStudentsCount(counts);
       }
+      setCachedPageData("groups_page", { groups: nextGroups, counts });
+      setCachedPageData("groups_list", nextGroups);
     } catch (err) {
       console.error("Failed to fetch groups data:", err);
     } finally {
