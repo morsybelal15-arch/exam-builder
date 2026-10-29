@@ -255,15 +255,15 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
       : null;
 
     revalidatePath("/admin");
-    revalidatePath("/");
-    revalidatePath("/my-subscription");
+
+    const safeTenant = updated ? { ...updated, password: "" } : null;
 
     return {
       success: true,
       message: vpsSync.synced
         ? "تم تحديث بيانات الاشتراك والمميزات ومزامنتها فورياً مع تطبيق العميل والسيرفر ✓"
         : "تم تحديث بيانات الاشتراك والمميزات محلياً وفورياً في تطبيق العميل ✓",
-      tenant: updated,
+      tenant: safeTenant,
       vpsSync,
       domainSetup,
     };
@@ -294,14 +294,14 @@ export async function extendSubscriptionAction(tenantId: string, daysToAdd: numb
     const vpsSync = await syncTenantsToVps({ force: true });
 
     revalidatePath("/admin");
-    revalidatePath("/");
-    revalidatePath("/my-subscription");
+
+    const safeTenant = updated ? { ...updated, password: "" } : null;
 
     return {
       success: true,
       message: `تم تمديد الاشتراك بنجاح بمقدار ${daysToAdd} يوم وتنشيط الحساب`,
       newDueDate: newDueDate.toISOString(),
-      tenant: updated,
+      tenant: safeTenant,
       vpsSync,
     };
   } catch (err: any) {
@@ -327,10 +327,10 @@ export async function toggleTenantStatusAction(tenantId: string) {
     const vpsSync = await syncTenantsToVps({ force: true });
 
     revalidatePath("/admin");
-    revalidatePath("/");
-    revalidatePath("/my-subscription");
 
-    return { success: true, newStatus, tenant: updated, vpsSync };
+    const safeTenant = updated ? { ...updated, password: "" } : null;
+
+    return { success: true, newStatus, tenant: safeTenant, vpsSync };
   } catch (err: any) {
     return { error: err.message || "فشل تغيير حالة الحساب" };
   }

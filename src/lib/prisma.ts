@@ -35,16 +35,25 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
+let dbReachableCache: { value: boolean; expiresAt: number } | null = null;
+
 /**
- * Checks if the PostgreSQL server is reachable without throwing console errors
+ * Checks if the PostgreSQL server is reachable without throwing console errors.
+ * Caches the result for 60 seconds so unreachable DBs never stall requests.
  */
 export async function isDatabaseReachable(): Promise<boolean> {
   if (!process.env.DATABASE_URL) return false;
+  const now = Date.now();
+  if (dbReachableCache && now < dbReachableCache.expiresAt) {
+    return dbReachableCache.value;
+  }
   try {
     const client = await pool.connect();
     client.release();
+    dbReachableCache = { value: true, expiresAt: now + 60_000 };
     return true;
   } catch {
+    dbReachableCache = { value: false, expiresAt: now + 60_000 };
     return false;
   }
 }

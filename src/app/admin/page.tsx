@@ -45,17 +45,19 @@ export default async function AdminDashboardPage() {
   }
 
   // 2. High-Availability Data Fetching (works seamlessly with PostgreSQL or persistent store)
-  const [tenantsList, counts, latestCommit, isDbOnline] = await Promise.all([
+  const [tenantsList, latestCommit, isDbOnline] = await Promise.all([
     getTenantsList(),
-    getTenantCounts(),
     getLatestCommitInfo(),
     isDatabaseReachable(),
   ]);
 
-  const totalTenants = counts.total;
-  const activeSubscriptions = counts.active;
-  const stoppedSubscriptions = counts.stopped;
-  const totalStorageUsedBytes = counts.usedStorageBytes;
+  const totalTenants = tenantsList.length;
+  const activeSubscriptions = tenantsList.filter((t) => t.subscriptionStatus === "ACTIVE").length;
+  const stoppedSubscriptions = tenantsList.filter((t) => t.subscriptionStatus === "STOPPED").length;
+  const totalStorageUsedBytes = tenantsList.reduce(
+    (acc, t) => acc + Number(t.usedStorageBytes || 0),
+    0
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800" dir="rtl">

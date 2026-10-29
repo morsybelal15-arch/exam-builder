@@ -83,7 +83,7 @@ export default function EditSubscriptionModal({
   onTenantPatched,
   onDeleted,
 }: EditSubscriptionModalProps) {
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
 
   // Form Fields
   const [name, setName] = useState(tenant.name || "");
@@ -144,7 +144,7 @@ export default function EditSubscriptionModal({
     }
   };
 
-  const handleUpdate = (e: React.FormEvent) => {
+  const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
 
@@ -153,7 +153,8 @@ export default function EditSubscriptionModal({
       return;
     }
 
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const res = await updateTenantSubscriptionAction({
         tenantId: tenant.id,
         name,
@@ -176,18 +177,18 @@ export default function EditSubscriptionModal({
         return;
       }
 
-      setMsg({
-        text: res.message || "تم حفظ التعديلات ومزامنتها فورياً مع تطبيق العميل ✓",
-        isError: false,
-      });
-      if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
       if (onUpdated) onUpdated(res.tenant);
-    });
+    } catch (err: any) {
+      setMsg({ text: err?.message || "حدث خطأ أثناء الحفظ", isError: true });
+    } finally {
+      setIsPending(false);
+    }
   };
 
-  const handleExtend = (days: number) => {
+  const handleExtend = async (days: number) => {
     setMsg(null);
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const res: any = await extendSubscriptionAction(tenant.id, days);
       if (res.error) {
         setMsg({ text: res.error, isError: true });
@@ -202,12 +203,17 @@ export default function EditSubscriptionModal({
         }
         if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
       }
-    });
+    } catch (err: any) {
+      setMsg({ text: err?.message || "فشل التمديد", isError: true });
+    } finally {
+      setIsPending(false);
+    }
   };
 
-  const handleToggleStatus = () => {
+  const handleToggleStatus = async () => {
     setMsg(null);
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const res: any = await toggleTenantStatusAction(tenant.id);
       if (res.error) {
         setMsg({ text: res.error, isError: true });
@@ -226,10 +232,14 @@ export default function EditSubscriptionModal({
         });
         if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
       }
-    });
+    } catch (err: any) {
+      setMsg({ text: err?.message || "فشل تغيير الحالة", isError: true });
+    } finally {
+      setIsPending(false);
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (
       !confirm(
         `هل أنت متأكد تماماً من حذف حساب العميل (${tenant.name || tenant.phone}) وكافة بياناته واختباراته؟`
@@ -238,7 +248,8 @@ export default function EditSubscriptionModal({
       return;
     }
 
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const res = await deleteTenantAction(tenant.id);
       if (res.error) {
         setMsg({ text: res.error, isError: true });
@@ -246,7 +257,11 @@ export default function EditSubscriptionModal({
         if (onDeleted) onDeleted(tenant.id);
         onClose();
       }
-    });
+    } catch (err: any) {
+      setMsg({ text: err?.message || "فشل حذف العميل", isError: true });
+    } finally {
+      setIsPending(false);
+    }
   };
 
   const copyNginxConfig = () => {

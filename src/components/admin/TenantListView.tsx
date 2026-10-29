@@ -111,7 +111,7 @@ export default function TenantListView({
   const [deployFeedback, setDeployFeedback] = useState<{
     [id: string]: { success: boolean; message: string };
   }>({});
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
   const [syncNotice, setSyncNotice] = useState<{ success: boolean; message: string } | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
 
@@ -184,30 +184,30 @@ export default function TenantListView({
     setTimeout(() => setCopiedVpsId(null), 2500);
   };
 
-  const handleAutoDeploy = (tenant: TenantData) => {
+  const handleAutoDeploy = async (tenant: TenantData) => {
     if (!tenant.domain) return;
     setDeployingTenantId(tenant.id);
-    startTransition(async () => {
-      try {
-        const res = await autoDeployTenantVpsAction(tenant.id, tenant.domain!);
-        setDeployFeedback((prev) => ({
-          ...prev,
-          [tenant.id]: { success: res.success, message: res.message },
-        }));
-        router.refresh();
-      } catch (err: any) {
-        setDeployFeedback((prev) => ({
-          ...prev,
-          [tenant.id]: { success: false, message: err.message || "فشل التفعيل" },
-        }));
-      } finally {
-        setDeployingTenantId(null);
-      }
-    });
+    setIsPending(true);
+    try {
+      const res = await autoDeployTenantVpsAction(tenant.id, tenant.domain!);
+      setDeployFeedback((prev) => ({
+        ...prev,
+        [tenant.id]: { success: res.success, message: res.message },
+      }));
+    } catch (err: any) {
+      setDeployFeedback((prev) => ({
+        ...prev,
+        [tenant.id]: { success: false, message: err.message || "فشل التفعيل" },
+      }));
+    } finally {
+      setDeployingTenantId(null);
+      setIsPending(false);
+    }
   };
 
-  const handleToggleStatus = (tenantId: string) => {
-    startTransition(async () => {
+  const handleToggleStatus = async (tenantId: string) => {
+    setIsPending(true);
+    try {
       const res: any = await toggleTenantStatusAction(tenantId);
       if (res?.tenant) {
         patchLocalTenant(res.tenant);
@@ -215,12 +215,14 @@ export default function TenantListView({
         patchLocalTenant({ id: tenantId, subscriptionStatus: res.newStatus });
       }
       reportSync(res, "تم تغيير حالة الاشتراك ومزامنته مع تطبيق العميل والسيرفر فوراً ✓");
-      router.refresh();
-    });
+    } finally {
+      setIsPending(false);
+    }
   };
 
-  const handleQuickExtend = (tenantId: string) => {
-    startTransition(async () => {
+  const handleQuickExtend = async (tenantId: string) => {
+    setIsPending(true);
+    try {
       const res: any = await extendSubscriptionAction(tenantId, 30);
       if (res?.tenant) {
         patchLocalTenant(res.tenant);
@@ -232,8 +234,9 @@ export default function TenantListView({
         });
       }
       reportSync(res, "تم تمديد الاشتراك 30 يوماً ومزامنته مع تطبيق العميل ✓");
-      router.refresh();
-    });
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
@@ -757,7 +760,6 @@ export default function TenantListView({
           }}
           onTenantPatched={(updatedTenant) => {
             if (updatedTenant) patchLocalTenant(updatedTenant);
-            router.refresh();
           }}
           onUpdated={(updatedTenant) => {
             if (updatedTenant) patchLocalTenant(updatedTenant);
@@ -767,7 +769,6 @@ export default function TenantListView({
             });
             setIsModalOpen(false);
             setEditingTenant(null);
-            router.refresh();
           }}
           onDeleted={(deletedId) => {
             setTenants((prev) => prev.filter((t) => t.id !== deletedId));
@@ -775,7 +776,6 @@ export default function TenantListView({
               success: true,
               message: "تم حذف حساب العميل بنجاح ✓",
             });
-            router.refresh();
           }}
         />
       )}

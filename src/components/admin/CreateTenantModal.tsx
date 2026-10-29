@@ -47,7 +47,7 @@ function toInputDateStr(date: Date): string {
 export default function CreateTenantModal({ onCreated }: CreateTenantModalProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
 
   // 1. Client Identity & Credentials (No Verification Code)
   const [name, setName] = useState("");
@@ -97,9 +97,6 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 
   const handleClose = () => {
     if (!isPending) {
-      if (createdResult) {
-        router.refresh();
-      }
       setIsOpen(false);
       setCreatedResult(null);
       setErrorMsg(null);
@@ -134,7 +131,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
     setDueDateStr(toInputDateStr(end));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -143,7 +140,8 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
       return;
     }
 
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const res = await createTenantAction({
         name,
         phone,
@@ -164,9 +162,12 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
       }
 
       setCreatedResult(res);
-      router.refresh();
       if (onCreated) onCreated();
-    });
+    } catch (err: any) {
+      setErrorMsg(err?.message || "حدث خطأ أثناء إنشاء الحساب");
+    } finally {
+      setIsPending(false);
+    }
   };
 
   const copyActivationCard = () => {
@@ -661,14 +662,14 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         type="button"
                         onClick={() => handleSelectSubscriptionType("سنتر")}
                         className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${subscriptionType === "سنتر"
-                            ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
-                            : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                          ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
+                          : "bg-slate-50 border-slate-200 hover:bg-slate-100"
                           }`}
                       >
                         <div
                           className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${subscriptionType === "سنتر"
-                              ? "bg-blue-600 text-white"
-                              : "bg-slate-200 text-slate-600"
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-200 text-slate-600"
                             }`}
                         >
                           <Building2 className="w-5 h-5" />
@@ -685,14 +686,14 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         type="button"
                         onClick={() => handleSelectSubscriptionType("معلم")}
                         className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${subscriptionType === "معلم"
-                            ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
-                            : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                          ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
+                          : "bg-slate-50 border-slate-200 hover:bg-slate-100"
                           }`}
                       >
                         <div
                           className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${subscriptionType === "معلم"
-                              ? "bg-blue-600 text-white"
-                              : "bg-slate-200 text-slate-600"
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-200 text-slate-600"
                             }`}
                         >
                           <GraduationCap className="w-5 h-5" />
@@ -792,8 +793,8 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                                     type="button"
                                     onClick={() => toggleFeature(feat.id)}
                                     className={`p-2.5 rounded-xl border text-right transition-all flex items-start gap-2.5 cursor-pointer ${isChecked
-                                        ? "bg-blue-50/70 border-blue-600 text-slate-900"
-                                        : "bg-slate-50/60 border-slate-200/80 text-slate-400 hover:bg-slate-100/70"
+                                      ? "bg-blue-50/70 border-blue-600 text-slate-900"
+                                      : "bg-slate-50/60 border-slate-200/80 text-slate-400 hover:bg-slate-100/70"
                                       }`}
                                   >
                                     {isChecked ? (

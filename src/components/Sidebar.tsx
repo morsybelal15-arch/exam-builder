@@ -119,14 +119,22 @@ export default function Sidebar() {
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  // Hide sidebar on login, admin, parent portal, and denied pages
-  if (
-    pathname === "/login" ||
-    pathname.startsWith("/admin") ||
-    pathname === "/denied" ||
-    pathname.startsWith("/s/") ||
-    pathname === "/s"
-  ) {
+  // Strictly render Sidebar only on valid tenant pages (never on login, admin, parent portal, denied, or 404 routes)
+  const isValidTenantPage =
+    pathname === "/" ||
+    pathname === "/groups" ||
+    pathname === "/students" ||
+    pathname.startsWith("/students/") ||
+    pathname === "/qr-printing" ||
+    pathname === "/excel-sheets" ||
+    pathname === "/exam-builder" ||
+    pathname === "/created-exams" ||
+    pathname === "/uploaded-files" ||
+    pathname === "/images-to-pdf" ||
+    pathname === "/my-subscription" ||
+    pathname === "/subscription";
+
+  if (!isValidTenantPage) {
     return null;
   }
 

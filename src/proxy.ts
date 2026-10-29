@@ -14,7 +14,8 @@ import { verifySessionToken } from "@/lib/session-token";
  * inside every page / route / server action via getSessionUser().
  */
 
-const TENANT_APP_PREFIXES = [
+const EXACT_TENANT_PAGES = new Set([
+  "/",
   "/exam-builder",
   "/groups",
   "/students",
@@ -25,17 +26,29 @@ const TENANT_APP_PREFIXES = [
   "/created-exams",
   "/my-subscription",
   "/subscription",
-];
+  "/denied",
+]);
+
+function isValidTenantPagePath(pathname: string): boolean {
+  if (EXACT_TENANT_PAGES.has(pathname)) return true;
+  if (pathname.startsWith("/students/") && pathname.split("/").length === 3) return true;
+  return false;
+}
 
 function notFound(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
-  // Plain 404 (a rewrite would be proxied to https://localhost behind Nginx SSL and fail with 500).
+  // Standalone 404 page outside RootLayout (never renders Sidebar or TopHeaderBar).
   return new NextResponse(
-    '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>404</title></head>' +
-      '<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a">' +
-      '<div style="text-align:center"><h1 style="font-size:48px;margin:0">404</h1><p>الصفحة غير موجودة</p></div></body></html>',
+    '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>404 - الصفحة غير موجودة</title></head>' +
+      '<body style="font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#f8fafc;padding:16px">' +
+      '<div style="text-align:center;max-width:420px;background:#1e293b;border:1px solid #334155;border-radius:24px;padding:36px 28px;box-shadow:0 20px 50px rgba(0,0,0,0.4)">' +
+      '<div style="font-size:56px;font-weight:900;color:#3b82f6;line-height:1;margin-bottom:12px">404</div>' +
+      '<h1 style="font-size:18px;font-weight:800;margin:0 0 8px 0;color:#ffffff">هذا الرابط غير موجود في المنصة</h1>' +
+      '<p style="font-size:13px;color:#94a3b8;margin:0 0 24px 0;line-height:1.6">يرجى التأكد من صحة الرابط أو الانتقال لصفحة تسجيل الدخول للمتابعة.</p>' +
+      '<a href="/login" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:13px;padding:12px 28px;border-radius:14px">الانتقال إلى تسجيل الدخول</a>' +
+      "</div></body></html>",
     { status: 404, headers: { "content-type": "text/html; charset=utf-8" } }
   );
 }
@@ -104,6 +117,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname === "/sample-textbook.svg") {
+    return NextResponse.next();
+  }
+
   if (pathname === "/login") {
     if (request.nextUrl.searchParams.has("blocked") || request.nextUrl.searchParams.has("logout")) {
       const response = NextResponse.next();
@@ -119,11 +136,6 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (pathname === "/") {
-    if (isTenant || isAdmin) return NextResponse.next();
-    return redirectTo(request, "/login");
-  }
-
   // Local "all" mode only: admin dashboard
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     if (isAdmin) return NextResponse.next();
@@ -131,8 +143,17 @@ export function proxy(request: NextRequest) {
     return redirectTo(request, "/login", pathname);
   }
 
-  if (TENANT_APP_PREFIXES.some((p) => pathname.startsWith(p))) {
-    if (!isTenant && !isAdmin) return redirectTo(request, "/login", pathname);
+  // Block any unknown/random path after "/" from ever entering the system layout:
+  // - Unauthenticated visitors are redirected straight to /login
+  // - Authenticated users get a standalone 404 screen (no Sidebar / Header)
+  if (!isValidTenantPagePath(pathname)) {
+    if (!isTenant && !isAdmin) return redirectTo(request, "/login");
+    return notFound(request);
+  }
+
+  // All valid tenant pages require authentication
+  if (!isTenant && !isAdmin) {
+    return redirectTo(request, "/login", pathname === "/" ? undefined : pathname);
   }
 
   return NextResponse.next();

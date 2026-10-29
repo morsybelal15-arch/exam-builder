@@ -184,13 +184,21 @@ export default function TopHeaderBar() {
     }
   };
 
-  if (
-    pathname === "/login" ||
-    pathname.startsWith("/admin") ||
-    pathname === "/denied" ||
-    pathname.startsWith("/s/") ||
-    pathname === "/s"
-  ) {
+  const isValidTenantPage =
+    pathname === "/" ||
+    pathname === "/groups" ||
+    pathname === "/students" ||
+    pathname.startsWith("/students/") ||
+    pathname === "/qr-printing" ||
+    pathname === "/excel-sheets" ||
+    pathname === "/exam-builder" ||
+    pathname === "/created-exams" ||
+    pathname === "/uploaded-files" ||
+    pathname === "/images-to-pdf" ||
+    pathname === "/my-subscription" ||
+    pathname === "/subscription";
+
+  if (!isValidTenantPage) {
     return null;
   }
 
