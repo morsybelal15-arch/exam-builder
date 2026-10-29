@@ -12,7 +12,7 @@ import {
   generateTenantWildcardNginx,
   generateAdminNginx,
 } from "@/lib/vps-service";
-import { updateTenantRecord } from "@/lib/tenants-repository";
+import { updateTenantRecord, getTenantsList } from "@/lib/tenants-repository";
 import {
   runOnVps,
   isLocalExec,
@@ -107,7 +107,7 @@ chmod 600 .env.admin .env.tenant
 grep -qs '^ADMIN_PASSWORD_HASH=' .env.admin || echo "[warn] ADMIN_PHONE / ADMIN_PASSWORD_HASH not configured — admin login disabled"
 
 echo "[3/6] Installing & building..."
-npm install --no-audit --no-fund
+npm install --include=dev --no-audit --no-fund
 npx prisma generate
 npm run build
 
@@ -285,7 +285,21 @@ export async function autoDeployTenantVpsAction(
 export async function syncAllTenantsToVpsAction(): Promise<VpsDeployResult> {
   await requireSuperAdmin();
   const res = await syncTenantsToVps({ force: true });
-  return { success: res.synced, message: res.message };
+  const tenants = await getTenantsList();
+  let domainsProvisioned = 0;
+  for (const t of tenants) {
+    if (t.domain && t.domain.trim()) {
+      const domRes = await provisionTenantDomain(t.domain);
+      if (domRes.synced) domainsProvisioned++;
+    }
+  }
+  return {
+    success: res.synced,
+    message:
+      domainsProvisioned > 0
+        ? `${res.message} (وتم تأمين وتفعيل ${domainsProvisioned} دومين بـ HTTPS ✓)`
+        : res.message,
+  };
 }
 
 /**
