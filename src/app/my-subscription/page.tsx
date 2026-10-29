@@ -119,13 +119,6 @@ export default async function MySubscriptionPage() {
     storageLimitNum > 0 ? Math.round((usedStorageNum / storageLimitNum) * 100) : 0
   );
 
-  // Limits
-  const examsLimit = Number(tenant?.examsLimit) || 150;
-  const examsPercent = Math.min(100, Math.round((examsCount / examsLimit) * 100));
-
-  const filesLimit = Number(tenant?.filesLimit) || 200;
-  const filesPercent = Math.min(100, Math.round((filesCount / filesLimit) * 100));
-
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-6 sm:p-10" dir="rtl">
       <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-200">
@@ -137,7 +130,7 @@ export default async function MySubscriptionPage() {
               <span>تفاصيل اشتراك: {clientName}</span>
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              معلومات الباقة، فترة الاشتراك، المميزات المثبتة في التطبيق، وحدود الاستهلاك
+              معلومات الباقة، فترة الاشتراك، وسعة المساحة السحابية
             </p>
           </div>
 
@@ -187,7 +180,7 @@ export default async function MySubscriptionPage() {
               </div>
               <h2 className="text-2xl font-black text-slate-900">{planType}</h2>
               <p className="text-sm text-slate-500 leading-relaxed max-w-xl">
-                نسخة مخصصة باسم ({clientName}) تحتوي على ({enabledFeatures.length}) ميزة مثبتة ومفعلة في القائمة الجانبية (Sidebar).
+                نسخة مخصصة باسم ({clientName}) مفعلة ومتصلة بسيرفر المنصة السحابي.
               </p>
 
               <div className="flex flex-wrap items-center gap-4 pt-2 text-xs font-bold text-slate-600">
@@ -232,161 +225,46 @@ export default async function MySubscriptionPage() {
           </div>
         </div>
 
-        {/* Section 2: Usage Limits & Quotas (Three Cards) */}
+        {/* Section 2: Storage Limit Only */}
         <div className="space-y-4">
           <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
             <Zap className="w-4 h-4 text-blue-600" />
-            <span>حدود الاستهلاك والمساحة (Usage & Limits)</span>
+            <span>سعة المساحة السحابية (Storage Capacity)</span>
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Storage Limit Card */}
-            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
-                  <HardDrive className="w-6 h-6" />
-                </div>
-                <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-1 rounded-xl">
-                  {storagePercent}%
-                </span>
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4 max-w-md">
+            <div className="flex items-center justify-between">
+              <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                <HardDrive className="w-6 h-6" />
               </div>
-
-              <div>
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  سعة التخزين (Storage Limit)
-                </h4>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-xl font-black text-slate-900">
-                    {formatBytes(usedStorageBytes)}
-                  </span>
-                  <span className="text-xs text-slate-400 font-semibold">
-                    / {formatBytes(storageLimitBytes)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="bg-purple-600 h-2.5 rounded-full transition-all duration-500"
-                  style={{ width: `${storagePercent}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                المتبقي: {formatBytes(BigInt(Math.max(0, storageLimitNum - usedStorageNum)))}
-              </p>
+              <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-1 rounded-xl">
+                {storagePercent}%
+              </span>
             </div>
 
-            {/* Exams Limit Card */}
-            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <FileText className="w-6 h-6" />
-                </div>
-                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-xl">
-                  {examsPercent}%
+            <div>
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                سعة التخزين (Storage Limit)
+              </h4>
+              <div className="flex items-baseline gap-1 mt-1">
+                <span className="text-xl font-black text-slate-900">
+                  {formatBytes(usedStorageBytes)}
+                </span>
+                <span className="text-xs text-slate-400 font-semibold">
+                  / {formatBytes(storageLimitBytes)}
                 </span>
               </div>
-
-              <div>
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  حد الاختبارات (Exams Quota)
-                </h4>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-xl font-black text-slate-900">{examsCount}</span>
-                  <span className="text-xs text-slate-400 font-semibold">
-                    / {examsLimit} اختبار
-                  </span>
-                </div>
-              </div>
-
-              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
-                  style={{ width: `${examsPercent}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                متاح إنشاء {Math.max(0, examsLimit - examsCount)} اختبار إضافي
-              </p>
             </div>
 
-            {/* Uploaded Files Limit Card */}
-            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                  <FolderUp className="w-6 h-6" />
-                </div>
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-xl">
-                  {filesPercent}%
-                </span>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  المستندات المرفوعة (Uploaded Files)
-                </h4>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-xl font-black text-slate-900">{filesCount}</span>
-                  <span className="text-xs text-slate-400 font-semibold">
-                    / {filesLimit} ملف
-                  </span>
-                </div>
-              </div>
-
-              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="bg-emerald-600 h-2.5 rounded-full transition-all duration-500"
-                  style={{ width: `${filesPercent}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                متاح رفع {Math.max(0, filesLimit - filesCount)} ملف إضافي
-              </p>
+            <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div
+                className="bg-purple-600 h-2.5 rounded-full transition-all duration-500"
+                style={{ width: `${storagePercent}%` }}
+              />
             </div>
-          </div>
-        </div>
-
-        {/* Section 3: Installed Sidebar Features */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 sm:p-8 space-y-5">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-emerald-600" />
-              <span>الخواص والمميزات المثبتة في نسختك ({enabledFeatures.length})</span>
-            </h3>
-            <span className="text-xs font-bold text-slate-500">
-              متزامنة تلقائياً مع إدارة النظام
-            </span>
-          </div>
-
-          <div className="space-y-4">
-            {SIDEBAR_SECTIONS_ORDER.map((sectionTitle) => {
-              const installedInSection = APP_FEATURES_REGISTRY.filter(
-                (f) => f.section === sectionTitle && enabledFeatures.includes(f.id)
-              );
-              if (installedInSection.length === 0) return null;
-
-              return (
-                <div key={sectionTitle} className="space-y-2.5">
-                  <h4 className="text-xs font-extrabold text-blue-600">
-                    قسم {sectionTitle} ({installedInSection.length})
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {installedInSection.map((feat) => (
-                      <div
-                        key={feat.id}
-                        className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-start gap-3"
-                      >
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-                        <div>
-                          <h5 className="text-xs font-bold text-slate-800">{feat.name}</h5>
-                          <p className="text-[11px] text-slate-500 mt-0.5">{feat.description}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+            <p className="text-[11px] text-slate-400">
+              المتبقي: {formatBytes(BigInt(Math.max(0, storageLimitNum - usedStorageNum)))}
+            </p>
           </div>
         </div>
       </div>

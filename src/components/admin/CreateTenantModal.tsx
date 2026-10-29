@@ -823,37 +823,20 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                     </div>
                   </div>
 
-                  {/* Storage & Exams Quotas */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
-                        <HardDrive className="w-3.5 h-3.5 text-purple-600" />
-                        <span>حد مساحة التخزين السحابية (GB)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="100"
-                        value={storageLimitGb}
-                        onChange={(e) => setStorageLimitGb(Number(e.target.value))}
-                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
-                        <FileText className="w-3.5 h-3.5 text-blue-600" />
-                        <span>حد إنشاء الاختبارات</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="10"
-                        max="5000"
-                        value={examsLimit}
-                        onChange={(e) => setExamsLimit(Number(e.target.value))}
-                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none"
-                      />
-                    </div>
+                  {/* Storage Quota Only */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                      <HardDrive className="w-3.5 h-3.5 text-purple-600" />
+                      <span>حد مساحة التخزين السحابية (GB)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={storageLimitGb}
+                      onChange={(e) => setStorageLimitGb(Number(e.target.value))}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                    />
                   </div>
 
                   {/* Submit Button */}

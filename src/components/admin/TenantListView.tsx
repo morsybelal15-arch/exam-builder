@@ -586,43 +586,26 @@ export default function TenantListView({
 
                       {/* 5. Resource Limits & Quotas */}
                       <td className="py-4 px-5 min-w-[160px]">
-                        <div className="space-y-2">
-                          <div>
-                            <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mb-1">
-                              <span className="flex items-center gap-1">
-                                <HardDrive className="w-3 h-3 text-slate-400" />
-                                <span>التخزين:</span>
-                              </span>
-                              <span dir="ltr">
-                                {formatBytes(usedBytesNum)} / {formatBytes(limitBytesNum)}
-                              </span>
-                            </div>
-                            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all ${storagePercent > 90
-                                    ? "bg-red-500"
-                                    : storagePercent > 70
-                                      ? "bg-amber-500"
-                                      : "bg-blue-600"
-                                  }`}
-                                style={{ width: `${storagePercent}%` }}
-                              />
-                            </div>
+                        <div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mb-1">
+                            <span className="flex items-center gap-1">
+                              <HardDrive className="w-3 h-3 text-slate-400" />
+                              <span>التخزين:</span>
+                            </span>
+                            <span dir="ltr">
+                              {formatBytes(usedBytesNum)} / {formatBytes(limitBytesNum)}
+                            </span>
                           </div>
-
-                          <div className="flex items-center justify-between text-[11px] text-slate-500">
-                            <span className="inline-flex items-center gap-1 font-medium">
-                              <FileText className="w-3 h-3 text-slate-400" />
-                              <span>
-                                {examsCount}/{examsLimit} اختبار
-                              </span>
-                            </span>
-                            <span className="inline-flex items-center gap-1 font-medium">
-                              <FolderUp className="w-3 h-3 text-slate-400" />
-                              <span>
-                                {filesCount}/{filesLimit} ملف
-                              </span>
-                            </span>
+                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${storagePercent > 90
+                                  ? "bg-red-500"
+                                  : storagePercent > 70
+                                    ? "bg-amber-500"
+                                    : "bg-blue-600"
+                                }`}
+                              style={{ width: `${storagePercent}%` }}
+                            />
                           </div>
                         </div>
                       </td>
