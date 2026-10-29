@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
-import { HOSTINGER_VPS_CONFIG, TENANT_APP_PORT, DEFAULT_ADMIN_HOST, generateNginxConfig } from "@/lib/vps-service";
+import { HOSTINGER_VPS_CONFIG, TENANT_APP_PORT, DEFAULT_ADMIN_HOST, CERTBOT_EMAIL, generateNginxConfig } from "@/lib/vps-service";
 import { exportRawTenantStoreAsync } from "@/lib/tenants-repository";
 
 export const VPS_APP_DIR = "/var/www/exam-builder";
@@ -154,6 +154,9 @@ echo '${nginxB64}' | base64 -d > ${conf}
 ln -sf ${conf} /etc/nginx/sites-enabled/
 if nginx -t 2>/tmp/nginx_test.log; then
   systemctl reload nginx
+  if command -v certbot >/dev/null 2>&1; then
+    certbot --nginx -d ${clean} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect >/tmp/certbot_${clean}.log 2>&1 && echo SSL_OK || echo SSL_WARN
+  fi
   echo DOMAIN_OK
 else
   rm -f /etc/nginx/sites-enabled/exam-tenant-${clean}
@@ -162,11 +165,17 @@ else
 fi
 `;
   try {
-    const { stdout } = await runOnVps(script);
+    const { stdout } = await runOnVps(script, 90_000);
     if (!stdout.includes("DOMAIN_OK")) {
       return { synced: false, message: `تعذر تأكيد تفعيل النطاق ${clean}` };
     }
-    return { synced: true, message: `تم تفعيل النطاق ${clean} على خادم VPS` };
+    const hasSsl = stdout.includes("SSL_OK");
+    return {
+      synced: true,
+      message: hasSsl
+        ? `تم تفعيل النطاق https://${clean} وتأمينه بشهادة SSL تلقائياً`
+        : `تم تفعيل النطاق ${clean} على خادم VPS`,
+    };
   } catch (err: any) {
     return { synced: false, message: `فشل تفعيل النطاق ${clean}: ` + (err?.message?.split("\n")[0] || "") };
   }

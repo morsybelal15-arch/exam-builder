@@ -448,7 +448,7 @@ export default function TenantListView({
                           {tenant.domain ? (
                             <div className="space-y-1">
                               <a
-                                href={`http://${tenant.domain}`}
+                                href={`https://${tenant.domain}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"

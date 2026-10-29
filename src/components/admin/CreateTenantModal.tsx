@@ -181,7 +181,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 🔑 كلمة المرور: ${password}
 🌐 رابط المنصة: ${
       createdResult.tenant.domain
-        ? `http://${createdResult.tenant.domain}/login`
+        ? `https://${createdResult.tenant.domain}/login`
         : "رابط المنصة الرئيسي"
     }
 📅 بداية الاشتراك: ${new Date(createdResult.tenant.startDate).toLocaleDateString("ar-EG")}
@@ -385,7 +385,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         </div>
 
                         <a
-                          href={`http://${createdResult.tenant.domain}/login`}
+                          href={`https://${createdResult.tenant.domain}/login`}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-all"

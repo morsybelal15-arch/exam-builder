@@ -263,7 +263,7 @@ export async function autoDeployTenantVpsAction(
       message: health.online
         ? `تم تفعيل (${cleanDomain}) ومزامنة بيانات الدخول — المنصة تعمل الآن`
         : `تم إعداد النطاق لكن ${health.message}. استخدم زر "نشر المنصة على VPS" أولاً.`,
-      domainUrl: `http://${cleanDomain}`,
+      domainUrl: `https://${cleanDomain}`,
       logs,
     };
   } catch (err: any) {

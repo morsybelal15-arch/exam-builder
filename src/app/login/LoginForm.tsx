@@ -3,7 +3,15 @@
 import React, { useState } from "react";
 import { Phone, Lock, LogIn, Loader2, AlertCircle, Eye, EyeOff, ShieldCheck } from "lucide-react";
 
-export default function LoginForm({ isAdmin = false }: { isAdmin?: boolean }) {
+export default function LoginForm({
+  isAdmin = false,
+  tenantName = null,
+  subscriptionType = null,
+}: {
+  isAdmin?: boolean;
+  tenantName?: string | null;
+  subscriptionType?: string | null;
+}) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -73,10 +81,18 @@ export default function LoginForm({ isAdmin = false }: { isAdmin?: boolean }) {
             {isAdmin ? <ShieldCheck className="w-8 h-8" /> : <LogIn className="w-8 h-8" />}
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            {isAdmin ? "لوحة تحكم مدير النظام" : "تسجيل الدخول"}
+            {isAdmin
+              ? "لوحة تحكم مدير النظام"
+              : tenantName
+              ? `منصة ${tenantName}`
+              : "تسجيل الدخول"}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-2">
-            {isAdmin ? "دخول مخصص لمدير النظام فقط" : "منصة بنك الاختبارات والتدريس التفاعلي"}
+            {isAdmin
+              ? "دخول مخصص لمدير النظام فقط"
+              : subscriptionType === "معلم"
+              ? "منصة المعلم الذكية لإدارة الطلاب والاختبارات"
+              : "منصة إدارة السنتر وبنك الاختبارات التفاعلي"}
           </p>
         </div>
 
