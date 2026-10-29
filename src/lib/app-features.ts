@@ -60,7 +60,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "لوحة إحصائيات السنتر، التحصيل الشهري، ومتابعة الغياب اليومي",
     iconName: "Home",
-    defaultFor: ["سنتر"],
+    defaultFor: ["سنتر", "معلم"],
   },
   {
     id: "groups",
@@ -87,7 +87,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "توليد وطباعة كروت الباركود للطلاب لتسجيل الحضور والدفع بالكاميرا",
     iconName: "QrCode",
-    defaultFor: ["سنتر"],
+    defaultFor: ["سنتر", "معلم"],
   },
   {
     id: "excel-sheets",

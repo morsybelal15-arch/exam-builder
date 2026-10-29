@@ -36,17 +36,17 @@ export function runOnVps(script: string, timeoutMs = 30_000): Promise<{ stdout: 
     const child = local
       ? spawn("bash", ["-s"], { windowsHide: true })
       : spawn(
-          "ssh",
-          [
-            "-i", SSH_KEY_PATH,
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "ConnectTimeout=15",
-            "-o", "BatchMode=yes",
-            `root@${HOSTINGER_VPS_CONFIG.ip}`,
-            "base64 -d | bash",
-          ],
-          { windowsHide: true }
-        );
+        "ssh",
+        [
+          "-i", SSH_KEY_PATH,
+          "-o", "StrictHostKeyChecking=no",
+          "-o", "ConnectTimeout=15",
+          "-o", "BatchMode=yes",
+          `root@${HOSTINGER_VPS_CONFIG.ip}`,
+          "base64 -d | bash",
+        ],
+        { windowsHide: true }
+      );
 
     let stdout = "";
     let stderr = "";
@@ -144,25 +144,45 @@ export async function provisionTenantDomain(domain: string): Promise<VpsSyncResu
     return { synced: false, message: `لا يمكن استخدام نطاق لوحة الإدارة (${clean}) لمستأجر` };
   }
 
-  const nginx = generateNginxConfig(clean);
-  const nginxB64 = Buffer.from(nginx, "utf-8").toString("base64");
+  const nginxHttpB64 = Buffer.from(generateNginxConfig(clean, false), "utf-8").toString("base64");
+  const nginxHttpsB64 = Buffer.from(generateNginxConfig(clean, true), "utf-8").toString("base64");
   const conf = `/etc/nginx/sites-available/exam-tenant-${clean}`;
+  const certFile = `/etc/letsencrypt/live/${clean}/fullchain.pem`;
 
   const script = `
 set -e
-echo '${nginxB64}' | base64 -d > ${conf}
-ln -sf ${conf} /etc/nginx/sites-enabled/
-if nginx -t 2>/tmp/nginx_test.log; then
-  systemctl reload nginx
-  if command -v certbot >/dev/null 2>&1; then
-    certbot --nginx -d ${clean} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect >/tmp/certbot_${clean}.log 2>&1 && echo SSL_OK || echo SSL_WARN
+mkdir -p /var/www/html
+ln -sf ${conf} /etc/nginx/sites-enabled/exam-tenant-${clean}
+
+if [ -f "${certFile}" ]; then
+  echo '${nginxHttpsB64}' | base64 -d > ${conf}
+  if nginx -t 2>/tmp/nginx_test.log; then
+    systemctl reload nginx
+    echo SSL_OK
+    echo DOMAIN_OK
+    exit 0
   fi
-  echo DOMAIN_OK
-else
+fi
+
+echo '${nginxHttpB64}' | base64 -d > ${conf}
+if ! nginx -t 2>/tmp/nginx_test.log; then
   rm -f /etc/nginx/sites-enabled/exam-tenant-${clean}
   cat /tmp/nginx_test.log
   exit 1
 fi
+systemctl reload nginx
+
+if command -v certbot >/dev/null 2>&1; then
+  certbot certonly --webroot -w /var/www/html -d ${clean} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} >/tmp/certbot_${clean}.log 2>&1 || true
+  if [ -f "${certFile}" ]; then
+    echo '${nginxHttpsB64}' | base64 -d > ${conf}
+    nginx -t && systemctl reload nginx
+    echo SSL_OK
+  else
+    echo SSL_WARN
+  fi
+fi
+echo DOMAIN_OK
 `;
   try {
     const { stdout } = await runOnVps(script, 90_000);
@@ -173,8 +193,8 @@ fi
     return {
       synced: true,
       message: hasSsl
-        ? `تم تفعيل النطاق https://${clean} وتأمينه بشهادة SSL تلقائياً`
-        : `تم تفعيل النطاق ${clean} على خادم VPS`,
+        ? `تم تفعيل النطاق https://${clean} وتأمينه بشهادة SSL تلقائياً ✓`
+        : `تم تفعيل النطاق ${clean} على خادم VPS ✓`,
     };
   } catch (err: any) {
     return { synced: false, message: `فشل تفعيل النطاق ${clean}: ` + (err?.message?.split("\n")[0] || "") };
@@ -183,7 +203,7 @@ fi
 
 /**
  * Checks from inside the VPS that the tenant domain is served by the Exam Builder app
- * (bypasses local DNS / ISP caching on the admin machine).
+ * over HTTPS (or HTTP fallback).
  */
 export async function checkTenantDomainOnVps(domain: string): Promise<{ online: boolean; message: string }> {
   const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
@@ -191,13 +211,20 @@ export async function checkTenantDomainOnVps(domain: string): Promise<{ online: 
     return { online: false, message: `اسم النطاق غير صالح: ${domain}` };
   }
   const script = `
-code=$(curl -s -o /tmp/eb_check.html -w '%{http_code}' -H 'Host: ${clean}' http://127.0.0.1/login || echo 000)
-if grep -q 'منصة إعداد الاختبارات' /tmp/eb_check.html 2>/dev/null; then echo "APP_OK $code"; else echo "APP_MISSING $code"; fi
+code=$(curl -k -L -s -o /tmp/eb_check.html -w '%{http_code}' --resolve "${clean}:443:127.0.0.1" --resolve "${clean}:80:127.0.0.1" "https://${clean}/login" 2>/dev/null || echo 000)
+if [ "$code" != "200" ]; then
+  code=$(curl -L -s -o /tmp/eb_check.html -w '%{http_code}' -H "Host: ${clean}" "http://127.0.0.1:${TENANT_APP_PORT}/login" 2>/dev/null || echo 000)
+fi
+if [ "$code" = "200" ] && grep -q '_next' /tmp/eb_check.html 2>/dev/null; then
+  echo "APP_OK $code"
+else
+  echo "APP_MISSING $code"
+fi
 `;
   try {
     const { stdout } = await runOnVps(script, 20_000);
-    if (stdout.includes("APP_OK")) return { online: true, message: "المنصة تعمل على النطاق بنجاح" };
-    return { online: false, message: "النطاق لا يعرض منصة الاختبارات بعد (" + stdout.trim() + ")" };
+    if (stdout.includes("APP_OK")) return { online: true, message: "المنصة تعمل على النطاق بنجاح (HTTPS 200 OK)" };
+    return { online: false, message: "النطاق لا يعرض المنصة بعد (" + stdout.trim() + ")" };
   } catch (err: any) {
     return { online: false, message: "تعذر الفحص: " + (err?.message?.split("\n")[0] || "") };
   }

@@ -52,10 +52,17 @@ function proxyLocation(port: number): string {
 
 /**
  * Generates an Nginx Reverse Proxy block for a tenant's domain pointing to the tenant app.
+ * - withSsl=false: HTTP + ACME webroot (used before Let's Encrypt cert is issued)
+ * - withSsl=true : HTTP->HTTPS redirect + full TLS 443 block
  */
-export function generateNginxConfig(domain: string): string {
+export function generateNginxConfig(domain: string, withSsl = false): string {
   const cleanDomain = domain.trim().toLowerCase();
-  return `# Nginx Virtual Host for Tenant: ${cleanDomain}
+  const acme = `    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }`;
+
+  if (!withSsl) {
+    return `# Nginx Virtual Host for Tenant (HTTP): ${cleanDomain}
 server {
     listen 80;
     listen [::]:80;
@@ -63,9 +70,38 @@ server {
 
     client_max_body_size 50M;
 
+${acme}
+
 ${proxyLocation(TENANT_APP_PORT)}
 }
-# SSL Command: certbot --nginx -d ${cleanDomain} --non-interactive --agree-tos -m ${CERTBOT_EMAIL}
+`;
+  }
+
+  return `# Nginx Virtual Host for Tenant (HTTPS): ${cleanDomain}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${cleanDomain};
+
+${acme}
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${cleanDomain};
+
+    ssl_certificate /etc/letsencrypt/live/${cleanDomain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${cleanDomain}/privkey.pem;
+
+    client_max_body_size 50M;
+
+${proxyLocation(TENANT_APP_PORT)}
+}
 `;
 }
 
@@ -131,10 +167,6 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/${host}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${host}/privkey.pem;
-
-    if ($host != "${host}") {
-        return 444;
-    }
 
     client_max_body_size 50M;
     add_header Strict-Transport-Security "max-age=31536000" always;

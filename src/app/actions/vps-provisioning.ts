@@ -82,8 +82,10 @@ fi
 
 echo "[2/6] Writing environment files..."
 rm -f .env
-echo '${b64(envLocal)}' | base64 -d > .env.local
-mkdir -p data
+if [ ! -f .env.local ] || [ -n "${geminiKey}" ]; then
+  echo '${b64(envLocal)}' | base64 -d > .env.local
+fi
+mkdir -p data/tenants
 
 # Tenant app secret (generated once, kept across deploys)
 if ! grep -qs '^SESSION_SECRET=' .env.tenant; then

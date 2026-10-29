@@ -103,7 +103,6 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 
   const handleSelectSubscriptionType = (type: SubscriptionCategory) => {
     setSubscriptionType(type);
-    setEnabledFeatures(getDefaultFeaturesForCategory(type));
   };
 
   const toggleFeature = (featureId: string) => {
@@ -179,11 +178,10 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 🏷️ نوع الاشتراك: ${createdResult.tenant.subscriptionType}
 📱 رقم الهاتف (الدخول): ${createdResult.tenant.phone}
 🔑 كلمة المرور: ${password}
-🌐 رابط المنصة: ${
-      createdResult.tenant.domain
+🌐 رابط المنصة: ${createdResult.tenant.domain
         ? `https://${createdResult.tenant.domain}/login`
         : "رابط المنصة الرئيسي"
-    }
+      }
 📅 بداية الاشتراك: ${new Date(createdResult.tenant.startDate).toLocaleDateString("ar-EG")}
 📅 نهاية الاشتراك: ${new Date(createdResult.tenant.dueDate).toLocaleDateString("ar-EG")}
 🧩 المميزات المثبتة: ${installedNames}`;
@@ -280,9 +278,8 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         </li>
                         {createdResult.vpsSync && (
                           <li
-                            className={`flex items-center gap-1.5 ${
-                              createdResult.vpsSync.synced ? "text-emerald-700" : "text-amber-700"
-                            }`}
+                            className={`flex items-center gap-1.5 ${createdResult.vpsSync.synced ? "text-emerald-700" : "text-amber-700"
+                              }`}
                           >
                             {createdResult.vpsSync.synced ? (
                               <Check className="w-3.5 h-3.5" />
@@ -294,9 +291,8 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         )}
                         {createdResult.domainSetup && (
                           <li
-                            className={`flex items-center gap-1.5 ${
-                              createdResult.domainSetup.synced ? "text-emerald-700" : "text-red-600"
-                            }`}
+                            className={`flex items-center gap-1.5 ${createdResult.domainSetup.synced ? "text-emerald-700" : "text-red-600"
+                              }`}
                           >
                             {createdResult.domainSetup.synced ? (
                               <Check className="w-3.5 h-3.5" />
@@ -658,18 +654,16 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                       <button
                         type="button"
                         onClick={() => handleSelectSubscriptionType("سنتر")}
-                        className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
-                          subscriptionType === "سنتر"
+                        className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${subscriptionType === "سنتر"
                             ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
                             : "bg-slate-50 border-slate-200 hover:bg-slate-100"
-                        }`}
+                          }`}
                       >
                         <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                            subscriptionType === "سنتر"
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${subscriptionType === "سنتر"
                               ? "bg-blue-600 text-white"
                               : "bg-slate-200 text-slate-600"
-                          }`}
+                            }`}
                         >
                           <Building2 className="w-5 h-5" />
                         </div>
@@ -684,18 +678,16 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                       <button
                         type="button"
                         onClick={() => handleSelectSubscriptionType("معلم")}
-                        className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
-                          subscriptionType === "معلم"
+                        className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${subscriptionType === "معلم"
                             ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
                             : "bg-slate-50 border-slate-200 hover:bg-slate-100"
-                        }`}
+                          }`}
                       >
                         <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                            subscriptionType === "معلم"
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${subscriptionType === "معلم"
                               ? "bg-blue-600 text-white"
                               : "bg-slate-200 text-slate-600"
-                          }`}
+                            }`}
                         >
                           <GraduationCap className="w-5 h-5" />
                         </div>
@@ -793,11 +785,10 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                                     key={feat.id}
                                     type="button"
                                     onClick={() => toggleFeature(feat.id)}
-                                    className={`p-2.5 rounded-xl border text-right transition-all flex items-start gap-2.5 cursor-pointer ${
-                                      isChecked
+                                    className={`p-2.5 rounded-xl border text-right transition-all flex items-start gap-2.5 cursor-pointer ${isChecked
                                         ? "bg-blue-50/70 border-blue-600 text-slate-900"
                                         : "bg-slate-50/60 border-slate-200/80 text-slate-400 hover:bg-slate-100/70"
-                                    }`}
+                                      }`}
                                   >
                                     {isChecked ? (
                                       <CheckSquare className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />

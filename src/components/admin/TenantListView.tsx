@@ -228,11 +228,10 @@ export default function TenantListView({
 
       {syncNotice && (
         <div
-          className={`rounded-xl px-4 py-2.5 text-xs font-bold flex items-center justify-between gap-2 border ${
-            syncNotice.success
+          className={`rounded-xl px-4 py-2.5 text-xs font-bold flex items-center justify-between gap-2 border ${syncNotice.success
               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
               : "bg-rose-50 text-rose-700 border-rose-200"
-          }`}
+            }`}
         >
           <span className="flex items-center gap-1.5">
             {syncNotice.success ? (
@@ -273,22 +272,20 @@ export default function TenantListView({
 
           <button
             onClick={() => setStatusFilter("ALL")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-              statusFilter === "ALL"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${statusFilter === "ALL"
                 ? "bg-slate-900 text-white shadow-xs"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-            }`}
+              }`}
           >
             الكل ({initialTenants.length})
           </button>
 
           <button
             onClick={() => setStatusFilter("ACTIVE")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
-              statusFilter === "ACTIVE"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${statusFilter === "ACTIVE"
                 ? "bg-emerald-600 text-white shadow-xs"
                 : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100/70 border border-emerald-200/60"
-            }`}
+              }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>
@@ -298,11 +295,10 @@ export default function TenantListView({
 
           <button
             onClick={() => setStatusFilter("STOPPED")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
-              statusFilter === "STOPPED"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${statusFilter === "STOPPED"
                 ? "bg-amber-600 text-white shadow-xs"
                 : "bg-amber-50 text-amber-700 hover:bg-amber-100/70 border border-amber-200/60"
-            }`}
+              }`}
           >
             <span className="w-2 h-2 rounded-full bg-amber-400" />
             <span>
@@ -312,11 +308,10 @@ export default function TenantListView({
 
           <button
             onClick={() => setStatusFilter("EXPIRED")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
-              statusFilter === "EXPIRED"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${statusFilter === "EXPIRED"
                 ? "bg-red-600 text-white shadow-xs"
                 : "bg-red-50 text-red-700 hover:bg-red-100/70 border border-red-200/60"
-            }`}
+              }`}
           >
             <span>
               المنتهية ({initialTenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
@@ -384,21 +379,21 @@ export default function TenantListView({
                   const availableToAddCount = ALL_FEATURE_IDS.length - installedFeatures.length;
                   const startDateDisplay = tenant.subscriptionStartDate
                     ? new Date(tenant.subscriptionStartDate).toLocaleDateString("ar-EG", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                    })
                     : new Date(tenant.createdAt).toLocaleDateString("ar-EG", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      });
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                    });
                   const dueDateDisplay = tenant.subscriptionDueDate
                     ? new Date(tenant.subscriptionDueDate).toLocaleDateString("ar-EG", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                    })
                     : "غير محدد";
 
                   return (
@@ -422,11 +417,10 @@ export default function TenantListView({
                             </span>
                             <div className="flex items-center gap-1.5 mt-1">
                               <span
-                                className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                                  subType === "سنتر"
+                                className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full ${subType === "سنتر"
                                     ? "bg-blue-50 text-blue-700 border border-blue-200/60"
                                     : "bg-purple-50 text-purple-700 border border-purple-200/60"
-                                }`}
+                                  }`}
                               >
                                 <span>اشتراك {subType}</span>
                               </span>
@@ -461,11 +455,10 @@ export default function TenantListView({
                               </a>
                               {deployFeedback[tenant.id] && (
                                 <p
-                                  className={`text-[10px] font-bold ${
-                                    deployFeedback[tenant.id].success
+                                  className={`text-[10px] font-bold ${deployFeedback[tenant.id].success
                                       ? "text-emerald-600"
                                       : "text-red-500"
-                                  }`}
+                                    }`}
                                 >
                                   {deployFeedback[tenant.id].message}
                                 </p>
@@ -491,18 +484,16 @@ export default function TenantListView({
                           </div>
                           <div className="flex items-center gap-1 text-[11px]">
                             <Clock
-                              className={`w-3.5 h-3.5 ${
-                                dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
-                              }`}
+                              className={`w-3.5 h-3.5 ${dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
+                                }`}
                             />
                             <span
-                              className={`font-semibold ${
-                                dueInfo.isExpired
+                              className={`font-semibold ${dueInfo.isExpired
                                   ? "text-red-600 font-bold"
                                   : dueInfo.isUrgent
-                                  ? "text-amber-600 font-bold"
-                                  : "text-emerald-600 font-bold"
-                              }`}
+                                    ? "text-amber-600 font-bold"
+                                    : "text-emerald-600 font-bold"
+                                }`}
                             >
                               {dueInfo.text}
                             </span>
@@ -570,13 +561,12 @@ export default function TenantListView({
                             </div>
                             <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                               <div
-                                className={`h-full rounded-full transition-all ${
-                                  storagePercent > 90
+                                className={`h-full rounded-full transition-all ${storagePercent > 90
                                     ? "bg-red-500"
                                     : storagePercent > 70
-                                    ? "bg-amber-500"
-                                    : "bg-blue-600"
-                                }`}
+                                      ? "bg-amber-500"
+                                      : "bg-blue-600"
+                                  }`}
                                 style={{ width: `${storagePercent}%` }}
                               />
                             </div>
@@ -631,11 +621,10 @@ export default function TenantListView({
                                 ? "إيقاف مؤقت للاشتراك"
                                 : "تشغيل واستئناف الاشتراك"
                             }
-                            className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                              tenant.subscriptionStatus === "ACTIVE"
+                            className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${tenant.subscriptionStatus === "ACTIVE"
                                 ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200/60"
                                 : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200/60"
-                            }`}
+                              }`}
                           >
                             {tenant.subscriptionStatus === "ACTIVE" ? (
                               <Pause className="w-3.5 h-3.5" />
@@ -660,11 +649,10 @@ export default function TenantListView({
                               onClick={() => handleAutoDeploy(tenant)}
                               disabled={deployingTenantId === tenant.id || isPending}
                               title="تفعيل الدومين وإعداد Nginx تلقائياً على خادم VPS"
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                                deployFeedback[tenant.id]?.success
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${deployFeedback[tenant.id]?.success
                                   ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
                                   : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20"
-                              } disabled:opacity-50`}
+                                } disabled:opacity-50`}
                             >
                               {deployingTenantId === tenant.id ? (
                                 <>
