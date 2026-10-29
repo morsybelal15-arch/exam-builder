@@ -196,25 +196,70 @@ function getSvgPathFromPoints(points: { x: number; y: number }[]): string {
   return d;
 }
 
+// ============================================================================
+// Smart Viewer Freeze / Resume Cache (3 Hours TTL)
+// Keeps open PDF/Image, rendered pages, active page (e.g. Page 30), zoom, and
+// exact scroll position alive when navigating across app sections or previewing
+// ============================================================================
+const VIEWER_FREEZE_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+interface FrozenViewerCache {
+  selectedFile: string | null;
+  imageSrc: string | null;
+  pdfDoc: any | null;
+  pdfTotalPages: number;
+  pdfCurrentPage: number;
+  activePdfCropPage: number;
+  pdfPageAspectRatio: number;
+  pdfPagesCache: Record<number, string>;
+  fileZoom: number;
+  scrollTop: number;
+  scrollLeft: number;
+  updatedAt: number;
+}
+
+let frozenViewerCache: FrozenViewerCache | null = null;
+
+function getValidFrozenViewerCache(): FrozenViewerCache | null {
+  if (!frozenViewerCache) return null;
+  if (Date.now() - frozenViewerCache.updatedAt > VIEWER_FREEZE_TTL_MS) {
+    frozenViewerCache = null;
+    return null;
+  }
+  return frozenViewerCache;
+}
+
 export default function ExamBuilderPage() {
-  // Source viewer states (defaults to null for a clean empty dropzone area)
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [fileZoom, setFileZoom] = useState<number>(100);
+  const initialFrozen = getValidFrozenViewerCache();
+
+  // Source viewer states (restored instantaneously from freeze cache if valid)
+  const [selectedFile, setSelectedFile] = useState<string | null>(() => initialFrozen?.selectedFile ?? null);
+  const [imageSrc, setImageSrc] = useState<string | null>(() => initialFrozen?.imageSrc ?? null);
+  const [fileZoom, setFileZoom] = useState<number>(() => initialFrozen?.fileZoom ?? 100);
+  const fileZoomRef = useRef<number>(initialFrozen?.fileZoom ?? 100);
+  useEffect(() => {
+    fileZoomRef.current = fileZoom;
+  }, [fileZoom]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imgElementRef = useRef<HTMLImageElement>(null);
   const imageUploadInputRef = useRef<HTMLInputElement>(null);
   const freeImageInputRef = useRef<HTMLInputElement>(null);
 
   // PDF Multi-page viewer & jump states
-  const [pdfDoc, setPdfDoc] = useState<any | null>(null);
-  const pdfDocRef = useRef<any | null>(null);
-  const [pdfTotalPages, setPdfTotalPages] = useState<number>(1);
-  const [pdfCurrentPage, setPdfCurrentPage] = useState<number>(1);
-  const pdfCurrentPageRef = useRef<number>(1);
+  const [pdfDoc, setPdfDoc] = useState<any | null>(() => initialFrozen?.pdfDoc ?? null);
+  const pdfDocRef = useRef<any | null>(initialFrozen?.pdfDoc ?? null);
+  const [pdfTotalPages, setPdfTotalPages] = useState<number>(() => initialFrozen?.pdfTotalPages ?? 1);
+  const [pdfCurrentPage, setPdfCurrentPage] = useState<number>(() => initialFrozen?.pdfCurrentPage ?? 1);
+  const pdfCurrentPageRef = useRef<number>(initialFrozen?.pdfCurrentPage ?? 1);
   useEffect(() => {
     pdfCurrentPageRef.current = pdfCurrentPage;
   }, [pdfCurrentPage]);
+
+  // Scroll & freeze restoration refs
+  const viewerScrollTopRef = useRef<number>(initialFrozen?.scrollTop ?? 0);
+  const viewerScrollLeftRef = useRef<number>(initialFrozen?.scrollLeft ?? 0);
+  const isRestoringScrollRef = useRef<boolean>(Boolean(initialFrozen?.selectedFile));
 
   // Smooth 60fps Lasso drawing & scroll throttle refs
   const lassoPointsRef = useRef<{ x: number; y: number }[]>([]);
@@ -222,14 +267,22 @@ export default function ExamBuilderPage() {
   const scrollRafRef = useRef<number | null>(null);
   const rectRafRef = useRef<number | null>(null);
 
-  const [pdfPageInput, setPdfPageInput] = useState<string>("1");
-  const [pdfPagesCache, setPdfPagesCache] = useState<Record<number, string>>({});
-  const pdfPagesCacheRef = useRef<Record<number, string>>({});
+  const [pdfPageInput, setPdfPageInput] = useState<string>(() => String(initialFrozen?.pdfCurrentPage ?? 1));
+  const [pdfPagesCache, setPdfPagesCache] = useState<Record<number, string>>(
+    () => (initialFrozen?.pdfPagesCache ? { ...initialFrozen.pdfPagesCache } : {})
+  );
+  const pdfPagesCacheRef = useRef<Record<number, string>>(
+    initialFrozen?.pdfPagesCache ? { ...initialFrozen.pdfPagesCache } : {}
+  );
   const renderQueueRef = useRef<number[]>([]);
   const isQueueProcessingRef = useRef<boolean>(false);
-  const [activePdfCropPage, setActivePdfCropPage] = useState<number>(1);
-  const activePdfCropPageRef = useRef<number>(1);
-  const [pdfPageAspectRatio, setPdfPageAspectRatio] = useState<number>(1.414);
+  const [activePdfCropPage, setActivePdfCropPage] = useState<number>(() => initialFrozen?.activePdfCropPage ?? 1);
+  const activePdfCropPageRef = useRef<number>(initialFrozen?.activePdfCropPage ?? 1);
+  const [pdfPageAspectRatio, setPdfPageAspectRatio] = useState<number>(() => initialFrozen?.pdfPageAspectRatio ?? 1.414);
+  const pdfPageAspectRatioRef = useRef<number>(initialFrozen?.pdfPageAspectRatio ?? 1.414);
+  useEffect(() => {
+    pdfPageAspectRatioRef.current = pdfPageAspectRatio;
+  }, [pdfPageAspectRatio]);
 
   // High-performance queue worker for PDF pages (scale 1.5 + fast JPEG blob compression)
   const processRenderQueue = useCallback(async () => {
@@ -321,22 +374,46 @@ export default function ExamBuilderPage() {
     const singleSlotHeight = pageWidth * pdfPageAspectRatio + 24;
     const targetScrollTop = (targetPage - 1) * singleSlotHeight;
 
+    viewerScrollTopRef.current = targetScrollTop;
+    if (frozenViewerCache) {
+      frozenViewerCache.pdfCurrentPage = targetPage;
+      frozenViewerCache.activePdfCropPage = targetPage;
+      frozenViewerCache.scrollTop = targetScrollTop;
+      frozenViewerCache.updatedAt = Date.now();
+    }
+
+    isRestoringScrollRef.current = true;
     if (imageContainerRef.current) {
       imageContainerRef.current.scrollTo({
         top: targetScrollTop,
-        behavior: "smooth",
+        behavior: "instant" as ScrollBehavior,
       });
     }
+    setTimeout(() => {
+      isRestoringScrollRef.current = false;
+    }, 250);
   }, [pdfDoc, pdfTotalPages, queuePdfPage, fileZoom, pdfPageAspectRatio]);
 
   const handleViewerScroll = useCallback(() => {
-    if (!imageContainerRef.current || !pdfDoc || pdfTotalPages <= 0) return;
+    if (!imageContainerRef.current || isRestoringScrollRef.current) return;
     if (scrollRafRef.current) return;
 
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
-      if (!imageContainerRef.current) return;
+      if (!imageContainerRef.current || isRestoringScrollRef.current) return;
       const scrollTop = imageContainerRef.current.scrollTop;
+      const scrollLeft = imageContainerRef.current.scrollLeft;
+
+      viewerScrollTopRef.current = scrollTop;
+      viewerScrollLeftRef.current = scrollLeft;
+      if (frozenViewerCache) {
+        frozenViewerCache.scrollTop = scrollTop;
+        frozenViewerCache.scrollLeft = scrollLeft;
+        frozenViewerCache.updatedAt = Date.now();
+      }
+
+      if (!pdfDoc || pdfTotalPages <= 0) return;
+
       const pageWidth = (fileZoom / 100) * 620;
       const slotHeight = pageWidth * pdfPageAspectRatio + 24;
       const current = Math.max(
@@ -351,6 +428,10 @@ export default function ExamBuilderPage() {
         pdfCurrentPageRef.current = current;
         setPdfCurrentPage(current);
         setPdfPageInput(String(current));
+        if (frozenViewerCache) {
+          frozenViewerCache.pdfCurrentPage = current;
+          frozenViewerCache.updatedAt = Date.now();
+        }
 
         // Predictive queue adjacent pages
         queuePdfPage(current, true);
@@ -555,6 +636,86 @@ export default function ExamBuilderPage() {
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
 
+  // Sync open document state continuously into module-level 3-hour freeze cache
+  useEffect(() => {
+    if (!selectedFile) {
+      frozenViewerCache = null;
+      return;
+    }
+    frozenViewerCache = {
+      selectedFile,
+      imageSrc,
+      pdfDoc,
+      pdfTotalPages,
+      pdfCurrentPage,
+      activePdfCropPage,
+      pdfPageAspectRatio,
+      pdfPagesCache,
+      fileZoom,
+      scrollTop: viewerScrollTopRef.current,
+      scrollLeft: viewerScrollLeftRef.current,
+      updatedAt: Date.now(),
+    };
+  }, [
+    selectedFile,
+    imageSrc,
+    pdfDoc,
+    pdfTotalPages,
+    pdfCurrentPage,
+    activePdfCropPage,
+    pdfPageAspectRatio,
+    pdfPagesCache,
+    fileZoom,
+  ]);
+
+  // Restore exact scroll offset & active page on mount (returning from another section) or exiting Preview Mode
+  useEffect(() => {
+    if (isPreviewMode || !imageSrc || !imageContainerRef.current) return;
+
+    const targetPage = pdfCurrentPageRef.current || 1;
+    const pageWidth = (fileZoomRef.current / 100) * 620;
+    const singleSlotHeight = pageWidth * pdfPageAspectRatioRef.current + 24;
+    const fallbackScrollTop = pdfDoc && targetPage > 1 ? (targetPage - 1) * singleSlotHeight : 0;
+    const targetScrollTop =
+      viewerScrollTopRef.current > 0 ? viewerScrollTopRef.current : fallbackScrollTop;
+    const targetScrollLeft = viewerScrollLeftRef.current || 0;
+
+    if (targetScrollTop <= 0 && targetScrollLeft <= 0 && targetPage <= 1) {
+      isRestoringScrollRef.current = false;
+      return;
+    }
+
+    isRestoringScrollRef.current = true;
+    if (pdfDoc && targetPage >= 1) {
+      queuePdfPage(targetPage, true);
+      if (targetPage + 1 <= pdfTotalPages) queuePdfPage(targetPage + 1, false);
+      if (targetPage - 1 >= 1) queuePdfPage(targetPage - 1, false);
+    }
+
+    const applyScroll = () => {
+      if (!imageContainerRef.current) return;
+      imageContainerRef.current.scrollTo({
+        top: targetScrollTop,
+        left: targetScrollLeft,
+        behavior: "instant" as ScrollBehavior,
+      });
+    };
+
+    applyScroll();
+    const rafId = requestAnimationFrame(applyScroll);
+    const t1 = setTimeout(applyScroll, 60);
+    const t2 = setTimeout(() => {
+      applyScroll();
+      isRestoringScrollRef.current = false;
+    }, 280);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [isPreviewMode, Boolean(imageSrc), Boolean(pdfDoc), pdfTotalPages, queuePdfPage]);
+
   // Continuous Scrolling: Lazy-load visible PDF pages & track current active page on scroll
   useEffect(() => {
     if (!pdfDoc || pdfTotalPages <= 0 || !imageContainerRef.current) return;
@@ -589,6 +750,7 @@ export default function ExamBuilderPage() {
       // 2. Observer to detect active visible page, sync toolbar, and pre-buffer neighbors
       activeObserver = new IntersectionObserver(
         (entries) => {
+          if (isRestoringScrollRef.current) return;
           let maxRatio = 0;
           let visiblePage = 0;
           entries.forEach((entry) => {
@@ -599,8 +761,13 @@ export default function ExamBuilderPage() {
             }
           });
           if (visiblePage > 0) {
+            pdfCurrentPageRef.current = visiblePage;
             setPdfCurrentPage(visiblePage);
             setPdfPageInput(String(visiblePage));
+            if (frozenViewerCache) {
+              frozenViewerCache.pdfCurrentPage = visiblePage;
+              frozenViewerCache.updatedAt = Date.now();
+            }
 
             // Priority queue current page if not yet cached
             if (!pdfPagesCacheRef.current[visiblePage]) {
@@ -725,6 +892,13 @@ export default function ExamBuilderPage() {
   // =========================================================================
   const ACTIVE_SCREEN_STORAGE_KEY = "exam_builder_active_screen_v2";
   const isInitialMountDoneRef = useRef<boolean>(false);
+  const pendingRestoreViewerRef = useRef<{
+    fileName: string;
+    page: number;
+    scrollTop: number;
+    scrollLeft: number;
+    zoom: number;
+  } | null>(null);
 
   // Reset to a clean fresh exam
   const handleResetToNewExam = useCallback((showNotice: boolean = true) => {
@@ -733,6 +907,20 @@ export default function ExamBuilderPage() {
     setPaperTitle("");
     setSelectedFile(null);
     setImageSrc(null);
+    setPdfDoc(null);
+    pdfDocRef.current = null;
+    setPdfTotalPages(1);
+    setPdfCurrentPage(1);
+    pdfCurrentPageRef.current = 1;
+    setPdfPageInput("1");
+    setActivePdfCropPage(1);
+    activePdfCropPageRef.current = 1;
+    setPdfPagesCache({});
+    pdfPagesCacheRef.current = {};
+    renderQueueRef.current = [];
+    viewerScrollTopRef.current = 0;
+    viewerScrollLeftRef.current = 0;
+    frozenViewerCache = null;
     setCompletedCrop(null);
     setCurrentCrop(null);
     generateNewExamCode();
@@ -839,9 +1027,51 @@ export default function ExamBuilderPage() {
           if (parsed.watermarkOpacity !== undefined) setWatermarkOpacity(parsed.watermarkOpacity);
           if (Array.isArray(parsed.freeCanvasImages)) setFreeCanvasImages(parsed.freeCanvasImages);
           if (Array.isArray(parsed.strokes)) setStrokes(parsed.strokes);
-          if (parsed.selectedFile !== undefined) setSelectedFile(parsed.selectedFile);
-          if (parsed.imageSrc !== undefined) setImageSrc(parsed.imageSrc);
           if (parsed.editingExamId !== undefined) setEditingExamId(parsed.editingExamId);
+
+          // Only restore viewer from localStorage if in-memory freeze cache wasn't already active
+          // AND the cached viewer timestamp is within the 3-hour TTL window
+          const hasInMemoryFreeze = Boolean(getValidFrozenViewerCache()?.selectedFile);
+          if (!hasInMemoryFreeze) {
+            const viewerCachedAt = Number(parsed.viewerCachedAt) || 0;
+            const isViewerCacheFresh =
+              viewerCachedAt > 0 && Date.now() - viewerCachedAt <= VIEWER_FREEZE_TTL_MS;
+
+            if (isViewerCacheFresh && parsed.selectedFile) {
+              const restoredPage = Math.max(1, Number(parsed.pdfCurrentPage) || 1);
+              const restoredZoom = Math.max(50, Math.min(250, Number(parsed.fileZoom) || 100));
+              const restoredScrollTop = Math.max(0, Number(parsed.viewerScrollTop) || 0);
+              const restoredScrollLeft = Math.max(0, Number(parsed.viewerScrollLeft) || 0);
+
+              setSelectedFile(parsed.selectedFile);
+              selectedFileRef.current = parsed.selectedFile;
+              setFileZoom(restoredZoom);
+              fileZoomRef.current = restoredZoom;
+              setPdfCurrentPage(restoredPage);
+              pdfCurrentPageRef.current = restoredPage;
+              setPdfPageInput(String(restoredPage));
+              setActivePdfCropPage(restoredPage);
+              activePdfCropPageRef.current = restoredPage;
+              viewerScrollTopRef.current = restoredScrollTop;
+              viewerScrollLeftRef.current = restoredScrollLeft;
+
+              if (
+                parsed.imageSrc &&
+                !String(parsed.imageSrc).startsWith("blob:") &&
+                !String(parsed.selectedFile).toLowerCase().endsWith(".pdf")
+              ) {
+                setImageSrc(parsed.imageSrc);
+              }
+
+              pendingRestoreViewerRef.current = {
+                fileName: parsed.selectedFile,
+                page: restoredPage,
+                scrollTop: restoredScrollTop,
+                scrollLeft: restoredScrollLeft,
+                zoom: restoredZoom,
+              };
+            }
+          }
 
           if (parsed.examQuestions?.length > 0 || parsed.archiveExamName || parsed.paperTitle) {
             setSaveStatus("تمت استعادة جلسة العمل الحالية تلقائياً");
@@ -859,6 +1089,9 @@ export default function ExamBuilderPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!isInitialMountDoneRef.current) return;
+
+    const persistableImageSrc =
+      imageSrc && !imageSrc.startsWith("blob:") && imageSrc.length < 1000000 ? imageSrc : null;
 
     try {
       const screenState = {
@@ -880,12 +1113,17 @@ export default function ExamBuilderPage() {
         })),
         strokes,
         selectedFile,
-        imageSrc: (imageSrc && imageSrc.length < 1000000) ? imageSrc : null,
+        imageSrc: persistableImageSrc,
+        pdfCurrentPage,
+        fileZoom,
+        viewerScrollTop: viewerScrollTopRef.current,
+        viewerScrollLeft: viewerScrollLeftRef.current,
+        viewerCachedAt: selectedFile ? Date.now() : 0,
         editingExamId,
       };
       localStorage.setItem(ACTIVE_SCREEN_STORAGE_KEY, JSON.stringify(screenState));
     } catch (e) {
-      // If quota exceeded due to large image, guarantee questions & titles are still persisted
+      // If quota exceeded due to large image, guarantee questions, titles & viewer page are still persisted
       try {
         const compactState = {
           examQuestions,
@@ -899,6 +1137,11 @@ export default function ExamBuilderPage() {
           examDirection,
           choiceFormat,
           selectedFile,
+          pdfCurrentPage,
+          fileZoom,
+          viewerScrollTop: viewerScrollTopRef.current,
+          viewerScrollLeft: viewerScrollLeftRef.current,
+          viewerCachedAt: selectedFile ? Date.now() : 0,
           editingExamId,
         };
         localStorage.setItem(ACTIVE_SCREEN_STORAGE_KEY, JSON.stringify(compactState));
@@ -923,6 +1166,8 @@ export default function ExamBuilderPage() {
     strokes,
     selectedFile,
     imageSrc,
+    pdfCurrentPage,
+    fileZoom,
     editingExamId,
   ]);
 
@@ -1093,10 +1338,12 @@ export default function ExamBuilderPage() {
   const processDocumentFileUpload = async (file: File, isReplace = false) => {
     if (!file) return;
 
-    // Reset crop and lasso
+    // Reset crop, lasso, and scroll offsets for the newly opened document
     setCompletedCrop(null);
     setCurrentCrop(null);
     setLassoPoints([]);
+    viewerScrollTopRef.current = 0;
+    viewerScrollLeftRef.current = 0;
 
     const isPdf = file.name.toLowerCase().endsWith(".pdf");
 
@@ -1112,6 +1359,7 @@ export default function ExamBuilderPage() {
         pdfDocRef.current = pdf;
         setPdfTotalPages(pdf.numPages);
         setPdfCurrentPage(1);
+        pdfCurrentPageRef.current = 1;
         setPdfPageInput("1");
         setActivePdfCropPage(1);
         activePdfCropPageRef.current = 1;
@@ -1130,13 +1378,18 @@ export default function ExamBuilderPage() {
           }
           return blobUrl;
         });
+        if (imageContainerRef.current) {
+          imageContainerRef.current.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+        }
       } catch (err) {
         console.warn("Could not render PDF via PDF.js on client:", err);
       }
     } else {
       setPdfDoc(null);
+      pdfDocRef.current = null;
       setPdfTotalPages(1);
       setPdfCurrentPage(1);
+      pdfCurrentPageRef.current = 1;
       setPdfPageInput("1");
       setPdfPagesCache({});
       pdfPagesCacheRef.current = {};
@@ -1147,6 +1400,9 @@ export default function ExamBuilderPage() {
         if (dataUrl) {
           setImageSrc(dataUrl);
           setSelectedFile(file.name);
+          if (imageContainerRef.current) {
+            imageContainerRef.current.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+          }
         }
       };
       reader.readAsDataURL(file);
@@ -1232,85 +1488,211 @@ export default function ExamBuilderPage() {
     }
   };
 
-  // Selection from Dropdown, Full Modal, or Local PC Store
-  const handleSelectUploadedFile = useCallback(async (f: UploadedFileItem) => {
-    setSelectedFile(f.name);
-    setCompletedCrop(null);
-    setCurrentCrop(null);
-    setLassoPoints([]);
-
-    try {
-      const record =
-        (f.id ? await getLocalPcFileById(f.id) : null) ||
-        (await getLocalPcFileByName(f.name));
-
-      if (record && record.blob) {
-        const blobUrl = URL.createObjectURL(record.blob);
-        if (f.name.toLowerCase().endsWith(".pdf")) {
-          setSaveStatus(`جاري تجهيز مستند PDF من جهازك: ${f.name}...`);
-          const pdfjs = await loadPdfJs();
-          const arrayBuffer = await record.blob.arrayBuffer();
-          const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-          const pdf = await loadingTask.promise;
-          setPdfDoc(pdf);
-          pdfDocRef.current = pdf;
-          setPdfTotalPages(pdf.numPages);
-          setPdfCurrentPage(1);
-          setPdfPageInput("1");
-          setActivePdfCropPage(1);
-          activePdfCropPageRef.current = 1;
-          setPdfPagesCache({});
-          pdfPagesCacheRef.current = {};
-          renderQueueRef.current = [];
-          queuePdfPage(1, true);
-          if (pdf.numPages > 1) queuePdfPage(2, false);
-          if (pdf.numPages > 2) queuePdfPage(3, false);
-          setImageSrc((prev) => {
-            if (prev && prev.startsWith("blob:")) {
-              try {
-                URL.revokeObjectURL(prev);
-              } catch {}
-            }
-            return blobUrl;
-          });
-          setSaveStatus(`تم فتح المستند من جهازك: ${f.name} (${pdf.numPages} صفحة)`);
-        } else {
-          setPdfDoc(null);
-          setPdfTotalPages(1);
-          setPdfPagesCache({});
-          pdfPagesCacheRef.current = {};
-          setImageSrc(blobUrl);
-          setSaveStatus(`تم فتح المستند من جهازك: ${f.name}`);
-        }
+  // Selection from Dropdown, Full Modal, or Local PC Store (with optional page & scroll resume)
+  const handleSelectUploadedFile = useCallback(
+    async (
+      f: UploadedFileItem,
+      restoreOptions?: {
+        initialPage?: number;
+        initialScrollTop?: number;
+        initialScrollLeft?: number;
+        silent?: boolean;
       }
-    } catch (err) {
-      console.warn("Failed to open local PC file:", err);
-    }
+    ) => {
+      setSelectedFile(f.name);
+      selectedFileRef.current = f.name;
+      setCompletedCrop(null);
+      setCurrentCrop(null);
+      setLassoPoints([]);
 
-    setIsFileDropdownOpen(false);
-    setIsAllFilesModalOpen(false);
-    setTimeout(() => setSaveStatus(null), 2500);
-  }, [queuePdfPage]);
+      const targetInitialPage = Math.max(1, restoreOptions?.initialPage || 1);
+      const targetInitialScrollTop = Math.max(0, restoreOptions?.initialScrollTop || 0);
+      const targetInitialScrollLeft = Math.max(0, restoreOptions?.initialScrollLeft || 0);
 
-  // Auto-open local file when navigating with ?localFile=... or when restoring selectedFile on refresh
+      viewerScrollTopRef.current = targetInitialScrollTop;
+      viewerScrollLeftRef.current = targetInitialScrollLeft;
+
+      try {
+        const record =
+          (f.id ? await getLocalPcFileById(f.id) : null) ||
+          (await getLocalPcFileByName(f.name));
+
+        if (record && record.blob) {
+          const blobUrl = URL.createObjectURL(record.blob);
+          if (f.name.toLowerCase().endsWith(".pdf")) {
+            if (!restoreOptions?.silent) {
+              setSaveStatus(`جاري تجهيز مستند PDF من جهازك: ${f.name}...`);
+            }
+            const pdfjs = await loadPdfJs();
+            const arrayBuffer = await record.blob.arrayBuffer();
+            const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+            const pdf = await loadingTask.promise;
+            const startPage = Math.max(1, Math.min(pdf.numPages, targetInitialPage));
+
+            isRestoringScrollRef.current = true;
+            setPdfDoc(pdf);
+            pdfDocRef.current = pdf;
+            setPdfTotalPages(pdf.numPages);
+            setPdfCurrentPage(startPage);
+            pdfCurrentPageRef.current = startPage;
+            setPdfPageInput(String(startPage));
+            setActivePdfCropPage(startPage);
+            activePdfCropPageRef.current = startPage;
+            setPdfPagesCache({});
+            pdfPagesCacheRef.current = {};
+            renderQueueRef.current = [];
+
+            // Render resumed target page first (e.g. Page 30), then adjacent pages
+            queuePdfPage(startPage, true);
+            if (startPage + 1 <= pdf.numPages) queuePdfPage(startPage + 1, false);
+            if (startPage - 1 >= 1) queuePdfPage(startPage - 1, false);
+            if (startPage + 2 <= pdf.numPages) queuePdfPage(startPage + 2, false);
+
+            setImageSrc((prev) => {
+              if (prev && prev.startsWith("blob:")) {
+                try {
+                  URL.revokeObjectURL(prev);
+                } catch {}
+              }
+              return blobUrl;
+            });
+
+            const pageWidth = (fileZoomRef.current / 100) * 620;
+            const singleSlotHeight = pageWidth * pdfPageAspectRatioRef.current + 24;
+            const computedScrollTop =
+              targetInitialScrollTop > 0
+                ? targetInitialScrollTop
+                : (startPage - 1) * singleSlotHeight;
+            viewerScrollTopRef.current = computedScrollTop;
+
+            setTimeout(() => {
+              if (imageContainerRef.current) {
+                imageContainerRef.current.scrollTo({
+                  top: computedScrollTop,
+                  left: targetInitialScrollLeft,
+                  behavior: "instant" as ScrollBehavior,
+                });
+              }
+            }, 50);
+            setTimeout(() => {
+              if (imageContainerRef.current) {
+                imageContainerRef.current.scrollTo({
+                  top: computedScrollTop,
+                  left: targetInitialScrollLeft,
+                  behavior: "instant" as ScrollBehavior,
+                });
+              }
+              isRestoringScrollRef.current = false;
+            }, 280);
+
+            if (!restoreOptions?.silent) {
+              setSaveStatus(
+                startPage > 1
+                  ? `تم استئناف المستند "${f.name}" عند صفحة ${startPage} من ${pdf.numPages}`
+                  : `تم فتح المستند من جهازك: ${f.name} (${pdf.numPages} صفحة)`
+              );
+            }
+          } else {
+            isRestoringScrollRef.current = true;
+            setPdfDoc(null);
+            pdfDocRef.current = null;
+            setPdfTotalPages(1);
+            setPdfCurrentPage(1);
+            pdfCurrentPageRef.current = 1;
+            setPdfPageInput("1");
+            setPdfPagesCache({});
+            pdfPagesCacheRef.current = {};
+            setImageSrc(blobUrl);
+
+            setTimeout(() => {
+              if (imageContainerRef.current) {
+                imageContainerRef.current.scrollTo({
+                  top: targetInitialScrollTop,
+                  left: targetInitialScrollLeft,
+                  behavior: "instant" as ScrollBehavior,
+                });
+              }
+              isRestoringScrollRef.current = false;
+            }, 150);
+
+            if (!restoreOptions?.silent) {
+              setSaveStatus(`تم فتح المستند من جهازك: ${f.name}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to open local PC file:", err);
+        isRestoringScrollRef.current = false;
+      }
+
+      setIsFileDropdownOpen(false);
+      setIsAllFilesModalOpen(false);
+      if (!restoreOptions?.silent) {
+        setTimeout(() => setSaveStatus(null), 2500);
+      }
+    },
+    [queuePdfPage]
+  );
+
+  // Auto-open local file when navigating with ?localFile=... or when restoring cached viewer on refresh (within 3h TTL)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const localFileName = params.get("localFile") || params.get("name");
-    const targetName = localFileName || selectedFileRef.current;
-    if (!targetName) return;
 
-    // Only auto-load if pdfDoc/imageSrc isn't already loaded for this file
-    if (!pdfDocRef.current || localFileName) {
+    if (localFileName) {
+      // Clean URL query parameter so future route returns don't reset to page 1
+      params.delete("localFile");
+      params.delete("name");
+      const remainingQuery = params.toString();
+      window.history.replaceState(
+        {},
+        "",
+        remainingQuery ? `/exam-builder?${remainingQuery}` : "/exam-builder"
+      );
+
+      const frozen = getValidFrozenViewerCache();
+      if (frozen && frozen.selectedFile === localFileName && (pdfDocRef.current || imageSrc)) {
+        return;
+      }
+
       handleSelectUploadedFile({
         id: "",
-        name: targetName,
-        type: targetName.toLowerCase().endsWith(".pdf") ? "pdf" : "image",
+        name: localFileName,
+        type: localFileName.toLowerCase().endsWith(".pdf") ? "pdf" : "image",
         size: "",
         date: "",
       });
+      return;
     }
-  }, [handleSelectUploadedFile]);
+
+    // If in-memory freeze cache already restored the open document, nothing to reload
+    if (getValidFrozenViewerCache()?.selectedFile && (pdfDocRef.current || imageSrc)) {
+      pendingRestoreViewerRef.current = null;
+      return;
+    }
+
+    // Otherwise, if browser was refreshed within the 3-hour TTL window, reopen from IndexedDB at exact page & scroll
+    if (pendingRestoreViewerRef.current) {
+      const restoreInfo = pendingRestoreViewerRef.current;
+      pendingRestoreViewerRef.current = null;
+      handleSelectUploadedFile(
+        {
+          id: "",
+          name: restoreInfo.fileName,
+          type: restoreInfo.fileName.toLowerCase().endsWith(".pdf") ? "pdf" : "image",
+          size: "",
+          date: "",
+        },
+        {
+          initialPage: restoreInfo.page,
+          initialScrollTop: restoreInfo.scrollTop,
+          initialScrollLeft: restoreInfo.scrollLeft,
+          silent: true,
+        }
+      );
+    }
+  }, [handleSelectUploadedFile, imageSrc]);
 
   // Drag and Drop files onto Document Viewer without flickering
   const dragCounterRef = useRef<number>(0);
@@ -3672,43 +4054,59 @@ export default function ExamBuilderPage() {
       >
         {/* ======================================================== */}
         {/* 1. RIGHT PANE: Source File Viewer (Draggable width) */}
+        {/* Kept mounted during Preview Mode so PDF & scroll stay frozen */}
         {/* ======================================================== */}
-        {!isPreviewMode && (
-          <section
-            style={{ width: `${viewerWidthPercent}%` }}
-            className={`w-full h-full flex flex-col bg-white rounded-2xl shadow-xs overflow-hidden border transition-all no-print shrink-0 ${
-              isDragOverViewer ? "border-2 border-dashed border-blue-500 bg-blue-50/20" : "border-slate-200/80"
-            }`}
-          >
-            {/* Top Header of Document Viewer: Real File Dropdown + Upload */}
-            <div className="p-3 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
-              {/* Interactive Real File Selector Dropdown */}
-              <div className="relative flex-1 max-w-[280px] flex items-center gap-1">
+        <section
+          style={isPreviewMode ? undefined : { width: `${viewerWidthPercent}%` }}
+          className={`${
+            isPreviewMode ? "hidden" : "w-full h-full flex flex-col"
+          } bg-white rounded-2xl shadow-xs overflow-hidden border transition-all no-print shrink-0 ${
+            isDragOverViewer ? "border-2 border-dashed border-blue-500 bg-blue-50/20" : "border-slate-200/80"
+          }`}
+        >
+          {/* Top Header of Document Viewer: Real File Dropdown + Upload */}
+          <div className="p-3 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+            {/* Interactive Real File Selector Dropdown */}
+            <div className="relative flex-1 max-w-[280px] flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setIsFileDropdownOpen(!isFileDropdownOpen)}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer text-right"
+              >
+                <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                <span className="truncate flex-1">{selectedFile || "اختر مستنداً أو ارفع ملفاً..."}</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              </button>
+
+              {selectedFile && (
                 <button
                   type="button"
-                  onClick={() => setIsFileDropdownOpen(!isFileDropdownOpen)}
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer text-right"
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setImageSrc(null);
+                    setPdfDoc(null);
+                    pdfDocRef.current = null;
+                    setPdfTotalPages(1);
+                    setPdfCurrentPage(1);
+                    pdfCurrentPageRef.current = 1;
+                    setPdfPageInput("1");
+                    setActivePdfCropPage(1);
+                    activePdfCropPageRef.current = 1;
+                    setPdfPagesCache({});
+                    pdfPagesCacheRef.current = {};
+                    renderQueueRef.current = [];
+                    viewerScrollTopRef.current = 0;
+                    viewerScrollLeftRef.current = 0;
+                    frozenViewerCache = null;
+                    setCompletedCrop(null);
+                    setCurrentCrop(null);
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer shrink-0"
+                  title="إغلاق المستند الحالي"
                 >
-                  <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span className="truncate flex-1">{selectedFile || "اختر مستنداً أو ارفع ملفاً..."}</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
-
-                {selectedFile && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedFile(null);
-                      setImageSrc(null);
-                      setCompletedCrop(null);
-                      setCurrentCrop(null);
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer shrink-0"
-                    title="إغلاق المستند الحالي"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              )}
 
                 {/* Dropdown Menu: Search bar + Latest 4 files + View All Modal trigger */}
                 {isFileDropdownOpen && (
@@ -4525,50 +4923,49 @@ export default function ExamBuilderPage() {
                 )}
               </div>
             </div>
-          </section>
-        )}
+        </section>
 
         {/* ======================================================== */}
         {/* Draggable Vertical Splitter / Extend Side View Handle */}
         {/* ======================================================== */}
-        {!isPreviewMode && (
+        <div
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsResizingPanes(true);
+          }}
+          onTouchStart={() => setIsResizingPanes(true)}
+          className={`${
+            isPreviewMode ? "hidden" : "hidden lg:flex"
+          } flex-col items-center justify-center relative z-20 w-4 -mx-1 hover:w-5 transition-all cursor-col-resize group select-none shrink-0 ${
+            isResizingPanes ? "w-5" : ""
+          }`}
+          title="اسحب لتوسيع أو تضييق حجم المعاينة الجانبية للمستند"
+        >
+          {/* Dividing vertical guide line */}
           <div
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsResizingPanes(true);
-            }}
-            onTouchStart={() => setIsResizingPanes(true)}
-            className={`hidden lg:flex flex-col items-center justify-center relative z-20 w-4 -mx-1 hover:w-5 transition-all cursor-col-resize group select-none shrink-0 ${
-              isResizingPanes ? "w-5" : ""
+            className={`w-1 h-full rounded-full transition-colors ${
+              isResizingPanes ? "bg-blue-600 ring-4 ring-blue-500/20" : "bg-slate-300 group-hover:bg-blue-500"
             }`}
-            title="اسحب لتوسيع أو تضييق حجم المعاينة الجانبية للمستند"
-          >
-            {/* Dividing vertical guide line */}
-            <div
-              className={`w-1 h-full rounded-full transition-colors ${
-                isResizingPanes ? "bg-blue-600 ring-4 ring-blue-500/20" : "bg-slate-300 group-hover:bg-blue-500"
-              }`}
-            />
+          />
 
-            {/* Floating Handle Pill with Red/Blue Double Arrows matching user screenshot */}
-            <div
-              className={`absolute top-1/2 -translate-y-1/2 flex items-center justify-center gap-0.5 px-1 py-3 rounded-full bg-white border shadow-md transition-transform ${
-                isResizingPanes
-                  ? "border-blue-600 text-blue-600 scale-110 shadow-lg ring-2 ring-blue-400"
-                  : "border-slate-300 text-slate-600 group-hover:border-blue-500 group-hover:text-blue-600"
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-                <polyline points="9 18 3 12 9 6" />
-              </svg>
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-                <polyline points="15 18 21 12 15 6" />
-              </svg>
-            </div>
+          {/* Floating Handle Pill with Red/Blue Double Arrows matching user screenshot */}
+          <div
+            className={`absolute top-1/2 -translate-y-1/2 flex items-center justify-center gap-0.5 px-1 py-3 rounded-full bg-white border shadow-md transition-transform ${
+              isResizingPanes
+                ? "border-blue-600 text-blue-600 scale-110 shadow-lg ring-2 ring-blue-400"
+                : "border-slate-300 text-slate-600 group-hover:border-blue-500 group-hover:text-blue-600"
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+              <polyline points="9 18 3 12 9 6" />
+            </svg>
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+              <polyline points="15 18 21 12 15 6" />
+            </svg>
           </div>
-        )}
+        </div>
 
         {/* ======================================================== */}
         {/* 2. LEFT PANE: Physical A4 Exam Canvas */}
