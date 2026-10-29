@@ -131,6 +131,7 @@ const STORE_FILE = path.join(DATA_DIR, "tenants.json");
 const globalForTenantsRepo = globalThis as unknown as {
   __tenantsStoreCache?: { mtimeMs: number; list: StoredTenant[] };
   __tenantLookupCache?: Map<string, { tenant: StoredTenant | null; expiresAt: number; mtimeMs: number }>;
+  __tenantsMtimeState?: { mtimeMs: number; checkedAt: number };
 };
 
 function getLookupCache() {
@@ -140,11 +141,24 @@ function getLookupCache() {
   return globalForTenantsRepo.__tenantLookupCache;
 }
 
-function getStoreFileMtime(): number {
+/**
+ * Throttled file mtime check: executes `fs.statSync` at most once every 3 seconds
+ * across the entire Node.js process (regardless of how many hundreds of tenants or
+ * requests are active), ensuring 0 disk I/O overhead during high traffic while
+ * synchronizing Super Admin edits across processes within <= 3s.
+ */
+function getStoreFileMtime(force: boolean = false): number {
+  const now = Date.now();
+  const state = globalForTenantsRepo.__tenantsMtimeState;
+  if (!force && state && now - state.checkedAt < 3000) {
+    return state.mtimeMs;
+  }
   try {
-    return fs.existsSync(STORE_FILE) ? fs.statSync(STORE_FILE).mtimeMs : 0;
+    const mtimeMs = fs.existsSync(STORE_FILE) ? fs.statSync(STORE_FILE).mtimeMs : 0;
+    globalForTenantsRepo.__tenantsMtimeState = { mtimeMs, checkedAt: now };
+    return mtimeMs;
   } catch {
-    return 0;
+    return state?.mtimeMs ?? 0;
   }
 }
 
@@ -195,6 +209,7 @@ function saveStoreFile(tenants: StoredTenant[]): void {
     fs.writeFileSync(tmp, JSON.stringify(tenants, null, 2), "utf-8");
     fs.renameSync(tmp, STORE_FILE);
     globalForTenantsRepo.__tenantsStoreCache = undefined;
+    globalForTenantsRepo.__tenantsMtimeState = undefined;
     getLookupCache().clear();
   } catch (err) {
     console.error("Error saving local tenants store:", err);
@@ -311,7 +326,6 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
   const cleanPhone = phone.trim();
   if (!cleanPhone) return null;
 
-  const localList = ensureStoreFile();
   const currentMtime = getStoreFileMtime();
   const cacheKey = `phone:${cleanPhone}`;
   const cached = getLookupCache().get(cacheKey);
@@ -319,6 +333,7 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
     return cached.tenant;
   }
 
+  const localList = ensureStoreFile();
   const localMatch = localList.find((t) => t.phone === cleanPhone) || null;
 
   try {
@@ -370,7 +385,6 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
 
 export async function findTenantById(id: string): Promise<StoredTenant | null> {
   if (!id) return null;
-  const localList = ensureStoreFile();
   const currentMtime = getStoreFileMtime();
   const cacheKey = `id:${id}`;
   const cached = getLookupCache().get(cacheKey);
@@ -378,6 +392,7 @@ export async function findTenantById(id: string): Promise<StoredTenant | null> {
     return cached.tenant;
   }
 
+  const localList = ensureStoreFile();
   const localMatch = localList.find((t) => t.id === id) || null;
 
   try {
@@ -464,7 +479,6 @@ export async function findTenantByDomain(domain: string): Promise<StoredTenant |
   const cleanDomain = domain.trim().toLowerCase().split(":")[0];
   if (!cleanDomain || cleanDomain === "localhost" || cleanDomain === "127.0.0.1") return null;
 
-  const localList = ensureStoreFile();
   const currentMtime = getStoreFileMtime();
   const cacheKey = `domain:${cleanDomain}`;
   const cached = getLookupCache().get(cacheKey);
@@ -472,6 +486,7 @@ export async function findTenantByDomain(domain: string): Promise<StoredTenant |
     return cached.tenant;
   }
 
+  const localList = ensureStoreFile();
   const localMatch = localList.find((t) => (t.domain || "").toLowerCase() === cleanDomain) || null;
 
   try {

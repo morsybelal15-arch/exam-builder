@@ -7,6 +7,7 @@ import {
   createTenantRecord,
   findTenantById,
   findTenantByPhone,
+  findTenantByDomain,
   updateTenantRecord,
   deleteTenantRecord,
   getTenantsList,
@@ -104,6 +105,14 @@ export async function createTenantAction(data: CreateTenantInput) {
     const existing = await findTenantByPhone(cleanPhone);
     if (existing) {
       return { error: `رقم الهاتف ${cleanPhone} مسجل مسبقاً لعميل آخر.` };
+    }
+
+    // Check for existing domain collision
+    if (cleanDomain) {
+      const existingDomain = await findTenantByDomain(cleanDomain);
+      if (existingDomain) {
+        return { error: `النطاق الفرعي (${cleanDomain}) مستخدم مسبقاً لعميل آخر (${existingDomain.name}).` };
+      }
     }
 
     const tenant = await createTenantRecord({
@@ -254,6 +263,25 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
 
     const existingList = await getTenantsList();
     const existingTenant = existingList.find((t) => t.id === data.tenantId);
+
+    if (updatePayload.phone) {
+      const phoneConflict = existingList.find(
+        (t) => t.phone === updatePayload.phone && t.id !== data.tenantId
+      );
+      if (phoneConflict) {
+        return { error: `رقم الهاتف (${updatePayload.phone}) مسجل مسبقاً لعميل آخر (${phoneConflict.name}).` };
+      }
+    }
+
+    if (updatePayload.domain) {
+      const domainConflict = existingList.find(
+        (t) => (t.domain || "").toLowerCase() === updatePayload.domain && t.id !== data.tenantId
+      );
+      if (domainConflict) {
+        return { error: `النطاق الفرعي (${updatePayload.domain}) مستخدم مسبقاً لعميل آخر (${domainConflict.name}).` };
+      }
+    }
+
     const domainChanged =
       updatePayload.domain &&
       updatePayload.domain !== (existingTenant?.domain || "").toLowerCase();

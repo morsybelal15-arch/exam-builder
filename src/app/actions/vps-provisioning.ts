@@ -45,17 +45,24 @@ function b64(text: string): string {
  * + dedicated admin vhost) → Let's Encrypt for the admin domain → health checks.
  */
 function buildDeployScript(): string {
-  const adminHost = (process.env.ADMIN_HOST || DEFAULT_ADMIN_HOST).trim().toLowerCase();
+  const rawAdminHost = (process.env.ADMIN_HOST || DEFAULT_ADMIN_HOST).trim().toLowerCase();
+  const adminHost = rawAdminHost.replace(/[^a-z0-9.-]/g, "") || DEFAULT_ADMIN_HOST;
   const geminiKey = process.env.GEMINI_API_KEY || "";
-  const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const geminiKeys = process.env.GEMINI_API_KEYS || "";
+  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
   // Shared, non-secret runtime config. Mode / port / secrets come from ecosystem.config.js + .env.tenant/.env.admin.
-  const envLocal = `GEMINI_API_KEY="${geminiKey}"\nGEMINI_MODEL="${geminiModel}"\n`;
+  const envLocalLines = [
+    `GEMINI_API_KEY="${geminiKey}"`,
+    ...(geminiKeys ? [`GEMINI_API_KEYS="${geminiKeys}"`] : []),
+    `GEMINI_MODEL="${geminiModel}"`,
+  ];
+  const envLocal = envLocalLines.join("\n") + "\n";
 
   // Admin credentials are pushed from the deploying admin's own environment (never from git).
-  const adminPhone = process.env.ADMIN_PHONE || "";
-  const adminHash = process.env.ADMIN_PASSWORD_HASH || "";
-  const adminName = process.env.ADMIN_NAME || "";
+  const adminPhone = (process.env.ADMIN_PHONE || "").replace(/[\r\n]/g, "");
+  const adminHash = (process.env.ADMIN_PASSWORD_HASH || "").replace(/[\r\n]/g, "");
+  const adminName = (process.env.ADMIN_NAME || "").replace(/[\r\n]/g, "");
   const adminCreds =
     adminPhone && adminHash
       ? `ADMIN_PHONE=${adminPhone}\nADMIN_PASSWORD_HASH=${adminHash}\nADMIN_HOST=${adminHost}\n${adminName ? `ADMIN_NAME=${adminName}\n` : ""}`
@@ -82,7 +89,7 @@ fi
 
 echo "[2/6] Writing environment files..."
 rm -f .env
-if [ ! -f .env.local ] || [ -n "${geminiKey}" ]; then
+if [ ! -f .env.local ]; then
   echo '${b64(envLocal)}' | base64 -d > .env.local
 fi
 mkdir -p data/tenants

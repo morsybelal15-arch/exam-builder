@@ -20,7 +20,9 @@ export { generateUniqueStudentCode };
 
 const globalForMgmt = globalThis as unknown as {
   __mgmtStoreCache?: Map<string, any>;
+  __mgmtStoreMeta?: Map<string, { mtimeMs: number; checkedAt: number }>;
   __mgmtPendingFlushes?: Map<string, ReturnType<typeof setTimeout>>;
+  __mgmtExitHookRegistered?: boolean;
 };
 
 function getMgmtMemoryCache(): Map<string, any> {
@@ -28,6 +30,13 @@ function getMgmtMemoryCache(): Map<string, any> {
     globalForMgmt.__mgmtStoreCache = new Map();
   }
   return globalForMgmt.__mgmtStoreCache;
+}
+
+function getMgmtMetaCache(): Map<string, { mtimeMs: number; checkedAt: number }> {
+  if (!globalForMgmt.__mgmtStoreMeta) {
+    globalForMgmt.__mgmtStoreMeta = new Map();
+  }
+  return globalForMgmt.__mgmtStoreMeta;
 }
 
 function getPendingFlushes(): Map<string, ReturnType<typeof setTimeout>> {
@@ -461,25 +470,84 @@ function flushStoreToDiskSync(activeStorePath: string, store: ManagementStore): 
     const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tmpPath, serialized, "utf-8");
     fs.renameSync(tmpPath, activeStorePath);
+    try {
+      const st = fs.statSync(activeStorePath);
+      getMgmtMetaCache().set(activeStorePath, { mtimeMs: st.mtimeMs, checkedAt: Date.now() });
+    } catch {}
   } catch (err) {
     console.error("Error saving management store:", err);
   }
+}
+
+export function flushAllPendingManagementStores(): void {
+  const flushes = getPendingFlushes();
+  if (flushes.size === 0) return;
+  const memCache = getMgmtMemoryCache();
+  for (const [storePath, timer] of flushes.entries()) {
+    clearTimeout(timer);
+    flushes.delete(storePath);
+    const store = memCache.get(storePath);
+    if (store) {
+      flushStoreToDiskSync(storePath, store);
+    }
+  }
+}
+
+if (typeof process !== "undefined" && !globalForMgmt.__mgmtExitHookRegistered) {
+  globalForMgmt.__mgmtExitHookRegistered = true;
+  const onExit = () => {
+    try {
+      flushAllPendingManagementStores();
+    } catch {}
+  };
+  process.once("beforeExit", onExit);
+  process.once("SIGTERM", () => {
+    onExit();
+    process.exit(0);
+  });
+  process.once("SIGINT", () => {
+    onExit();
+    process.exit(0);
+  });
 }
 
 export function getManagementStore(tenantId?: string): ManagementStore {
   const key = sanitizeTenantKey(tenantId);
   const activeStorePath = resolveStorePath(tenantId);
   const memCache = getMgmtMemoryCache();
+  const metaCache = getMgmtMetaCache();
+  const flushes = getPendingFlushes();
   const cached = memCache.get(activeStorePath);
+
   if (cached) {
-    return cached;
+    // If there is an active write-behind flush in this process, RAM is strictly newer than disk
+    if (flushes.has(activeStorePath)) {
+      return cached;
+    }
+    // Throttle disk mtime check to at most once every 3s per tenant (zero load during bursts)
+    const meta = metaCache.get(activeStorePath);
+    const now = Date.now();
+    if (meta && now - meta.checkedAt < 3000) {
+      return cached;
+    }
+    try {
+      if (fs.existsSync(activeStorePath)) {
+        const st = fs.statSync(activeStorePath);
+        if (meta && st.mtimeMs === meta.mtimeMs) {
+          meta.checkedAt = now;
+          return cached;
+        }
+      }
+    } catch {}
   }
 
   try {
     if (fs.existsSync(activeStorePath)) {
+      const st = fs.statSync(activeStorePath);
       const data = fs.readFileSync(activeStorePath, "utf-8");
       const parsed = JSON.parse(data) as ManagementStore;
       memCache.set(activeStorePath, parsed);
+      metaCache.set(activeStorePath, { mtimeMs: st.mtimeMs, checkedAt: Date.now() });
       setCachedManagementStoreBytes(key, computeStoreActiveBytes(parsed));
       return parsed;
     }
@@ -544,6 +612,10 @@ export function saveManagementStore(
       const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
       await fs.promises.writeFile(tmpPath, serialized, "utf-8");
       await fs.promises.rename(tmpPath, activeStorePath);
+      try {
+        const st = await fs.promises.stat(activeStorePath);
+        getMgmtMetaCache().set(activeStorePath, { mtimeMs: st.mtimeMs, checkedAt: Date.now() });
+      } catch {}
     } catch (err) {
       console.error("Async management store flush failed, falling back to sync:", err);
       flushStoreToDiskSync(activeStorePath, store);
@@ -600,13 +672,26 @@ export function saveGroup(group: Partial<Group> & { name: string; teacher: strin
 
 export function deleteGroup(id: string): boolean {
   const store = getManagementStore();
+  const removedStudentIds = new Set(
+    store.students.filter((s) => s.groupId === id).map((s) => s.id)
+  );
+  const removedExamRecordIds = new Set(
+    store.examRecords.filter((e) => e.groupId === id).map((e) => e.id)
+  );
+
   store.groups = store.groups.filter((g) => g.id !== id);
-  // Also unassign or remove students
   store.students = store.students.filter((s) => s.groupId !== id);
-  store.financials = store.financials.filter((f) => f.groupId !== id);
-  store.attendance = store.attendance.filter((a) => a.groupId !== id);
+  store.financials = store.financials.filter(
+    (f) => f.groupId !== id && !removedStudentIds.has(f.studentId)
+  );
+  store.attendance = store.attendance.filter(
+    (a) => a.groupId !== id && !removedStudentIds.has(a.studentId)
+  );
   store.sessions = store.sessions.filter((s) => s.groupId !== id);
   store.examRecords = store.examRecords.filter((e) => e.groupId !== id);
+  store.studentGrades = (store.studentGrades || []).filter(
+    (gr) => !removedExamRecordIds.has(gr.examRecordId) && !removedStudentIds.has(gr.studentId)
+  );
   saveManagementStore(store);
   return true;
 }

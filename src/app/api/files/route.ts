@@ -3,8 +3,9 @@ import path from "node:path";
 import fs from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { getLocalUploadedFiles, addLocalUploadedFile, deleteLocalUploadedFile, getUploadsDir } from "@/lib/db";
+import { getLocalUploadedFiles, addLocalUploadedFile, deleteLocalUploadedFile, getUploadsDir, getTenantUsageStats } from "@/lib/db";
 import { requireApiSession } from "@/lib/auth";
+import { findTenantById } from "@/lib/tenants-repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,6 @@ export async function GET() {
 
     const rawFiles = getLocalUploadedFiles(session.id);
     const uploadsDir = getUploadsDir(session.id);
-    const defaultUploadsDir = getUploadsDir("default");
 
     const files = rawFiles.map((f: any) => {
       let fp = f.filepath;
@@ -42,9 +42,7 @@ export async function GET() {
         const diskName = fp.includes("?name=")
           ? decodeURIComponent(fp.split("?name=").pop() || f.name)
           : path.basename(f.name);
-        const diskPath = fs.existsSync(path.join(uploadsDir, diskName))
-          ? path.join(uploadsDir, diskName)
-          : path.join(defaultUploadsDir, diskName);
+        const diskPath = path.join(uploadsDir, diskName);
         if (fs.existsSync(diskPath)) {
           const stats = fs.statSync(diskPath);
           realSize = (stats.size / (1024 * 1024)).toFixed(1) + " ميجابايت";
@@ -70,6 +68,24 @@ export async function POST(req: NextRequest) {
     const uploadMode = req.headers.get("x-upload-mode") || "";
     const rawHeaderFileName = req.headers.get("x-file-name");
     const rawHeaderFileSize = req.headers.get("x-file-size");
+
+    if (session.role === "TENANT") {
+      const tenant = await findTenantById(session.id);
+      const limitBytes = Number(tenant?.storageLimitBytes) || 0;
+      if (tenant && limitBytes > 0) {
+        const usage = getTenantUsageStats(session.id);
+        const declaredSize = rawHeaderFileSize && !isNaN(Number(rawHeaderFileSize)) ? Number(rawHeaderFileSize) : 0;
+        if (usage.usedStorageBytes + declaredSize >= limitBytes) {
+          return NextResponse.json(
+            {
+              error:
+                "لقد وصلت إلى الحد الأقصى للمساحة السحابية المخصصة لباقتك. يرجى حذف بعض الاختبارات أو الملفات القديمة أو التواصل مع الدعم الفني.",
+            },
+            { status: 403 }
+          );
+        }
+      }
+    }
 
     // 0) Direct Binary Streaming Upload (Best for huge 200MB+ files)
     if (uploadMode === "stream" || contentType === "application/octet-stream" || rawHeaderFileName) {

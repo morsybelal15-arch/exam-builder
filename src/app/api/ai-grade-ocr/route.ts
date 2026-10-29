@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
-import { resolveApiKey, CANDIDATE_MODELS } from "@/lib/gemini";
+import { resolveApiKeyPool, CANDIDATE_MODELS } from "@/lib/gemini";
 import { getStudents, saveStudentGrade } from "@/lib/management-db";
 import { requireApiSession } from "@/lib/auth";
 
@@ -23,8 +23,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "الصورة الملتقطة مطلوبة" }, { status: 400 });
     }
 
-    const apiKey = resolveApiKey(requestApiKey);
-    if (!apiKey) {
+    const keyPool = resolveApiKeyPool(requestApiKey);
+    if (keyPool.length === 0) {
       return NextResponse.json(
         { error: "مفتاح Gemini API غير متوفر. يرجى ضبطه في الإعدادات أو ملف البيئة." },
         { status: 400 }
@@ -58,45 +58,50 @@ ${studentsContext || "لا توجد قائمة مسبقة، استخرج الا�
 }`;
 
     const { mimeType, data } = stripDataUrl(imageBase64);
-    const client = new GoogleGenAI({ apiKey });
 
     let parsedResult: any = null;
     let lastError: any = null;
 
-    for (const model of CANDIDATE_MODELS) {
-      try {
-        const response = await client.models.generateContent({
-          model,
-          contents: [
-            {
-              inlineData: {
-                mimeType,
-                data,
+    keyLoop: for (const apiKey of keyPool) {
+      const client = new GoogleGenAI({ apiKey });
+      for (const model of CANDIDATE_MODELS) {
+        try {
+          const response = await client.models.generateContent({
+            model,
+            contents: [
+              {
+                inlineData: {
+                  mimeType,
+                  data,
+                },
               },
+              "استخرج اسم الطالب والدرجة من هذه الورقة بناءً على التعليمات السابقة.",
+            ],
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              temperature: 0.1,
+              abortSignal: AbortSignal.timeout(12000),
             },
-            "استخرج اسم الطالب والدرجة من هذه الورقة بناءً على التعليمات السابقة.",
-          ],
-          config: {
-            systemInstruction,
-            responseMimeType: "application/json",
-            temperature: 0.1,
-            abortSignal: AbortSignal.timeout(12000),
-          },
-        });
+          });
 
-        const text = response.text;
-        if (text) {
-          // Parse JSON safely
-          let cleaned = text.trim();
-          if (cleaned.startsWith("```")) {
-            cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
+          const text = response.text;
+          if (text) {
+            let cleaned = text.trim();
+            if (cleaned.startsWith("```")) {
+              cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
+            }
+            parsedResult = JSON.parse(cleaned);
+            break keyLoop;
           }
-          parsedResult = JSON.parse(cleaned);
-          break;
+        } catch (err: any) {
+          lastError = err;
+          const msg = String(err?.message || err);
+          console.warn(`Model ${model} OCR failed:`, msg);
+          if (/api[_ ]?key|API_KEY_INVALID|401|403|429|quota|RESOURCE_EXHAUSTED/i.test(msg) && keyPool.length > 1) {
+            break; // switch to next API key in pool
+          }
         }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${model} OCR failed:`, err?.message || err);
       }
     }
 
@@ -104,16 +109,24 @@ ${studentsContext || "لا توجد قائمة مسبقة، استخرج الا�
       throw lastError || new Error("تعذر قراءة الورقة بواسطة الذكاء الاصطناعي");
     }
 
-    // Try fallback fuzzy match on student name if model didn't provide matchedStudentId
+    // Safe fallback match on student name/code if model didn't provide matchedStudentId
+    // Requires either exact code match or at least 2 name tokens with a unique student match
     if (!parsedResult.matchedStudentId && parsedResult.detectedStudentName && groupStudents.length > 0) {
-      const detected = parsedResult.detectedStudentName.trim().toLowerCase();
-      const match = groupStudents.find((s) => {
-        const name = s.name.trim().toLowerCase();
-        return name.includes(detected) || detected.includes(name) || name.split(" ")[0] === detected.split(" ")[0];
+      const detected = parsedResult.detectedStudentName.trim().toLowerCase().replace(/\s+/g, " ");
+      const detectedParts = detected.split(" ").filter(Boolean);
+      const candidates = groupStudents.filter((s) => {
+        const name = s.name.trim().toLowerCase().replace(/\s+/g, " ");
+        const code = (s.code || "").trim().toLowerCase();
+        if (code && detected === code) return true;
+        if (name === detected) return true;
+        if (detectedParts.length >= 2 && (name.startsWith(detected) || detected.startsWith(name))) {
+          return true;
+        }
+        return false;
       });
-      if (match) {
-        parsedResult.matchedStudentId = match.id;
-        parsedResult.matchedStudentName = match.name;
+      if (candidates.length === 1) {
+        parsedResult.matchedStudentId = candidates[0].id;
+        parsedResult.matchedStudentName = candidates[0].name;
       }
     }
 

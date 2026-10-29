@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { testGeminiKey } from "@/lib/gemini";
+import { testGeminiKey, resolveApiKeyPool } from "@/lib/gemini";
 import { requireApiSession } from "@/lib/auth";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,14 +9,22 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
   }
-  const headerKey = req.headers.get("x-gemini-key");
-  const envKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  const key = (headerKey || "").trim() || envKey;
+  const headerKey = (req.headers.get("x-gemini-key") || "").trim();
+  const serverPool = resolveApiKeyPool();
+  const hasEnvKey = serverPool.length > 0;
+  const activeKey = headerKey || serverPool[0] || "";
+  const canSeeServerKeyMask = session.role === "SUPER_ADMIN" || Boolean(headerKey);
 
   return NextResponse.json({
-    configured: Boolean(key && key.length > 10),
-    hasEnvKey: Boolean(envKey && envKey.length > 10),
-    keyMasked: key ? `${key.slice(0, 6)}...${key.slice(-4)}` : null,
+    configured: Boolean(activeKey && activeKey.length > 10),
+    hasEnvKey,
+    poolSize: serverPool.length,
+    keyMasked:
+      canSeeServerKeyMask && activeKey
+        ? `${activeKey.slice(0, 6)}...${activeKey.slice(-4)}`
+        : hasEnvKey
+          ? "مفعل على السيرفر"
+          : null,
   });
 }
 

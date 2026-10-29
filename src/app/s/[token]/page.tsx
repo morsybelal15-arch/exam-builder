@@ -20,7 +20,7 @@ import {
 import { getFullStudentProfile, getLocalTodayDate } from "@/lib/management-db";
 import { headers } from "next/headers";
 import { findTenantByDomain } from "@/lib/tenants-repository";
-import { setCurrentTenantId } from "@/lib/tenant-context";
+import { initTenantContextBox, setCurrentTenantId } from "@/lib/tenant-context";
 import ParentSectionsClient from "./ParentSectionsClient";
 import ParentShareButton from "./ParentShareButton";
 
@@ -33,6 +33,7 @@ interface PageProps {
 }
 
 async function resolveTenantFromRequestHost(): Promise<boolean> {
+  initTenantContextBox();
   try {
     const h = await headers();
     const host = (h.get("host") || "").split(":")[0].trim().toLowerCase();

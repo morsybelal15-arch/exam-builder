@@ -106,6 +106,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 
   const handleSelectSubscriptionType = (type: SubscriptionCategory) => {
     setSubscriptionType(type);
+    setEnabledFeatures(getDefaultFeaturesForCategory(type));
   };
 
   const toggleFeature = (featureId: string) => {

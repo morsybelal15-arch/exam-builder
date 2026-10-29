@@ -13,14 +13,21 @@ function getOcrCache(): Map<string, ExtractionResult> {
   return globalForGemini.__geminiOcrCache;
 }
 
-export const CANDIDATE_MODELS = [
-  process.env.GEMINI_MODEL,
-  "gemini-2.5-flash",
-  "gemini-flash-lite-latest",
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-  "gemini-3.8-flash",
-].filter(Boolean) as string[];
+const envModel =
+  process.env.GEMINI_MODEL && process.env.GEMINI_MODEL !== "gemini-3.5-flash-lite"
+    ? process.env.GEMINI_MODEL
+    : undefined;
+
+export const CANDIDATE_MODELS = Array.from(
+  new Set(
+    [
+      envModel,
+      "gemini-2.5-flash",
+      "gemini-flash-lite-latest",
+      "gemini-2.0-flash",
+    ].filter(Boolean) as string[]
+  )
+);
 
 export type QuestionType = "choice" | "trueFalse" | "essay" | "fillBlank";
 
@@ -344,6 +351,8 @@ async function callGeminiGenerate(
     totalTimeoutMs?: number;
     /** Max time for a single model attempt (ms). */
     perAttemptTimeoutMs?: number;
+    /** Whether to rotate across the server key pool on failure (default true). */
+    useKeyPool?: boolean;
   }
 ) {
   const totalTimeoutMs = params.totalTimeoutMs ?? 100_000;
@@ -362,12 +371,12 @@ async function callGeminiGenerate(
   }
   contents.push(params.prompt);
 
-  const keyPool = resolveApiKeyPool();
+  const keyPool = params.useKeyPool === false ? [] : resolveApiKeyPool();
   const clientsToTry =
     keyPool.length > 1 ? keyPool.map((k) => getClient(k)) : [client];
 
   for (const activeClient of clientsToTry) {
-    for (const model of CANDIDATE_MODELS) {
+    modelLoop: for (const model of CANDIDATE_MODELS) {
       // Try with minimal thinking first (much faster for OCR/structuring); if the model
       // rejects the thinking config, retry the same model without it.
       for (const useThinkingConfig of [true, false]) {
@@ -399,10 +408,14 @@ async function callGeminiGenerate(
           lastError = err;
           const msg = String(err?.message || err);
 
-          // Auth errors: if we have another key in the pool, break to next key; otherwise throw
+          // Auth or quota/rate-limit errors: immediately rotate to the next API key in the pool
           if (/api[_ ]?key|API_KEY_INVALID|401|403/i.test(msg)) {
-            if (clientsToTry.length > 1) break;
+            if (clientsToTry.length > 1) break modelLoop;
             throw err;
+          }
+          if (/429|quota|rate limit|RESOURCE_EXHAUSTED/i.test(msg) && clientsToTry.length > 1) {
+            console.warn(`[gemini] Key rate-limited on ${model}, rotating to next key in pool...`);
+            break modelLoop;
           }
 
           // Model doesn't accept the thinking config → retry same model without it
@@ -574,11 +587,12 @@ export async function refineQuestion(
 export async function testGeminiKey(apiKey: string): Promise<{ valid: boolean; model: string; error?: string }> {
   try {
     const client = getClient(apiKey);
-    const text = await callGeminiGenerate(client, {
+    await callGeminiGenerate(client, {
       systemInstruction: "أنت نظام فحص المفتاح. أجب حصراً بـ JSON: {\"status\": \"ok\"}",
       prompt: "ping",
       totalTimeoutMs: 20_000,
       perAttemptTimeoutMs: 10_000,
+      useKeyPool: false,
     });
     return { valid: true, model: CANDIDATE_MODELS[0] || "gemini-2.5-flash" };
   } catch (err: any) {

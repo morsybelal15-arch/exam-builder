@@ -45,6 +45,10 @@ export function getLastSessionFetchTime(): number {
 export function setCachedSession(data: any): void {
   if (typeof window === "undefined" || !data || !data.authenticated) return;
   const host = getHost();
+  const prevId = memorySessionCache?.data?.id;
+  if (prevId && data.id && prevId !== data.id) {
+    memoryPageCache.clear();
+  }
   const now = Date.now();
   memorySessionCache = { host, data, updatedAt: now };
   try {
@@ -55,6 +59,12 @@ export function setCachedSession(data: any): void {
   } catch {
     // ignore storage errors
   }
+}
+
+function getTenantScope(): string {
+  const session = getCachedSession();
+  const tid = session?.id || "default";
+  return `${getHost()}:${tid}`;
 }
 
 export function clearCachedSession(): void {
@@ -78,7 +88,7 @@ export function clearCachedSession(): void {
 
 export function getCachedPageData<T>(key: string): T | null {
   if (typeof window === "undefined") return null;
-  const scopedKey = `${PAGE_CACHE_PREFIX}${getHost()}:${key}`;
+  const scopedKey = `${PAGE_CACHE_PREFIX}${getTenantScope()}:${key}`;
   const mem = memoryPageCache.get(scopedKey);
   if (mem) return mem.data as T;
 
@@ -98,7 +108,7 @@ export function getCachedPageData<T>(key: string): T | null {
 
 export function setCachedPageData<T>(key: string, data: T): void {
   if (typeof window === "undefined") return;
-  const scopedKey = `${PAGE_CACHE_PREFIX}${getHost()}:${key}`;
+  const scopedKey = `${PAGE_CACHE_PREFIX}${getTenantScope()}:${key}`;
   const now = Date.now();
   memoryPageCache.set(scopedKey, { data, updatedAt: now });
   try {
@@ -110,7 +120,7 @@ export function setCachedPageData<T>(key: string, data: T): void {
 
 export function invalidateCachedPageData(keyPrefix?: string): void {
   if (typeof window === "undefined") return;
-  const hostPrefix = `${PAGE_CACHE_PREFIX}${getHost()}:${keyPrefix || ""}`;
+  const hostPrefix = `${PAGE_CACHE_PREFIX}${getTenantScope()}:${keyPrefix || ""}`;
   for (const k of Array.from(memoryPageCache.keys())) {
     if (k.startsWith(hostPrefix)) {
       memoryPageCache.delete(k);

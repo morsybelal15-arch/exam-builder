@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Phone, Lock, LogIn, Loader2, AlertCircle, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { clearCachedSession } from "@/lib/client-session-cache";
 
 export default function LoginForm({
   isAdmin = false,
@@ -21,6 +22,7 @@ export default function LoginForm({
   const [errorMessage, setErrorMessage] = useState<string | null>(initialBlockedMessage);
 
   React.useEffect(() => {
+    clearCachedSession();
     const blocked = new URLSearchParams(window.location.search).get("blocked");
     if (blocked) setErrorMessage(blocked);
   }, []);

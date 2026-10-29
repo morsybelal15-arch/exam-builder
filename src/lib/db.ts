@@ -48,7 +48,7 @@ const globalForDb = globalThis as unknown as {
     string,
     { examsCount: number; filesCount: number; usedStorageBytes: number; cachedAt: number }
   >;
-  __exam_builder_mgmt_bytes_cache__?: Map<string, number>;
+  __exam_builder_mgmt_bytes_cache__?: Map<string, { bytes: number; mtimeMs: number }>;
 };
 
 function getUsageCache() {
@@ -62,17 +62,19 @@ export function invalidateTenantUsageCache(tenantId?: string) {
   const cache = getUsageCache();
   if (!tenantId) {
     cache.clear();
+    globalForDb.__exam_builder_mgmt_bytes_cache__?.clear();
     return;
   }
   const key = sanitizeTenantKey(tenantId);
   cache.delete(key);
+  globalForDb.__exam_builder_mgmt_bytes_cache__?.delete(key);
 }
 
 export function setCachedManagementStoreBytes(tenantKey: string, bytes: number) {
   if (!globalForDb.__exam_builder_mgmt_bytes_cache__) {
     globalForDb.__exam_builder_mgmt_bytes_cache__ = new Map();
   }
-  globalForDb.__exam_builder_mgmt_bytes_cache__.set(tenantKey, bytes);
+  globalForDb.__exam_builder_mgmt_bytes_cache__.set(tenantKey, { bytes, mtimeMs: Date.now() });
   getUsageCache().delete(tenantKey);
 }
 
@@ -496,15 +498,18 @@ export function deleteLocalUploadedFile(id: string, tenantId?: string): any | nu
 }
 
 function computeManagementStoreBytes(tenantKey: string): number {
-  if (globalForDb.__exam_builder_mgmt_bytes_cache__?.has(tenantKey)) {
-    return globalForDb.__exam_builder_mgmt_bytes_cache__.get(tenantKey) || 0;
-  }
   try {
     const storeFile =
       !tenantKey || tenantKey === "default"
         ? path.join(dataDir, "management_store.json")
         : path.join(dataDir, "tenants", tenantKey, "management_store.json");
     if (!fs.existsSync(storeFile)) return 0;
+
+    const st = fs.statSync(storeFile);
+    const cached = globalForDb.__exam_builder_mgmt_bytes_cache__?.get(tenantKey);
+    if (cached && cached.mtimeMs >= st.mtimeMs) {
+      return cached.bytes;
+    }
 
     const raw = fs.readFileSync(storeFile, "utf-8");
     const parsed = JSON.parse(raw);
@@ -530,7 +535,10 @@ function computeManagementStoreBytes(tenantKey: string): number {
     if (!globalForDb.__exam_builder_mgmt_bytes_cache__) {
       globalForDb.__exam_builder_mgmt_bytes_cache__ = new Map();
     }
-    globalForDb.__exam_builder_mgmt_bytes_cache__.set(tenantKey, totalBytes);
+    globalForDb.__exam_builder_mgmt_bytes_cache__.set(tenantKey, {
+      bytes: totalBytes,
+      mtimeMs: st.mtimeMs,
+    });
     return totalBytes;
   } catch {
     return 0;

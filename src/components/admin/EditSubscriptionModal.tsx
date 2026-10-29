@@ -504,7 +504,10 @@ export default function EditSubscriptionModal({
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => setSubscriptionType("سنتر")}
+                  onClick={() => {
+                    setSubscriptionType("سنتر");
+                    setEnabledFeatures(getDefaultFeaturesForCategory("سنتر"));
+                  }}
                   className={`p-3 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
                     subscriptionType === "سنتر"
                       ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"
@@ -528,7 +531,10 @@ export default function EditSubscriptionModal({
 
                 <button
                   type="button"
-                  onClick={() => setSubscriptionType("معلم")}
+                  onClick={() => {
+                    setSubscriptionType("معلم");
+                    setEnabledFeatures(getDefaultFeaturesForCategory("معلم"));
+                  }}
                   className={`p-3 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
                     subscriptionType === "معلم"
                       ? "bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20"

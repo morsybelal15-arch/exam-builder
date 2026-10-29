@@ -6,7 +6,6 @@ interface TenantContextBox {
 
 const globalForTenant = globalThis as unknown as {
   __examBuilderTenantAls?: AsyncLocalStorage<TenantContextBox>;
-  __examBuilderLastTenantId?: string | null;
 };
 
 const tenantStorage =
@@ -32,7 +31,6 @@ export function initTenantContextBox(): TenantContextBox {
  */
 export function setCurrentTenantId(tenantId: string): void {
   if (!tenantId) return;
-  globalForTenant.__examBuilderLastTenantId = tenantId;
   const box = tenantStorage.getStore();
   if (box) {
     box.tenantId = tenantId;
@@ -46,17 +44,13 @@ export function setCurrentTenantId(tenantId: string): void {
  */
 export function getCurrentTenantId(): string | null {
   const box = tenantStorage.getStore();
-  if (box?.tenantId) {
-    return box.tenantId;
-  }
-  return globalForTenant.__examBuilderLastTenantId ?? null;
+  return box?.tenantId ?? null;
 }
 
 /**
  * Runs a callback within an explicit tenant ID context.
  */
 export function runWithTenantId<T>(tenantId: string, fn: () => T): T {
-  globalForTenant.__examBuilderLastTenantId = tenantId;
   return tenantStorage.run({ tenantId }, fn);
 }
 

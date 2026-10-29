@@ -55,8 +55,21 @@ function proxyLocation(port: number): string {
  * - withSsl=false: HTTP + ACME webroot (used before Let's Encrypt cert is issued)
  * - withSsl=true : HTTP->HTTPS redirect + full TLS 443 block
  */
+function sanitizeHostname(raw: string): string {
+  return (raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/[^a-z0-9.-]/g, "");
+}
+
+function sanitizeIdentifier(raw: string): string {
+  return (raw || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 export function generateNginxConfig(domain: string, withSsl = false): string {
-  const cleanDomain = domain.trim().toLowerCase();
+  const cleanDomain = sanitizeHostname(domain);
   const acme = `    location /.well-known/acme-challenge/ {
         root /var/www/html;
     }`;
@@ -126,6 +139,7 @@ ${proxyLocation(TENANT_APP_PORT)}
  *  - withSsl=true : HTTP->HTTPS redirect + TLS vhost
  */
 export function generateAdminNginx(host: string, withSsl: boolean): string {
+  const cleanHost = sanitizeHostname(host) || DEFAULT_ADMIN_HOST;
   const acme = `    location /.well-known/acme-challenge/ {
         root /var/www/html;
     }`;
@@ -135,7 +149,7 @@ export function generateAdminNginx(host: string, withSsl: boolean): string {
 server {
     listen 80;
     listen [::]:80;
-    server_name ${host};
+    server_name ${cleanHost};
 
     client_max_body_size 50M;
     add_header X-Robots-Tag "noindex, nofollow" always;
@@ -151,7 +165,7 @@ ${proxyLocation(ADMIN_APP_PORT)}
 server {
     listen 80;
     listen [::]:80;
-    server_name ${host};
+    server_name ${cleanHost};
 
 ${acme}
 
@@ -163,10 +177,10 @@ ${acme}
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name ${host};
+    server_name ${cleanHost};
 
-    ssl_certificate /etc/letsencrypt/live/${host}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${host}/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/${cleanHost}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${cleanHost}/privkey.pem;
 
     client_max_body_size 50M;
     add_header Strict-Transport-Security "max-age=31536000" always;
@@ -183,14 +197,16 @@ ${proxyLocation(ADMIN_APP_PORT)}
  * Generates the manual setup commands for a tenant domain (shown in the admin UI).
  */
 export function generateDockerConfig(domain: string, tenantId: string): string {
-  return `# VPS Deployment Configuration for ${domain}
+  const cleanDomain = sanitizeHostname(domain) || "tenant.oqabagency.com";
+  const cleanId = sanitizeIdentifier(tenantId) || "tenant";
+  return `# VPS Deployment Configuration for ${cleanDomain}
 # Run on VPS: ssh root@${HOSTINGER_VPS_CONFIG.ip}
-mkdir -p /var/www/tenants/${tenantId}
-cat << 'EOF' > /etc/nginx/sites-available/${domain}
-${generateNginxConfig(domain)}
+mkdir -p /var/www/tenants/${cleanId}
+cat << 'EOF' > /etc/nginx/sites-available/${cleanDomain}
+${generateNginxConfig(cleanDomain)}
 EOF
-ln -sf /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/
+ln -sf /etc/nginx/sites-available/${cleanDomain} /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
-certbot --nginx -d ${domain} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect
+certbot --nginx -d ${cleanDomain} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect
 `;
 }

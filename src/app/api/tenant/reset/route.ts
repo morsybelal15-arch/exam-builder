@@ -15,8 +15,12 @@ export async function POST(req: NextRequest) {
 
     const host = (req.headers.get("host") || "").split(":")[0].trim().toLowerCase();
     const domainTenant = host ? await findTenantByDomain(host) : null;
+    const allowedDomainId =
+      domainTenant?.id && (session.role === "SUPER_ADMIN" || domainTenant.id === session.id)
+        ? domainTenant.id
+        : null;
     const targetIds = Array.from(
-      new Set([session.id, domainTenant?.id].filter((id): id is string => Boolean(id)))
+      new Set([session.id, allowedDomainId].filter((id): id is string => Boolean(id)))
     );
 
     for (const tid of targetIds) {
@@ -29,8 +33,10 @@ export async function POST(req: NextRequest) {
       await updateTenantRecord(tid, { usedStorageBytes: 0 });
     }
 
-    // Also clear any orphan records that may have been written to the fallback "default" store
-    resetTenantManagementStore("default");
+    // Only Super Admin resets the fallback "default" store
+    if (session.role === "SUPER_ADMIN") {
+      resetTenantManagementStore("default");
+    }
 
     // 4. Wipe PostgreSQL exams & uploadedFiles if connected
     try {

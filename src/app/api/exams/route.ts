@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLocalExams, getLocalExamById, saveLocalExam, deleteLocalExam } from "@/lib/db";
+import { getLocalExams, getLocalExamById, saveLocalExam, deleteLocalExam, getTenantUsageStats } from "@/lib/db";
 import { requireApiSession } from "@/lib/auth";
+import { findTenantById } from "@/lib/tenants-repository";
 
 export async function GET(req: NextRequest) {
   try {
@@ -114,6 +115,33 @@ export async function POST(req: NextRequest) {
     } = body;
 
     const rawExtra = extraData ?? extra_data;
+    const serializedQuestions = typeof questions === "string" ? questions : JSON.stringify(questions || []);
+    const serializedModels = typeof models === "string" ? models : models ? JSON.stringify(models) : undefined;
+    const serializedExtra = typeof rawExtra === "string" ? rawExtra : rawExtra ? JSON.stringify(rawExtra) : undefined;
+
+    if (session.role === "TENANT") {
+      const tenant = await findTenantById(session.id);
+      const limitBytes = Number(tenant?.storageLimitBytes) || 0;
+      if (tenant && limitBytes > 0) {
+        const usage = getTenantUsageStats(session.id);
+        const existingExam = id ? getLocalExamById(id, session.id) : null;
+        const existingBytes = Number(existingExam?.size_bytes) || 0;
+        const incomingBytes =
+          Buffer.byteLength(serializedQuestions, "utf8") +
+          (serializedModels ? Buffer.byteLength(serializedModels, "utf8") : 0) +
+          (serializedExtra ? Buffer.byteLength(serializedExtra, "utf8") : 0);
+
+        if (usage.usedStorageBytes - existingBytes + incomingBytes > limitBytes) {
+          return NextResponse.json(
+            {
+              error:
+                "لقد وصلت إلى الحد الأقصى للمساحة السحابية المخصصة لباقتك. يرجى حذف بعض الاختبارات القديمة أو التواصل مع الدعم الفني لترقية المساحة.",
+            },
+            { status: 403 }
+          );
+        }
+      }
+    }
 
     saveLocalExam(
       {
@@ -124,9 +152,9 @@ export async function POST(req: NextRequest) {
         subject: subject || "عام",
         grade: grade || "مستوى عام",
         duration: duration || "ساعتان",
-        questions: typeof questions === "string" ? questions : JSON.stringify(questions || []),
-        models: typeof models === "string" ? models : models ? JSON.stringify(models) : undefined,
-        extra_data: typeof rawExtra === "string" ? rawExtra : rawExtra ? JSON.stringify(rawExtra) : undefined,
+        questions: serializedQuestions,
+        models: serializedModels,
+        extra_data: serializedExtra,
         questions_count: questions_count ?? questionsCount ?? (Array.isArray(questions) ? questions.length : 0),
         total_points: total_points ?? totalPoints ?? 20,
         date_created: date_created ?? dateCreated ?? "اليوم",

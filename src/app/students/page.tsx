@@ -52,6 +52,7 @@ import WhatsAppBulkDispatcherModal from "@/components/students/WhatsAppBulkDispa
 import {
   getCachedPageData,
   setCachedPageData,
+  invalidateCachedPageData,
 } from "@/lib/client-session-cache";
 
 const months2026_2027 = [
@@ -291,6 +292,7 @@ function StudentsPageContent() {
         sessions: nextSessions,
         exams: nextExams,
       });
+      invalidateCachedPageData("groups_page");
     } catch (err) {
       console.error("Error loading group dashboard data:", err);
     }
