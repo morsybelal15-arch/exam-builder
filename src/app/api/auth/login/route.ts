@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSessionCookie, verifyPassword } from "@/lib/auth";
 import { getAppMode } from "@/lib/app-mode";
 import { isAdminConfigured, verifyAdminCredentials } from "@/lib/admin-credentials";
-import { findTenantByPhone, getTenantAccessBlock } from "@/lib/tenants-repository";
+import {
+  findTenantByPhone,
+  findTenantByDomain,
+  getTenantAccessBlock,
+} from "@/lib/tenants-repository";
 import { getFirstAllowedRoute } from "@/lib/app-features";
 
 const INVALID = "بيانات تسجيل الدخول غير صحيحة";
@@ -54,9 +58,18 @@ export async function POST(req: NextRequest) {
     }
 
     const mode = getAppMode();
+    const host = (req.headers.get("host") || "").split(":")[0].trim().toLowerCase();
+    const domainTenant = host ? await findTenantByDomain(host) : null;
+    const isDedicatedTenantDomain = Boolean(
+      domainTenant &&
+        host !== "exambuilderapp.oqabagency.com" &&
+        host !== "exambuilderadmin.oqabagency.com" &&
+        host !== "localhost" &&
+        host !== "127.0.0.1"
+    );
 
-    // 1. Super Admin — only on the admin process (or local "all" mode), credentials from env.
-    if (mode !== "tenant") {
+    // 1. Super Admin — only on the admin process (or non-dedicated domain in "all" mode), credentials from env.
+    if (mode !== "tenant" && !isDedicatedTenantDomain) {
       const admin = verifyAdminCredentials(phone, password);
       if (admin) {
         failures.delete(key);
@@ -75,8 +88,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Tenants — never on the admin process.
-    const user = await findTenantByPhone(phone);
+    // 2. Tenants — if on a dedicated tenant domain (e.g. mr.oqabagency.com), enforce domain match.
+    if (isDedicatedTenantDomain && domainTenant) {
+      const domainBlock = getTenantAccessBlock(domainTenant);
+      if (domainBlock) {
+        return NextResponse.json({ error: domainBlock }, { status: 403 });
+      }
+      if (domainTenant.phone !== phone) {
+        recordFailure(key);
+        return NextResponse.json(
+          { error: "رقم الهاتف غير مسجل لهذا النطاق. يرجى الدخول بحساب العميل المخصص لهذا الرابط." },
+          { status: 401 }
+        );
+      }
+    }
+
+    const user = isDedicatedTenantDomain && domainTenant ? domainTenant : await findTenantByPhone(phone);
     if (!user || !user.password || user.role !== "TENANT") {
       recordFailure(key);
       return NextResponse.json({ error: INVALID }, { status: 401 });

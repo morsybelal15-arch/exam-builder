@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createTenantAction } from "@/app/actions/admin-tenants";
 import { autoDeployTenantVpsAction } from "@/app/actions/vps-provisioning";
 import {
@@ -44,6 +45,7 @@ function toInputDateStr(date: Date): string {
 }
 
 export default function CreateTenantModal({ onCreated }: CreateTenantModalProps) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -95,6 +97,9 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
 
   const handleClose = () => {
     if (!isPending) {
+      if (createdResult) {
+        router.refresh();
+      }
       setIsOpen(false);
       setCreatedResult(null);
       setErrorMsg(null);
@@ -159,6 +164,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
       }
 
       setCreatedResult(res);
+      router.refresh();
       if (onCreated) onCreated();
     });
   };

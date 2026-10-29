@@ -7,16 +7,18 @@ export default function LoginForm({
   isAdmin = false,
   tenantName = null,
   subscriptionType = null,
+  initialBlockedMessage = null,
 }: {
   isAdmin?: boolean;
   tenantName?: string | null;
   subscriptionType?: string | null;
+  initialBlockedMessage?: string | null;
 }) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(initialBlockedMessage);
 
   React.useEffect(() => {
     const blocked = new URLSearchParams(window.location.search).get("blocked");

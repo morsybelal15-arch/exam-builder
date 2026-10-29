@@ -502,9 +502,11 @@ export async function createTenantRecord(data: {
 }): Promise<StoredTenant> {
   const id = `tenant_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date();
-  const startDateIso = (data.subscriptionStartDate || now).toISOString();
+  const startDateObj = data.subscriptionStartDate ? new Date(data.subscriptionStartDate) : now;
+  startDateObj.setUTCHours(0, 0, 0, 0);
+  const startDateIso = startDateObj.toISOString();
   const dueDate = new Date(data.subscriptionDueDate);
-  dueDate.setHours(23, 59, 59, 999);
+  dueDate.setUTCHours(23, 59, 59, 999);
 
   const subType: SubscriptionCategory =
     data.subscriptionType || inferSubscriptionType(data.planType);
@@ -631,10 +633,13 @@ export async function updateTenantRecord(
     existing?.subscriptionType ||
     inferSubscriptionType(data.planType || existing?.planType);
 
-  const mergedStartDateIso: string | null =
-    data.subscriptionStartDate !== undefined
-      ? data.subscriptionStartDate.toISOString()
-      : existing?.subscriptionStartDate || existing?.createdAt || new Date().toISOString();
+  let mergedStartDateIso: string | null =
+    existing?.subscriptionStartDate || existing?.createdAt || new Date().toISOString();
+  if (data.subscriptionStartDate !== undefined) {
+    const startObj = new Date(data.subscriptionStartDate);
+    startObj.setUTCHours(0, 0, 0, 0);
+    mergedStartDateIso = startObj.toISOString();
+  }
 
   const mergedFeatures: string[] = normalizeEnabledFeatures(
     data.enabledFeatures !== undefined ? data.enabledFeatures : existing?.enabledFeatures
@@ -643,7 +648,7 @@ export async function updateTenantRecord(
   let normalizedDueDate: Date | undefined = undefined;
   if (data.subscriptionDueDate !== undefined) {
     normalizedDueDate = new Date(data.subscriptionDueDate);
-    normalizedDueDate.setHours(23, 59, 59, 999);
+    normalizedDueDate.setUTCHours(23, 59, 59, 999);
   }
 
   const metaEncoded = encodeTenantMeta({

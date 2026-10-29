@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useState, useEffect, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import EditSubscriptionModal, { TenantData } from "./EditSubscriptionModal";
 import {
   extendSubscriptionAction,
@@ -99,6 +100,8 @@ export default function TenantListView({
   initialTenants,
   onOpenCreateModal,
 }: TenantListViewProps) {
+  const router = useRouter();
+  const [tenants, setTenants] = useState<TenantData[]>(initialTenants);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "STOPPED" | "EXPIRED">("ALL");
   const [editingTenant, setEditingTenant] = useState<TenantData | null>(null);
@@ -112,9 +115,23 @@ export default function TenantListView({
   const [syncNotice, setSyncNotice] = useState<{ success: boolean; message: string } | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
 
+  useEffect(() => {
+    setTenants(initialTenants);
+  }, [initialTenants]);
+
+  const patchLocalTenant = (updated?: Partial<TenantData> & { id?: string }) => {
+    if (!updated || !updated.id) return;
+    setTenants((prev) =>
+      prev.map((t) => (t.id === updated.id ? ({ ...t, ...updated } as TenantData) : t))
+    );
+    setEditingTenant((prev) =>
+      prev && prev.id === updated.id ? ({ ...prev, ...updated } as TenantData) : prev
+    );
+  };
+
   const reportSync = (res: any, okMsg: string) => {
     if (!res) return;
-    if (res.success === false) {
+    if (res.success === false || res.error) {
       setSyncNotice({ success: false, message: res.error || res.message || "فشلت العملية" });
       return;
     }
@@ -136,6 +153,7 @@ export default function TenantListView({
         success: !!res.success,
         message: res.message || (res.success ? "تمت المزامنة" : "فشلت المزامنة"),
       });
+      router.refresh();
     } catch (err: any) {
       setSyncNotice({ success: false, message: err.message || "فشلت المزامنة" });
     } finally {
@@ -144,7 +162,7 @@ export default function TenantListView({
   };
 
   // Filtered tenants list
-  const filteredTenants = initialTenants.filter((tenant) => {
+  const filteredTenants = tenants.filter((tenant) => {
     const nameMatch = tenant.name?.toLowerCase().includes(searchTerm.toLowerCase());
     const phoneMatch = tenant.phone.includes(searchTerm);
     const domainMatch = tenant.domain?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -176,6 +194,7 @@ export default function TenantListView({
           ...prev,
           [tenant.id]: { success: res.success, message: res.message },
         }));
+        router.refresh();
       } catch (err: any) {
         setDeployFeedback((prev) => ({
           ...prev,
@@ -189,15 +208,31 @@ export default function TenantListView({
 
   const handleToggleStatus = (tenantId: string) => {
     startTransition(async () => {
-      const res = await toggleTenantStatusAction(tenantId);
+      const res: any = await toggleTenantStatusAction(tenantId);
+      if (res?.tenant) {
+        patchLocalTenant(res.tenant);
+      } else if (res?.newStatus) {
+        patchLocalTenant({ id: tenantId, subscriptionStatus: res.newStatus });
+      }
       reportSync(res, "تم تغيير حالة الاشتراك ومزامنته مع تطبيق العميل والسيرفر فوراً ✓");
+      router.refresh();
     });
   };
 
   const handleQuickExtend = (tenantId: string) => {
     startTransition(async () => {
-      const res = await extendSubscriptionAction(tenantId, 30);
+      const res: any = await extendSubscriptionAction(tenantId, 30);
+      if (res?.tenant) {
+        patchLocalTenant(res.tenant);
+      } else if (res?.newDueDate) {
+        patchLocalTenant({
+          id: tenantId,
+          subscriptionDueDate: res.newDueDate,
+          subscriptionStatus: "ACTIVE",
+        });
+      }
       reportSync(res, "تم تمديد الاشتراك 30 يوماً ومزامنته مع تطبيق العميل ✓");
+      router.refresh();
     });
   };
 
@@ -277,7 +312,7 @@ export default function TenantListView({
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
               }`}
           >
-            الكل ({initialTenants.length})
+            الكل ({tenants.length})
           </button>
 
           <button
@@ -289,7 +324,7 @@ export default function TenantListView({
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>
-              النشطة ({initialTenants.filter((t) => t.subscriptionStatus === "ACTIVE").length})
+              النشطة ({tenants.filter((t) => t.subscriptionStatus === "ACTIVE").length})
             </span>
           </button>
 
@@ -302,7 +337,7 @@ export default function TenantListView({
           >
             <span className="w-2 h-2 rounded-full bg-amber-400" />
             <span>
-              الموقوفة ({initialTenants.filter((t) => t.subscriptionStatus === "STOPPED").length})
+              الموقوفة ({tenants.filter((t) => t.subscriptionStatus === "STOPPED").length})
             </span>
           </button>
 
@@ -314,7 +349,7 @@ export default function TenantListView({
               }`}
           >
             <span>
-              المنتهية ({initialTenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
+              المنتهية ({tenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
             </span>
           </button>
         </div>
@@ -713,15 +748,34 @@ export default function TenantListView({
       {/* Edit Subscription Modal */}
       {editingTenant && (
         <EditSubscriptionModal
+          key={editingTenant.id}
           tenant={editingTenant}
           isOpen={isModalOpen}
           onClose={() => {
             setIsModalOpen(false);
             setEditingTenant(null);
           }}
-          onUpdated={() => {
+          onTenantPatched={(updatedTenant) => {
+            if (updatedTenant) patchLocalTenant(updatedTenant);
+            router.refresh();
+          }}
+          onUpdated={(updatedTenant) => {
+            if (updatedTenant) patchLocalTenant(updatedTenant);
+            setSyncNotice({
+              success: true,
+              message: "تم حفظ تعديلات الاشتراك والمميزات ومزامنتها فوراً مع تطبيق العميل ✓",
+            });
             setIsModalOpen(false);
             setEditingTenant(null);
+            router.refresh();
+          }}
+          onDeleted={(deletedId) => {
+            setTenants((prev) => prev.filter((t) => t.id !== deletedId));
+            setSyncNotice({
+              success: true,
+              message: "تم حذف حساب العميل بنجاح ✓",
+            });
+            router.refresh();
           }}
         />
       )}

@@ -81,7 +81,7 @@ export default function Sidebar() {
   };
 
   useEffect(() => {
-    fetch("/api/auth/session", { cache: "no-store" })
+    fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => applySessionPayload(data))
       .catch(() => {});

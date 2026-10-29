@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { getAppMode } from "@/lib/app-mode";
-import { findTenantByDomain } from "@/lib/tenants-repository";
+import { findTenantByDomain, getTenantAccessBlock } from "@/lib/tenants-repository";
 import LoginForm from "./LoginForm";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -18,6 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage() {
   let tenantName: string | null = null;
   let subscriptionType: string | null = null;
+  let initialBlockedMessage: string | null = null;
   try {
     const h = await headers();
     const host = h.get("host") || "";
@@ -25,6 +26,7 @@ export default async function LoginPage() {
     if (tenant) {
       tenantName = tenant.name;
       subscriptionType = tenant.subscriptionType || null;
+      initialBlockedMessage = getTenantAccessBlock(tenant);
     }
   } catch {
     // non-fatal
@@ -35,6 +37,7 @@ export default async function LoginPage() {
       isAdmin={getAppMode() === "admin"}
       tenantName={tenantName}
       subscriptionType={subscriptionType}
+      initialBlockedMessage={initialBlockedMessage}
     />
   );
 }

@@ -56,16 +56,16 @@ export async function createTenantAction(data: CreateTenantInput) {
   const startDate = data.subscriptionStartDate
     ? new Date(data.subscriptionStartDate)
     : new Date();
-  startDate.setHours(0, 0, 0, 0);
+  startDate.setUTCHours(0, 0, 0, 0);
 
   let dueDate: Date;
   if (data.subscriptionDueDate) {
     dueDate = new Date(data.subscriptionDueDate);
-    dueDate.setHours(23, 59, 59, 999);
+    dueDate.setUTCHours(23, 59, 59, 999);
   } else {
     const durationMonths = Number(data.durationMonths) || 12;
     dueDate = new Date(startDate.getTime() + durationMonths * 30 * 24 * 60 * 60 * 1000);
-    dueDate.setHours(23, 59, 59, 999);
+    dueDate.setUTCHours(23, 59, 59, 999);
   }
 
   if (dueDate.getTime() < startDate.getTime()) {
@@ -205,13 +205,13 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
 
     if (data.subscriptionStartDate) {
       const start = new Date(data.subscriptionStartDate);
-      start.setHours(0, 0, 0, 0);
+      start.setUTCHours(0, 0, 0, 0);
       updatePayload.subscriptionStartDate = start;
     }
 
     if (data.subscriptionDueDate) {
       const due = new Date(data.subscriptionDueDate);
-      due.setHours(23, 59, 59, 999);
+      due.setUTCHours(23, 59, 59, 999);
       updatePayload.subscriptionDueDate = due;
     }
 
@@ -242,9 +242,15 @@ export async function updateTenantSubscriptionAction(data: UpdateSubscriptionInp
       updatePayload.password = await hashPassword(data.newPassword.trim());
     }
 
+    const existingList = await getTenantsList();
+    const existingTenant = existingList.find((t) => t.id === data.tenantId);
+    const domainChanged =
+      updatePayload.domain &&
+      updatePayload.domain !== (existingTenant?.domain || "").toLowerCase();
+
     const updated = await updateTenantRecord(data.tenantId, updatePayload);
     const vpsSync = await syncTenantsToVps({ force: true });
-    const domainSetup = updatePayload.domain
+    const domainSetup = domainChanged
       ? await provisionTenantDomain(updatePayload.domain)
       : null;
 
@@ -278,9 +284,9 @@ export async function extendSubscriptionAction(tenantId: string, daysToAdd: numb
 
     const baseDate = tenant.subscriptionDueDate ? new Date(tenant.subscriptionDueDate) : new Date();
     const newDueDate = new Date(baseDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
-    newDueDate.setHours(23, 59, 59, 999);
+    newDueDate.setUTCHours(23, 59, 59, 999);
 
-    await updateTenantRecord(tenantId, {
+    const updated = await updateTenantRecord(tenantId, {
       subscriptionDueDate: newDueDate,
       subscriptionStatus: "ACTIVE", // Automatically reactivate if extended
     });
@@ -295,6 +301,7 @@ export async function extendSubscriptionAction(tenantId: string, daysToAdd: numb
       success: true,
       message: `تم تمديد الاشتراك بنجاح بمقدار ${daysToAdd} يوم وتنشيط الحساب`,
       newDueDate: newDueDate.toISOString(),
+      tenant: updated,
       vpsSync,
     };
   } catch (err: any) {
@@ -313,7 +320,7 @@ export async function toggleTenantStatusAction(tenantId: string) {
 
     const newStatus = tenant.subscriptionStatus === "ACTIVE" ? "STOPPED" : "ACTIVE";
 
-    await updateTenantRecord(tenantId, {
+    const updated = await updateTenantRecord(tenantId, {
       subscriptionStatus: newStatus,
     });
 
@@ -323,7 +330,7 @@ export async function toggleTenantStatusAction(tenantId: string) {
     revalidatePath("/");
     revalidatePath("/my-subscription");
 
-    return { success: true, newStatus, vpsSync };
+    return { success: true, newStatus, tenant: updated, vpsSync };
   } catch (err: any) {
     return { error: err.message || "فشل تغيير حالة الحساب" };
   }

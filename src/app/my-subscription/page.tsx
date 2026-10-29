@@ -1,8 +1,9 @@
 import React from "react";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { prisma, isDatabaseReachable } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { findTenantById, findTenantByPhone } from "@/lib/tenants-repository";
+import { findTenantById, findTenantByPhone, findTenantByDomain } from "@/lib/tenants-repository";
 import { getTenantUsageStats } from "@/lib/db";
 import {
   APP_FEATURES_REGISTRY,
@@ -48,7 +49,19 @@ export default async function MySubscriptionPage() {
   const localUsage = getTenantUsageStats(session.id);
 
   try {
-    tenant = (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
+    const h = await headers();
+    const host = (h.get("host") || "").split(":")[0].trim().toLowerCase();
+    const domainTenant = host ? await findTenantByDomain(host) : null;
+    const isDedicatedTenantDomain = Boolean(
+      domainTenant &&
+        host !== "exambuilderapp.oqabagency.com" &&
+        host !== "exambuilderadmin.oqabagency.com" &&
+        host !== "localhost" &&
+        host !== "127.0.0.1"
+    );
+    const userTenant =
+      (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
+    tenant = isDedicatedTenantDomain ? domainTenant : userTenant || domainTenant;
     const isReachable = await isDatabaseReachable();
     if (isReachable) {
       const [examsTotal, filesTotal] = await Promise.all([

@@ -46,7 +46,7 @@ export default function SubscriptionGuard() {
       }
 
       try {
-        const res = await fetch("/api/auth/session", {
+        const res = await fetch(`/api/auth/session?t=${Date.now()}`, {
           cache: "no-store",
           credentials: "same-origin",
         });
@@ -74,7 +74,7 @@ export default function SubscriptionGuard() {
         if (data.authenticated && typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("tenant-session-sync", { detail: data }));
 
-          if (data.role === "TENANT" && Array.isArray(data.enabledFeatures)) {
+          if (Array.isArray(data.enabledFeatures)) {
             const currentPath = window.location.pathname;
             if (!isPathnameAllowedForFeatures(currentPath, data.enabledFeatures)) {
               const fallbackRoute = getFirstAllowedRoute(data.enabledFeatures);
@@ -91,12 +91,17 @@ export default function SubscriptionGuard() {
 
     check();
     const onFocus = () => check();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(check, 12_000);
+    document.addEventListener("visibilitychange", onVisibility);
+    const interval = window.setInterval(check, 3_000);
 
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.clearInterval(interval);
     };
   }, [pathname, router]);

@@ -70,7 +70,9 @@ interface EditSubscriptionModalProps {
   tenant: TenantData;
   isOpen: boolean;
   onClose: () => void;
-  onUpdated?: () => void;
+  onUpdated?: (updatedTenant?: any) => void;
+  onTenantPatched?: (updatedTenant?: any) => void;
+  onDeleted?: (tenantId: string) => void;
 }
 
 export default function EditSubscriptionModal({
@@ -78,6 +80,8 @@ export default function EditSubscriptionModal({
   isOpen,
   onClose,
   onUpdated,
+  onTenantPatched,
+  onDeleted,
 }: EditSubscriptionModalProps) {
   const [isPending, startTransition] = useTransition();
 
@@ -85,6 +89,7 @@ export default function EditSubscriptionModal({
   const [name, setName] = useState(tenant.name || "");
   const [phone, setPhone] = useState(tenant.phone);
   const [domain, setDomain] = useState(tenant.domain || "");
+  const [status, setStatus] = useState<"ACTIVE" | "STOPPED" | "EXPIRED">(tenant.subscriptionStatus);
   const [subscriptionType, setSubscriptionType] = useState<SubscriptionCategory>(
     tenant.subscriptionType === "معلم" ? "معلم" : "سنتر"
   );
@@ -119,7 +124,7 @@ export default function EditSubscriptionModal({
   const [showVpsCommands, setShowVpsCommands] = useState(false);
   const [copiedVps, setCopiedVps] = useState(false);
 
-  const isActive = tenant.subscriptionStatus === "ACTIVE";
+  const isActive = status === "ACTIVE";
 
   const toggleFeature = (featureId: string) => {
     setEnabledFeatures((prev) =>
@@ -155,6 +160,7 @@ export default function EditSubscriptionModal({
         phone,
         domain,
         subscriptionType,
+        subscriptionStatus: status,
         subscriptionStartDate: startDateStr || undefined,
         subscriptionDueDate: dueDateStr || undefined,
         enabledFeatures,
@@ -174,17 +180,19 @@ export default function EditSubscriptionModal({
         text: res.message || "تم حفظ التعديلات ومزامنتها فورياً مع تطبيق العميل ✓",
         isError: false,
       });
-      if (onUpdated) onUpdated();
+      if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
+      if (onUpdated) onUpdated(res.tenant);
     });
   };
 
   const handleExtend = (days: number) => {
     setMsg(null);
     startTransition(async () => {
-      const res = await extendSubscriptionAction(tenant.id, days);
+      const res: any = await extendSubscriptionAction(tenant.id, days);
       if (res.error) {
         setMsg({ text: res.error, isError: true });
       } else {
+        setStatus("ACTIVE");
         setMsg({
           text: res.message || `تم تمديد الاشتراك ${days} يوم بنجاح`,
           isError: false,
@@ -192,7 +200,7 @@ export default function EditSubscriptionModal({
         if (res.newDueDate) {
           setDueDateStr(new Date(res.newDueDate).toISOString().split("T")[0]);
         }
-        if (onUpdated) onUpdated();
+        if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
       }
     });
   };
@@ -200,11 +208,12 @@ export default function EditSubscriptionModal({
   const handleToggleStatus = () => {
     setMsg(null);
     startTransition(async () => {
-      const res = await toggleTenantStatusAction(tenant.id);
+      const res: any = await toggleTenantStatusAction(tenant.id);
       if (res.error) {
         setMsg({ text: res.error, isError: true });
       } else {
-        const syncFailed = (res as any).vpsSync && (res as any).vpsSync.synced === false;
+        if (res.newStatus) setStatus(res.newStatus);
+        const syncFailed = res.vpsSync && res.vpsSync.synced === false;
         setMsg({
           text:
             (res.newStatus === "ACTIVE"
@@ -215,7 +224,7 @@ export default function EditSubscriptionModal({
               : " وتمت المزامنة الفورية مع تطبيق العميل ✓"),
           isError: !!syncFailed,
         });
-        if (onUpdated) onUpdated();
+        if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
       }
     });
   };
@@ -234,9 +243,8 @@ export default function EditSubscriptionModal({
       if (res.error) {
         setMsg({ text: res.error, isError: true });
       } else {
-        alert("تم حذف حساب العميل بنجاح");
+        if (onDeleted) onDeleted(tenant.id);
         onClose();
-        if (onUpdated) onUpdated();
       }
     });
   };
