@@ -17,6 +17,11 @@ import {
   Plus,
 } from "lucide-react";
 
+import {
+  saveFileToLocalPc,
+  triggerImmediatePcDownload,
+} from "@/lib/local-pc-files";
+
 interface QueuedImage {
   id: string;
   name: string;
@@ -24,35 +29,14 @@ interface QueuedImage {
   size: string;
 }
 
-const initialQueuedImages: QueuedImage[] = [
-  {
-    id: "img-1",
-    name: "ورقة_الأسئلة_صفحة_١.jpg",
-    previewUrl: "/sample-textbook.svg",
-    size: "١.٢ ميجابايت",
-  },
-  {
-    id: "img-2",
-    name: "ورقة_الأسئلة_صفحة_٢.jpg",
-    previewUrl: "/sample-textbook.svg",
-    size: "٩٨٠ كيلوبايت",
-  },
-  {
-    id: "img-3",
-    name: "نموذج_الإجابة_المعتمد.jpg",
-    previewUrl: "/sample-textbook.svg",
-    size: "١.٥ ميجابايت",
-  },
-];
-
 export default function ImagesToPdfPage() {
-  const [images, setImages] = useState<QueuedImage[]>(initialQueuedImages);
+  const [images, setImages] = useState<QueuedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const [isNameModalOpen, setIsNameModalOpen] = useState<boolean>(false);
   const [pdfName, setPdfName] = useState<string>("مستند_أوراق_الاختبار.pdf");
-  const [savedFile, setSavedFile] = useState<{ id: string; name: string; filepath?: string } | null>(null);
+  const [savedFile, setSavedFile] = useState<{ id: string; name: string; blobUrl?: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Convert queued images into a real multi-page A4 PDF Blob (pure browser canvas + PDF 1.4 DCTDecode)
@@ -228,27 +212,22 @@ export default function ImagesToPdfPage() {
 
     try {
       const pdfBlob = await buildPdfBlobFromImages(images);
-      const pdfFile = new File([pdfBlob], finalName, { type: "application/pdf" });
-      const formData = new FormData();
-      formData.append("file", pdfFile);
 
-      const res = await fetch("/api/files", {
-        method: "POST",
-        body: formData,
+      // 1) Immediately trigger download of the generated PDF to the tenant's PC (zero server storage)
+      triggerImmediatePcDownload(pdfBlob, finalName);
+
+      // 2) Keep a local PC reference (IndexedDB on the user's browser) so they can also open it in Exam Builder
+      const localMeta = await saveFileToLocalPc(pdfBlob, finalName).catch(() => null);
+      const blobUrl = URL.createObjectURL(pdfBlob);
+
+      setSavedFile({
+        id: localMeta?.id || `local-${Date.now()}`,
+        name: finalName,
+        blobUrl,
       });
-      const data = await res.json();
-      if (data?.file) {
-        setSavedFile(data.file);
-      } else {
-        setSavedFile({
-          id: `f-${Date.now()}`,
-          name: finalName,
-          filepath: `/api/files/content?name=${encodeURIComponent(finalName)}`,
-        });
-      }
       setIsSuccess(true);
     } catch (err) {
-      console.error("Failed to generate and save PDF to uploaded files", err);
+      console.error("Failed to generate local PDF", err);
     } finally {
       setIsGenerating(false);
     }
@@ -261,8 +240,11 @@ export default function ImagesToPdfPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">
-              تحويل الصور إلى PDF
+              تحويل الصور إلى PDF (تنزيل مباشر على جهازك)
             </h1>
+            <p className="text-xs text-slate-500 mt-1">
+              يتم دمج الصور وتحويلها وتنزيل ملف الـ PDF فوراً على جهازك الشخصي دون تخزينه على السيرفر
+            </p>
           </div>
         </div>
 
@@ -274,37 +256,33 @@ export default function ImagesToPdfPage() {
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="font-bold text-sm">تم إنشاء ملف PDF وحفظه في قسم الملفات المرفوعة بنجاح!</h4>
+                <h4 className="font-bold text-sm">تم تحويل الصور وتنزيل ملف الـ PDF على جهازك فوراً بنجاح!</h4>
                 <p className="text-xs text-emerald-700 mt-0.5">
-                  تم دمج {images.length} صفحات وحفظ الملف باسم <strong className="font-bold text-slate-900">«{savedFile?.name || pdfName}»</strong>.
+                  تم دمج {images.length} صفحات وتنزيل الملف باسم <strong className="font-bold text-slate-900">«{savedFile?.name || pdfName}»</strong> على جهازك مباشرة.
                 </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href="/uploaded-files"
-                className="inline-flex items-center justify-center gap-1 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100/60 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                <span>قسم الملفات المرفوعة</span>
-              </Link>
-              <Link
                 href={
-                  savedFile?.filepath
-                    ? `/exam-builder?file=${encodeURIComponent(savedFile.filepath)}&type=pdf&name=${encodeURIComponent(savedFile.name)}`
+                  savedFile?.name
+                    ? `/exam-builder?localFile=${encodeURIComponent(savedFile.name)}`
                     : "/exam-builder"
                 }
                 className="inline-flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
               >
-                <span>منشئ الاختبارات</span>
+                <span>فتح في منشئ الاختبارات</span>
               </Link>
-              <a
-                href={savedFile?.filepath || `/api/files/content?name=${encodeURIComponent(savedFile?.name || pdfName)}`}
-                download={savedFile?.name || `${pdfName}.pdf`}
-                className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
-              >
-                <FileDown className="w-4 h-4" />
-                <span>تحميل</span>
-              </a>
+              {savedFile?.blobUrl && (
+                <a
+                  href={savedFile.blobUrl}
+                  download={savedFile.name || `${pdfName}.pdf`}
+                  className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4" />
+                  <span>إعادة تنزيل على جهازك</span>
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -508,7 +486,7 @@ export default function ImagesToPdfPage() {
               <div>
                 <h3 className="font-bold text-base text-slate-800">تسمية ملف الـ PDF</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  حدد اسماً للمستند ليتم حفظه تلقائياً في قسم الملفات المرفوعة
+                  حدد اسماً للمستند ليتم تنزيله فوراً على جهازك الشخصي
                 </p>
               </div>
             </div>
@@ -540,7 +518,7 @@ export default function ImagesToPdfPage() {
                 type="submit"
                 className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
               >
-                إنشاء وحفظ في الملفات المرفوعة
+                تحويل وتنزيل على جهازك فوراً
               </button>
             </div>
           </form>

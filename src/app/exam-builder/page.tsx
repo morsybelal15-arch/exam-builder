@@ -62,6 +62,12 @@ import {
   reshuffleExamModels,
   updateQuestionNumberPrefix,
 } from "@/lib/multi-model-exam";
+import {
+  getLocalPcFilesList,
+  saveFileToLocalPc,
+  getLocalPcFileById,
+  getLocalPcFileByName,
+} from "@/lib/local-pc-files";
 
 const loadPdfJs = (): Promise<any> => {
   if (typeof window === "undefined") return Promise.reject("SSR");
@@ -923,25 +929,13 @@ export default function ExamBuilderPage() {
   const selectedFileRef = useRef(selectedFile);
   selectedFileRef.current = selectedFile;
 
-  // Fetch real uploaded files list from backend
+  // Load files list directly from the tenant's PC (IndexedDB — zero server upload)
   const loadUploadedFiles = useCallback(async () => {
     try {
-      const res = await fetch("/api/files");
-      const data = await res.json();
-      if (data.success && Array.isArray(data.files)) {
-        setUploadedFilesList(data.files);
-        // If user has a selectedFile but imageSrc was omitted from localStorage due to quota, restore it from backend
-        setImageSrc((curr) => {
-          const currentSelected = selectedFileRef.current;
-          if (!curr && currentSelected) {
-            const match = data.files.find((f: any) => f.name === currentSelected);
-            if (match && match.filepath) return match.filepath;
-          }
-          return curr;
-        });
-      }
+      const files = await getLocalPcFilesList();
+      setUploadedFilesList(files);
     } catch {
-      // Ignore if offline
+      // Ignore if IndexedDB unavailable
     }
   }, []);
 
@@ -1095,7 +1089,7 @@ export default function ExamBuilderPage() {
     };
   }, []);
 
-  // Process Document File Upload (File Input or Drag & Drop) with Real Progress & Memory Safety for Heavy 200MB+ PDFs
+  // Process Document File Selection (100% Local on Tenant's PC — Zero Server Upload)
   const processDocumentFileUpload = async (file: File, isReplace = false) => {
     if (!file) return;
 
@@ -1106,10 +1100,10 @@ export default function ExamBuilderPage() {
 
     const isPdf = file.name.toLowerCase().endsWith(".pdf");
 
-    // 1. Client-side instant display for optimal UX (Streaming Blob URL to prevent RAM exhaustion on 200MB+ PDFs)
+    // 1. Instant local display directly from the tenant's PC via streaming Blob URL
     if (isPdf) {
       try {
-        setSaveStatus(`جاري تجهيز مستند PDF (${file.name})...`);
+        setSaveStatus(`جاري فتح مستند PDF من جهازك (${file.name})...`);
         const pdfjs = await loadPdfJs();
         const blobUrl = URL.createObjectURL(file);
         const loadingTask = pdfjs.getDocument({ url: blobUrl });
@@ -1158,102 +1152,22 @@ export default function ExamBuilderPage() {
       reader.readAsDataURL(file);
     }
 
-    // 2. Upload file to backend storage via direct streaming XMLHttpRequest with circular progress & time remaining
-    const startTime = Date.now();
-    const totalMbVal = (file.size / (1024 * 1024)).toFixed(1);
-    setUploadProgress({
-      isOpen: true,
-      fileName: file.name,
-      percent: 0,
-      speedMb: "0.0",
-      remainingSec: 0,
-      loadedMb: "0.0",
-      totalMb: totalMbVal,
-      status: "uploading",
-    });
-
-    await new Promise<void>((resolve) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/files", true);
-      xhr.setRequestHeader("x-upload-mode", "stream");
-      xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
-      xhr.setRequestHeader("x-file-size", String(file.size));
-      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && event.total > 0) {
-          const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
-          const now = Date.now();
-          const elapsedSec = (now - startTime) / 1000;
-          const bytesPerSec = elapsedSec > 0 ? event.loaded / elapsedSec : 0;
-          const remainingBytes = event.total - event.loaded;
-          const remainingSec = bytesPerSec > 0 ? Math.ceil(remainingBytes / bytesPerSec) : 0;
-
-          setUploadProgress({
-            isOpen: true,
-            fileName: file.name,
-            percent,
-            speedMb: (bytesPerSec / (1024 * 1024)).toFixed(1),
-            remainingSec,
-            loadedMb: (event.loaded / (1024 * 1024)).toFixed(1),
-            totalMb: (event.total / (1024 * 1024)).toFixed(1),
-            status: "uploading",
-          });
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          setUploadProgress((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  percent: 100,
-                  remainingSec: 0,
-                  status: "success",
-                }
-              : null
-          );
-          loadUploadedFiles();
-          setSaveStatus(
-            isReplace
-              ? `تم استبدال وحفظ مستند "${file.name}" بنجاح`
-              : `تم رفع وحفظ مستند "${file.name}" بنجاح`
-          );
-          setTimeout(() => {
-            setUploadProgress(null);
-            setSaveStatus(null);
-          }, 1400);
-          resolve();
-        } else {
-          setUploadProgress((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  status: "error",
-                  errorMessage: "حدث خطأ أثناء حفظ الملف على الخادم.",
-                }
-              : null
-          );
-          resolve();
-        }
-      };
-
-      xhr.onerror = () => {
-        setUploadProgress((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: "error",
-                errorMessage: "تعذر الاتصال بالخادم لرفع الملف.",
-              }
-            : null
-        );
-        resolve();
-      };
-
-      xhr.send(file);
-    });
+    // 2. Save in local PC IndexedDB so it appears in "الملفات المرفوعة" without touching the server
+    try {
+      await saveFileToLocalPc(file);
+      await loadUploadedFiles();
+      setSaveStatus(
+        isReplace
+          ? `تم تحديث المستند محلياً على جهازك "${file.name}" بنجاح`
+          : `تم فتح وحفظ المستند محلياً على جهازك "${file.name}" بنجاح`
+      );
+    } catch (err) {
+      console.warn("Could not persist file in local IndexedDB:", err);
+      setSaveStatus(`تم فتح المستند محلياً "${file.name}"`);
+    }
+    setTimeout(() => {
+      setSaveStatus(null);
+    }, 2200);
   };
 
   // Manual Passage text insertion handler
@@ -1293,7 +1207,7 @@ export default function ExamBuilderPage() {
     setTimeout(() => setSaveStatus(null), 2500);
   };
 
-  // Inspect incoming file for duplicate check before uploading
+  // Inspect incoming file for duplicate check before saving locally
   const handleIncomingFile = (file: File) => {
     if (!file) return;
 
@@ -1318,60 +1232,85 @@ export default function ExamBuilderPage() {
     }
   };
 
-  // Selection from Dropdown or Full Modal
-  const handleSelectUploadedFile = async (f: UploadedFileItem) => {
+  // Selection from Dropdown, Full Modal, or Local PC Store
+  const handleSelectUploadedFile = useCallback(async (f: UploadedFileItem) => {
     setSelectedFile(f.name);
     setCompletedCrop(null);
     setCurrentCrop(null);
     setLassoPoints([]);
 
-    const fileUrl = f.filepath || `/api/files/content?name=${encodeURIComponent(f.name)}`;
+    try {
+      const record =
+        (f.id ? await getLocalPcFileById(f.id) : null) ||
+        (await getLocalPcFileByName(f.name));
 
-    if (f.name.toLowerCase().endsWith(".pdf")) {
-      try {
-        setSaveStatus(`جاري تجهيز مستند PDF للعرض: ${f.name}...`);
-        const pdfjs = await loadPdfJs();
-        const response = await fetch(fileUrl);
-        const arrayBuffer = await response.arrayBuffer();
-        const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
-        setPdfDoc(pdf);
-        pdfDocRef.current = pdf;
-        setPdfTotalPages(pdf.numPages);
-        setPdfCurrentPage(1);
-        setPdfPageInput("1");
-        setActivePdfCropPage(1);
-        activePdfCropPageRef.current = 1;
-        setPdfPagesCache({});
-        pdfPagesCacheRef.current = {};
-        renderQueueRef.current = [];
-        queuePdfPage(1, true);
-        if (pdf.numPages > 1) queuePdfPage(2, false);
-        if (pdf.numPages > 2) queuePdfPage(3, false);
-        setImageSrc(fileUrl);
-        setSaveStatus(`تم تحميل المستند: ${f.name} (${pdf.numPages} صفحة)`);
-      } catch (err) {
-        console.warn("Could not render PDF via PDF.js, using direct URL:", err);
-        setPdfDoc(null);
-        setPdfTotalPages(1);
-        setPdfPagesCache({});
-        pdfPagesCacheRef.current = {};
-        setImageSrc(fileUrl);
-        setSaveStatus(`تم تحديد: ${f.name}`);
+      if (record && record.blob) {
+        const blobUrl = URL.createObjectURL(record.blob);
+        if (f.name.toLowerCase().endsWith(".pdf")) {
+          setSaveStatus(`جاري تجهيز مستند PDF من جهازك: ${f.name}...`);
+          const pdfjs = await loadPdfJs();
+          const arrayBuffer = await record.blob.arrayBuffer();
+          const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+          const pdf = await loadingTask.promise;
+          setPdfDoc(pdf);
+          pdfDocRef.current = pdf;
+          setPdfTotalPages(pdf.numPages);
+          setPdfCurrentPage(1);
+          setPdfPageInput("1");
+          setActivePdfCropPage(1);
+          activePdfCropPageRef.current = 1;
+          setPdfPagesCache({});
+          pdfPagesCacheRef.current = {};
+          renderQueueRef.current = [];
+          queuePdfPage(1, true);
+          if (pdf.numPages > 1) queuePdfPage(2, false);
+          if (pdf.numPages > 2) queuePdfPage(3, false);
+          setImageSrc((prev) => {
+            if (prev && prev.startsWith("blob:")) {
+              try {
+                URL.revokeObjectURL(prev);
+              } catch {}
+            }
+            return blobUrl;
+          });
+          setSaveStatus(`تم فتح المستند من جهازك: ${f.name} (${pdf.numPages} صفحة)`);
+        } else {
+          setPdfDoc(null);
+          setPdfTotalPages(1);
+          setPdfPagesCache({});
+          pdfPagesCacheRef.current = {};
+          setImageSrc(blobUrl);
+          setSaveStatus(`تم فتح المستند من جهازك: ${f.name}`);
+        }
       }
-    } else {
-      setPdfDoc(null);
-      setPdfTotalPages(1);
-      setPdfPagesCache({});
-      pdfPagesCacheRef.current = {};
-      setImageSrc(fileUrl);
-      setSaveStatus(`تم تحميل المستند: ${f.name}`);
+    } catch (err) {
+      console.warn("Failed to open local PC file:", err);
     }
 
     setIsFileDropdownOpen(false);
     setIsAllFilesModalOpen(false);
     setTimeout(() => setSaveStatus(null), 2500);
-  };
+  }, [queuePdfPage]);
+
+  // Auto-open local file when navigating with ?localFile=... or when restoring selectedFile on refresh
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const localFileName = params.get("localFile") || params.get("name");
+    const targetName = localFileName || selectedFileRef.current;
+    if (!targetName) return;
+
+    // Only auto-load if pdfDoc/imageSrc isn't already loaded for this file
+    if (!pdfDocRef.current || localFileName) {
+      handleSelectUploadedFile({
+        id: "",
+        name: targetName,
+        type: targetName.toLowerCase().endsWith(".pdf") ? "pdf" : "image",
+        size: "",
+        date: "",
+      });
+    }
+  }, [handleSelectUploadedFile]);
 
   // Drag and Drop files onto Document Viewer without flickering
   const dragCounterRef = useRef<number>(0);
