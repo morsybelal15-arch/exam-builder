@@ -44,6 +44,9 @@ export default function SubscriptionGuard() {
       if (typeof window !== "undefined" && isPublicOrAdminPath(window.location.pathname)) {
         return;
       }
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
 
       try {
         const res = await fetch(`/api/auth/session?t=${Date.now()}`, {
@@ -96,7 +99,7 @@ export default function SubscriptionGuard() {
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
-    const interval = window.setInterval(check, 3_000);
+    const interval = window.setInterval(check, 12_000);
 
     return () => {
       cancelled = true;

@@ -32,26 +32,37 @@ interface PageProps {
   params: Promise<{ token: string }>;
 }
 
-async function resolveTenantFromRequestHost() {
+async function resolveTenantFromRequestHost(): Promise<boolean> {
   try {
     const h = await headers();
-    const host = h.get("host") || "";
-    if (host) {
+    const host = (h.get("host") || "").split(":")[0].trim().toLowerCase();
+    if (
+      host &&
+      host !== "exambuilderapp.oqabagency.com" &&
+      host !== "exambuilderadmin.oqabagency.com" &&
+      host !== "localhost" &&
+      host !== "127.0.0.1"
+    ) {
       const tenant = await findTenantByDomain(host);
       if (tenant?.id) {
         setCurrentTenantId(tenant.id);
+        return true;
       }
     }
   } catch {
     // Ignore header resolution errors
   }
+  return false;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  await resolveTenantFromRequestHost();
+  const isDedicatedDomain = await resolveTenantFromRequestHost();
   const { token } = await params;
   const decoded = decodeURIComponent(token).trim();
-  const profile = getFullStudentProfile(decoded);
+  const profile = getFullStudentProfile(decoded, {
+    publicTokenOnly: true,
+    strictTenantOnly: isDedicatedDomain,
+  });
 
   if (!profile) {
     return {
@@ -76,10 +87,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function StudentParentPortalPage({ params }: PageProps) {
-  await resolveTenantFromRequestHost();
+  const isDedicatedDomain = await resolveTenantFromRequestHost();
   const { token } = await params;
   const decodedToken = decodeURIComponent(token).trim();
-  const profile = getFullStudentProfile(decodedToken);
+  const profile = getFullStudentProfile(decodedToken, {
+    publicTokenOnly: true,
+    strictTenantOnly: isDedicatedDomain,
+  });
 
   // 1. Student removed / Not Found State
   if (!profile) {

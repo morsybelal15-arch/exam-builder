@@ -42,30 +42,24 @@ function resolveStorePath(tenantId?: string): string {
   const tenantFolder = path.join(tenantsDir, key);
   const targetPath = path.join(tenantFolder, "management_store.json");
 
-  if (!fs.existsSync(targetPath)) {
-    const isFirstTenantEver =
-      !fs.existsSync(tenantsDir) ||
-      fs.readdirSync(tenantsDir).filter((d) => {
-        try {
-          return fs.statSync(path.join(tenantsDir, d)).isDirectory();
-        } catch {
-          return false;
-        }
-      }).length === 0;
-
+  if (!fs.existsSync(tenantFolder)) {
     fs.mkdirSync(tenantFolder, { recursive: true });
-
-    if (isFirstTenantEver && fs.existsSync(legacyStorePath)) {
-      try {
-        fs.copyFileSync(legacyStorePath, targetPath);
-        return targetPath;
-      } catch {
-        // Fall through to initialize fresh store
-      }
-    }
   }
 
   return targetPath;
+}
+
+export function purgeTenantManagementStore(tenantId: string): void {
+  const key = sanitizeTenantKey(tenantId);
+  if (!key || key === "default") return;
+  try {
+    const tenantFolder = path.join(tenantsDir, key);
+    if (fs.existsSync(tenantFolder)) {
+      fs.rmSync(tenantFolder, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.warn("Error removing tenant management store folder:", err);
+  }
 }
 
 export interface DeletedStudentLogEntry {
@@ -394,7 +388,22 @@ function getInitialStore(): ManagementStore {
   };
 }
 
+function getEmptyStore(): ManagementStore {
+  return {
+    groups: [],
+    students: [],
+    financials: [],
+    attendance: [],
+    sessions: [],
+    examRecords: [],
+    studentGrades: [],
+    savedQrPdfs: [],
+    deletedStudentsLog: [],
+  };
+}
+
 export function getManagementStore(tenantId?: string): ManagementStore {
+  const key = sanitizeTenantKey(tenantId);
   const activeStorePath = resolveStorePath(tenantId);
   try {
     if (fs.existsSync(activeStorePath)) {
@@ -417,7 +426,8 @@ export function getManagementStore(tenantId?: string): ManagementStore {
     }
   }
 
-  const initial = getInitialStore();
+  // Real tenants start with a clean empty store; only the legacy default fallback uses sample seed data
+  const initial = key && key !== "default" ? getEmptyStore() : getInitialStore();
   saveManagementStore(initial, tenantId);
   return initial;
 }
@@ -1145,26 +1155,45 @@ export function deleteFinancialRecord(groupId: string, studentId: string, month:
 // STUDENT PROFILE AGGREGATOR
 // ==========================================
 
-export function getFullStudentProfile(studentId: string) {
-  let store = getManagementStore();
+export function getFullStudentProfile(
+  studentId: string,
+  options?: { publicTokenOnly?: boolean; strictTenantOnly?: boolean }
+) {
+  const activeKey = sanitizeTenantKey();
   const clean = (studentId || "").includes("/s/")
     ? studentId.split("/s/").pop()?.split("?")[0]?.trim() || studentId.trim()
     : (studentId || "").trim();
 
+  if (!clean) return null;
+  if (options?.publicTokenOnly && /^std-\d+$/i.test(clean)) {
+    return null;
+  }
+
   const matchStudent = (stList: Student[]) =>
-    stList.find(
-      (s) =>
+    stList.find((s) => {
+      if (options?.publicTokenOnly) {
+        return (
+          s.code === clean ||
+          s.code.toLowerCase() === clean.toLowerCase() ||
+          (!/^std-\d+$/i.test(s.id) &&
+            (s.id === clean || s.id.toLowerCase() === clean.toLowerCase()))
+        );
+      }
+      return (
         s.id === clean ||
         s.code === clean ||
         s.id.toLowerCase() === clean.toLowerCase() ||
         s.code.toLowerCase() === clean.toLowerCase()
-    );
+      );
+    });
 
-  let student = matchStudent(store.students);
+  let store = getManagementStore();
+  let student =
+    activeKey && activeKey !== "default" ? matchStudent(store.students) : undefined;
 
-  // If not found in the active tenant context (e.g. public /s/[token] parent portal without session),
-  // search across all tenant stores and legacy store so parent QR links always resolve.
-  if (!student) {
+  // If not found in a dedicated tenant context (e.g. public /s/[token] on the main platform domain),
+  // search across all real tenant stores first, then legacy store as last resort.
+  if (!student && !options?.strictTenantOnly) {
     const candidateFiles: string[] = [];
     if (fs.existsSync(tenantsDir)) {
       try {
@@ -1189,6 +1218,10 @@ export function getFullStudentProfile(studentId: string) {
         }
       } catch {}
     }
+  }
+
+  if (!student && activeKey === "default") {
+    student = matchStudent(store.students);
   }
 
   if (!student) return null;

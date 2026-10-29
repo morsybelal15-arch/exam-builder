@@ -3,12 +3,28 @@ import { cookies, headers } from "next/headers";
 import { adminEnabled, getAppMode, getSessionCookieName } from "@/lib/app-mode";
 import { signSessionToken, verifySessionToken } from "@/lib/session-token";
 import { setCurrentTenantId } from "@/lib/tenant-context";
+import {
+  findTenantByDomain,
+  findTenantById,
+  findTenantByPhone,
+  getTenantAccessBlock,
+} from "@/lib/tenants-repository";
 
 export interface SessionUser {
   id: string;
   phone: string;
   role: "TENANT" | "SUPER_ADMIN";
   name?: string | null;
+}
+
+function isDedicatedTenantHost(host: string): boolean {
+  return Boolean(
+    host &&
+      host !== "exambuilderapp.oqabagency.com" &&
+      host !== "exambuilderadmin.oqabagency.com" &&
+      host !== "localhost" &&
+      host !== "127.0.0.1"
+  );
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -84,6 +100,34 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     const payload = verifySessionToken(cookieStore.get(getSessionCookieName())?.value);
     if (!payload || !isRoleAllowedHere(payload.role)) return null;
 
+    let host = "";
+    try {
+      const h = await headers();
+      host = (h.get("host") || "").split(":")[0].trim().toLowerCase();
+    } catch {
+      host = "";
+    }
+
+    if (isDedicatedTenantHost(host)) {
+      const domainTenant = await findTenantByDomain(host);
+      if (domainTenant) {
+        if (
+          payload.role === "TENANT" &&
+          payload.id !== domainTenant.id &&
+          payload.phone !== domainTenant.phone
+        ) {
+          return null;
+        }
+        setCurrentTenantId(domainTenant.id);
+        return {
+          id: domainTenant.id,
+          phone: domainTenant.phone,
+          role: payload.role,
+          name: domainTenant.name || payload.name,
+        };
+      }
+    }
+
     if (payload.id) {
       setCurrentTenantId(payload.id);
     }
@@ -100,10 +144,30 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 }
 
 /**
- * Verifies an active session for API routes and initializes the request's tenant context.
+ * Verifies an active session AND active subscription for API routes,
+ * initializing the request's isolated tenant context.
  */
 export async function requireApiSession(): Promise<SessionUser | null> {
-  return getSessionUser();
+  const session = await getSessionUser();
+  if (!session) return null;
+
+  if (session.role === "TENANT") {
+    const tenant =
+      (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
+    const blockReason = getTenantAccessBlock(tenant);
+    if (blockReason || !tenant) {
+      return null;
+    }
+    setCurrentTenantId(tenant.id);
+    return {
+      id: tenant.id,
+      phone: tenant.phone,
+      role: "TENANT",
+      name: tenant.name || session.name,
+    };
+  }
+
+  return session;
 }
 
 /** Throws unless the caller is the Super Admin on a process where admin is enabled. */

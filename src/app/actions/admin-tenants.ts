@@ -5,12 +5,13 @@ import { requireSuperAdmin, hashPassword } from "@/lib/auth";
 import { generateDockerConfig, HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 import {
   createTenantRecord,
+  findTenantById,
   findTenantByPhone,
   updateTenantRecord,
   deleteTenantRecord,
   getTenantsList,
 } from "@/lib/tenants-repository";
-import { syncTenantsToVps, provisionTenantDomain } from "@/lib/vps-sync";
+import { syncTenantsToVps, provisionTenantDomain, removeTenantFromVps } from "@/lib/vps-sync";
 import {
   SubscriptionCategory,
   normalizeEnabledFeatures,
@@ -340,8 +341,10 @@ export async function deleteTenantAction(tenantId: string) {
   await assertSuperAdmin();
 
   try {
+    const existing = await findTenantById(tenantId);
     await deleteTenantRecord(tenantId);
     const vpsSync = await syncTenantsToVps({ force: true });
+    await removeTenantFromVps(existing?.domain, tenantId);
     revalidatePath("/admin");
     return { success: true, message: "تم حذف حساب العميل وكافة بياناته بنجاح", vpsSync };
   } catch (err: any) {

@@ -11,7 +11,7 @@ export const isDatabaseConfigured = Boolean(process.env.DATABASE_URL);
 
 const connectionString =
   process.env.DATABASE_URL ||
-  "postgresql://exam_builder:ExamBuilder2026!@127.0.0.1:5432/exam_builder_db?schema=public";
+  "postgresql://127.0.0.1:5432/exam_builder_db?schema=public";
 
 const pool =
   globalForPrisma.pool ??

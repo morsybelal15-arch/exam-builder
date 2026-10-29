@@ -229,3 +229,34 @@ fi
     return { online: false, message: "تعذر الفحص: " + (err?.message?.split("\n")[0] || "") };
   }
 }
+
+/**
+ * Cleans up a deleted tenant's Nginx virtual host and isolated data directories on the VPS.
+ */
+export async function removeTenantFromVps(domain?: string | null, tenantId?: string): Promise<void> {
+  const cleanDomain = (domain || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+  const safeTenantId = (tenantId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+
+  const lines: string[] = ["set -e"];
+  if (safeTenantId && safeTenantId !== "default") {
+    lines.push(`rm -rf ${VPS_APP_DIR}/data/tenants/${safeTenantId} || true`);
+    lines.push(`rm -rf /root/.exam_builder/tenants/${safeTenantId} || true`);
+    lines.push(`rm -rf /root/.exam_builder/uploads/${safeTenantId} || true`);
+  }
+  if (cleanDomain && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(cleanDomain)) {
+    lines.push(`rm -f /etc/nginx/sites-enabled/exam-tenant-${cleanDomain} || true`);
+    lines.push(`rm -f /etc/nginx/sites-available/exam-tenant-${cleanDomain} || true`);
+    lines.push(`nginx -t && systemctl reload nginx || true`);
+  }
+
+  if (lines.length <= 1) return;
+  try {
+    await runOnVps(lines.join("\n"), 20_000);
+  } catch {
+    // Non-fatal cleanup
+  }
+}

@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { prisma, isDatabaseReachable } from "@/lib/prisma";
-import { getTenantUsageStats, getUploadsDir } from "@/lib/db";
-import { getManagementStore } from "@/lib/management-db";
+import { getTenantUsageStats, getUploadsDir, purgeTenantLocalDb } from "@/lib/db";
+import { getManagementStore, purgeTenantManagementStore } from "@/lib/management-db";
 import {
   ALL_FEATURE_IDS,
   SubscriptionCategory,
@@ -760,5 +760,9 @@ export async function deleteTenantRecord(id: string): Promise<boolean> {
   const localList = ensureStoreFile();
   const filtered = localList.filter((t) => t.id !== id);
   saveStoreFile(filtered);
+
+  purgeTenantLocalDb(id);
+  purgeTenantManagementStore(id);
+
   return true;
 }

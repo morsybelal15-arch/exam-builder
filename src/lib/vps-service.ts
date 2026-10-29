@@ -2,7 +2,7 @@
  * Hostinger VPS & DNS Integration Service
  * Target VPS: 72.60.44.106 (srv1792816.hstgr.cloud - KVM 2, Ubuntu 24.04)
  *
- * NOTE: imported by client components too â€” keep this file free of Node-only APIs.
+ * NOTE: imported by client components too — keep this file free of Node-only APIs.
  */
 
 export interface VpsInfo {
@@ -23,9 +23,9 @@ export const HOSTINGER_VPS_CONFIG: VpsInfo = {
   status: "running",
 };
 
-/** PM2 process "exam-builder" (APP_MODE=tenant) â€” serves every teacher domain. */
+/** PM2 process "exam-builder" (APP_MODE=tenant) — serves every teacher domain. */
 export const TENANT_APP_PORT = 3015;
-/** PM2 process "exam-admin" (APP_MODE=admin) â€” serves only the admin domain. */
+/** PM2 process "exam-admin" (APP_MODE=admin) — serves only the admin domain. */
 export const ADMIN_APP_PORT = 3016;
 /** The one and only Super Admin domain. */
 export const DEFAULT_ADMIN_HOST = "exambuilderadmin.oqabagency.com";
@@ -123,7 +123,7 @@ ${proxyLocation(TENANT_APP_PORT)}
  * Vhost for the dedicated admin domain. An exact server_name always wins over the
  * *.oqabagency.com wildcard, so this never collides with tenant routing.
  *  - withSsl=false: HTTP only + ACME webroot (used until the certificate exists)
- *  - withSsl=true : HTTPâ†’HTTPS redirect + TLS vhost
+ *  - withSsl=true : HTTP->HTTPS redirect + TLS vhost
  */
 export function generateAdminNginx(host: string, withSsl: boolean): string {
   const acme = `    location /.well-known/acme-challenge/ {
@@ -131,7 +131,7 @@ export function generateAdminNginx(host: string, withSsl: boolean): string {
     }`;
 
   if (!withSsl) {
-    return `# Exam Builder â€” Super Admin domain (HTTP, awaiting certificate)
+    return `# Exam Builder — Super Admin domain (HTTP, awaiting certificate)
 server {
     listen 80;
     listen [::]:80;
@@ -147,7 +147,7 @@ ${proxyLocation(ADMIN_APP_PORT)}
 `;
   }
 
-  return `# Exam Builder â€” Super Admin domain (HTTPS only)
+  return `# Exam Builder — Super Admin domain (HTTPS only)
 server {
     listen 80;
     listen [::]:80;

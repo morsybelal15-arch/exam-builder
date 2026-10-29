@@ -205,7 +205,7 @@ export async function deployExamBuilderToVpsAction(): Promise<VpsDeployResult> {
     }
 
     // First-time migration only: pushes local tenants.json when the VPS has none yet.
-    const sync = await syncTenantsToVps();
+    const sync = await syncTenantsToVps({ force: true });
     logs.push(sync.message);
 
     const health = stdout.match(/\[health\] tenant=(\d+) admin=(\d+) tenant_admin_path=(\d+)/);
@@ -253,7 +253,7 @@ export async function autoDeployTenantVpsAction(
       return { success: false, message: domainRes.message, logs };
     }
 
-    const sync = await syncTenantsToVps();
+    const sync = await syncTenantsToVps({ force: true });
     logs.push(sync.message);
 
     const health = await checkTenantDomainOnVps(cleanDomain);

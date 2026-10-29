@@ -195,26 +195,10 @@ function initSchema(db: any) {
 }
 
 /**
- * If a real tenant logs in and no tenant has claimed the legacy 'default' rows yet,
- * migrate those legacy rows once to this first tenant so existing local work is preserved.
+ * No-op: each tenant keeps a strictly isolated partition in `exams` and `uploaded_files`.
  */
-function ensureLegacyTenantClaimed(db: any, tenantKey: string) {
-  if (!tenantKey || tenantKey === "default") return;
-  try {
-    const claimedExams = db
-      .prepare("SELECT count(*) as count FROM exams WHERE tenant_id IS NOT NULL AND tenant_id != 'default' AND tenant_id != ''")
-      .get() as { count: number };
-    const claimedFiles = db
-      .prepare("SELECT count(*) as count FROM uploaded_files WHERE tenant_id IS NOT NULL AND tenant_id != 'default' AND tenant_id != ''")
-      .get() as { count: number };
-
-    if ((claimedExams?.count || 0) === 0 && (claimedFiles?.count || 0) === 0) {
-      db.prepare("UPDATE exams SET tenant_id = ? WHERE tenant_id IS NULL OR tenant_id = 'default' OR tenant_id = ''").run(tenantKey);
-      db.prepare("UPDATE uploaded_files SET tenant_id = ? WHERE tenant_id IS NULL OR tenant_id = 'default' OR tenant_id = ''").run(tenantKey);
-    }
-  } catch {
-    // Ignore migration errors
-  }
+function ensureLegacyTenantClaimed(_db: any, _tenantKey: string) {
+  // Intentionally empty — prevents new tenants from inheriting default demo rows.
 }
 
 // ==========================================
@@ -584,5 +568,39 @@ export function getTenantUsageStats(tenantId: string): {
     };
   } catch {
     return { examsCount: 0, filesCount: 0, usedStorageBytes: 0 };
+  }
+}
+
+/**
+ * Permanently removes all exams, uploaded file metadata, and upload directory for a deleted tenant.
+ */
+export function purgeTenantLocalDb(tenantId: string): void {
+  const tenantKey = sanitizeTenantKey(tenantId);
+  if (!tenantKey || tenantKey === "default") return;
+
+  try {
+    const db = getDb();
+    if (db) {
+      db.prepare("DELETE FROM exams WHERE tenant_id = ?").run(tenantKey);
+      db.prepare("DELETE FROM uploaded_files WHERE tenant_id = ?").run(tenantKey);
+    } else {
+      const store = getJsonStore();
+      store.exams = store.exams.filter((e) => (e.tenant_id || "default") !== tenantKey);
+      store.uploaded_files = store.uploaded_files.filter(
+        (f) => (f.tenant_id || "default") !== tenantKey
+      );
+      saveJsonStore(store);
+    }
+  } catch (err) {
+    console.warn("Error purging tenant SQLite/JSON rows:", err);
+  }
+
+  try {
+    const tenantUploadFolder = path.join(uploadsDir, tenantKey);
+    if (fs.existsSync(tenantUploadFolder)) {
+      fs.rmSync(tenantUploadFolder, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.warn("Error removing tenant uploads folder:", err);
   }
 }

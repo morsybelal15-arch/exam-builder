@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "طلب غير صالح." }, { status: 400 });
   }
 
-  const apiKey = (body.apiKey || "").trim();
+  const apiKey = (body.apiKey || "").replace(/[\r\n"'`$\\]/g, "").trim();
   if (!apiKey) {
     return NextResponse.json(
       { success: false, error: "يرجى إدخال مفتاح Gemini API." },
@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Only persist to global .env.local when Super Admin or in local development
-  const canWriteServerEnv = session.role === "SUPER_ADMIN" || process.env.NODE_ENV !== "production";
+  // Only persist to global .env.local when Super Admin
+  const canWriteServerEnv = session.role === "SUPER_ADMIN";
   if (body.saveToEnv !== false && canWriteServerEnv) {
     try {
       const envPath = path.join(process.cwd(), ".env.local");

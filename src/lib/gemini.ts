@@ -2,10 +2,11 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 
 export const CANDIDATE_MODELS = [
   process.env.GEMINI_MODEL,
+  "gemini-2.5-flash",
+  "gemini-flash-lite-latest",
   "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
   "gemini-3.8-flash",
-  "gemini-flash-lite-latest",
 ].filter(Boolean) as string[];
 
 export type QuestionType = "choice" | "trueFalse" | "essay" | "fillBlank";

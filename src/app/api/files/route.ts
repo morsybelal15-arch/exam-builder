@@ -238,16 +238,13 @@ export async function DELETE(req: NextRequest) {
     }
 
     const tenantUploadsDir = getUploadsDir(session.id);
-    const defaultUploadsDir = getUploadsDir("default");
 
     for (const safeName of candidateNames) {
-      for (const dir of [tenantUploadsDir, defaultUploadsDir]) {
-        const filePath = path.join(dir, safeName);
-        if (fs.existsSync(filePath)) {
-          try {
-            fs.unlinkSync(filePath);
-          } catch { }
-        }
+      const filePath = path.join(tenantUploadsDir, safeName);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch {}
       }
     }
 

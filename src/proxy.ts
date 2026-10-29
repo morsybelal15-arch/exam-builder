@@ -92,11 +92,11 @@ export function proxy(request: NextRequest) {
       return isAdmin ? NextResponse.next() : redirectTo(request, "/login", pathname);
     }
 
-    // Everything else (exam builder, OCR, files API, â€¦) does not exist on the admin domain.
+    // Everything else (exam builder, OCR, files API, ...) does not exist on the admin domain.
     return notFound(request);
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TENANT DOMAINS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ───────────────────────────── TENANT DOMAINS ─────────────────────────────
   if (mode === "tenant" && isAdminPath(pathname)) return notFound(request);
 
   // Public zero-login parent portal exemption: /s/* is directly accessible by parents without login

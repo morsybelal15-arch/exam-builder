@@ -20,9 +20,10 @@ export async function GET(req: NextRequest) {
     const safeName = path.basename(name);
     const candidatePaths = [
       path.join(/*turbopackIgnore: true*/ getUploadsDir(session.id), safeName),
-      path.join(/*turbopackIgnore: true*/ getUploadsDir("default"), safeName),
-      path.join(/*turbopackIgnore: true*/ process.cwd(), "public", safeName),
     ];
+    if (safeName === "sample-textbook.svg") {
+      candidatePaths.push(path.join(/*turbopackIgnore: true*/ process.cwd(), "public", safeName));
+    }
 
     for (const filePath of candidatePaths) {
       if (fs.existsSync(/*turbopackIgnore: true*/ filePath)) {

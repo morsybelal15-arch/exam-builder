@@ -164,7 +164,7 @@ export default function TopHeaderBar() {
   }, []);
 
   const loadDirectoryIfNeeded = async () => {
-    if (hasLoadedDirectory) return;
+    if (hasLoadedDirectory && students.length > 0) return;
     setHasLoadedDirectory(true);
     try {
       const [stdRes, grpRes] = await Promise.all([
@@ -174,10 +174,12 @@ export default function TopHeaderBar() {
       if (stdRes.ok) {
         const stdData = await stdRes.json();
         if (Array.isArray(stdData)) setStudents(stdData);
+        else if (Array.isArray(stdData?.students)) setStudents(stdData.students);
       }
       if (grpRes.ok) {
         const grpData = await grpRes.json();
         if (Array.isArray(grpData)) setGroups(grpData);
+        else if (Array.isArray(grpData?.groups)) setGroups(grpData.groups);
       }
     } catch {
       // non-fatal

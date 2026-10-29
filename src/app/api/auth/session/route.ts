@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSessionCookieName } from "@/lib/app-mode";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 import {
   findTenantById,
   findTenantByPhone,
@@ -8,7 +9,7 @@ import {
   getTenantAccessBlock,
 } from "@/lib/tenants-repository";
 import { getStudents, getGroups } from "@/lib/management-db";
-import { getLocalUploadedFiles } from "@/lib/db";
+import { getLocalUploadedFiles, getTenantUsageStats } from "@/lib/db";
 import {
   ALL_FEATURE_IDS,
   normalizeEnabledFeatures,
@@ -48,7 +49,28 @@ export async function GET(req: NextRequest) {
       host !== "127.0.0.1"
   );
 
+  if (
+    isDedicatedTenantDomain &&
+    session.role === "TENANT" &&
+    domainTenant &&
+    userTenant &&
+    userTenant.id !== domainTenant.id
+  ) {
+    const res = NextResponse.json({ authenticated: false }, { headers: NO_CACHE_HEADERS });
+    res.cookies.set(getSessionCookieName(), "", {
+      path: "/",
+      maxAge: 0,
+      expires: new Date(0),
+      httpOnly: true,
+      sameSite: "lax",
+    });
+    return res;
+  }
+
   const tenant = isDedicatedTenantDomain ? domainTenant : userTenant || domainTenant;
+  if (tenant?.id) {
+    setCurrentTenantId(tenant.id);
+  }
 
   let studentsCount = 0;
   let activeStudentsCount = 0;
@@ -59,8 +81,13 @@ export async function GET(req: NextRequest) {
     studentsCount = stds.length;
     activeStudentsCount = stds.filter((s) => s.status === "active").length;
     groupsCount = getGroups().length;
-    const files = getLocalUploadedFiles();
-    filesBytes = files.reduce((acc: number, f: any) => acc + (Number(f.size) || 0), 0);
+    const files = getLocalUploadedFiles(tenant?.id);
+    const localBytes = files.reduce(
+      (acc: number, f: any) => acc + (Number(f.size_bytes) || 0),
+      0
+    );
+    const statsBytes = tenant?.id ? getTenantUsageStats(tenant.id).usedStorageBytes : 0;
+    filesBytes = Math.max(localBytes, statsBytes, Number(tenant?.usedStorageBytes || 0));
   } catch {
     // non-fatal
   }
