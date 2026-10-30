@@ -65,6 +65,12 @@ const MONTHS_LIST = [
   { value: "2027-04", label: "أبريل 2027" },
   { value: "2027-05", label: "مايو 2027" },
   { value: "2027-06", label: "يونيو 2027" },
+  { value: "2027-07", label: "يوليو 2027" },
+  { value: "2027-08", label: "أغسطس 2027" },
+  { value: "2027-09", label: "سبتمبر 2027" },
+  { value: "2027-10", label: "أكتوبر 2027" },
+  { value: "2027-11", label: "نوفمبر 2027" },
+  { value: "2027-12", label: "ديسمبر 2027" },
 ];
 
 type ExportPresetType = "all" | "students_group" | "financials" | "phones" | "custom";
@@ -123,7 +129,7 @@ export default function ExcelSheetsPage() {
   const [exportAcademicYear, setExportAcademicYear] = useState<string>("ALL");
   const [exportGroupId, setExportGroupId] = useState<string>("ALL");
   const [exportStudentStatus, setExportStudentStatus] = useState<"active" | "inactive" | "all">("active");
-  const [exportMonth, setExportMonth] = useState<string>("2026-10");
+  const [exportMonth, setExportMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
   const [exportPaymentFilter, setExportPaymentFilter] = useState<"all" | "paid" | "unpaid" | "overdue">("all");
   const [exportSearchQuery, setExportSearchQuery] = useState<string>("");
 
@@ -213,6 +219,15 @@ export default function ExcelSheetsPage() {
 
   useEffect(() => {
     fetchExcelDataset();
+    const onSync = () => {
+      fetchExcelDataset();
+    };
+    window.addEventListener("tenant-data-mutated", onSync);
+    window.addEventListener("focus", onSync);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", onSync);
+      window.removeEventListener("focus", onSync);
+    };
   }, [exportAcademicYear, exportGroupId, exportStudentStatus, exportMonth, exportPaymentFilter, includeFinancialsInfo]);
 
   // Synchronize preset toggles

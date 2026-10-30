@@ -67,9 +67,28 @@ function getTenantScope(): string {
   return getHost();
 }
 
-export function notifyTenantDataMutated(): void {
+export function notifyTenantDataMutated(preserveKeyPrefix?: string): void {
   if (typeof window === "undefined") return;
   try {
+    if (!preserveKeyPrefix) {
+      invalidateCachedPageData();
+    } else {
+      const hostPrefix = `${PAGE_CACHE_PREFIX}${getTenantScope()}:`;
+      const keepPrefix = `${hostPrefix}${preserveKeyPrefix}`;
+      for (const k of Array.from(memoryPageCache.keys())) {
+        if (k.startsWith(hostPrefix) && !k.startsWith(keepPrefix)) {
+          memoryPageCache.delete(k);
+        }
+      }
+      const toDelete: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k && k.startsWith(hostPrefix) && !k.startsWith(keepPrefix)) {
+          toDelete.push(k);
+        }
+      }
+      toDelete.forEach((k) => sessionStorage.removeItem(k));
+    }
     window.dispatchEvent(new CustomEvent("tenant-data-mutated"));
   } catch {
     // ignore

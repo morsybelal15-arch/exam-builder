@@ -57,6 +57,16 @@ export default function GroupsPage() {
       setIsLoading(false);
     }
     fetchData(Boolean(cached));
+
+    const onSync = () => {
+      fetchData(true);
+    };
+    window.addEventListener("tenant-data-mutated", onSync);
+    window.addEventListener("focus", onSync);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", onSync);
+      window.removeEventListener("focus", onSync);
+    };
   }, []);
 
   const fetchData = async (silent = false) => {

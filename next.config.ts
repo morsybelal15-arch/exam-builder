@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
   experimental: {
+    staleTimes: {
+      dynamic: 0,
+      static: 30,
+    },
     serverActions: {
       bodySizeLimit: "1gb",
     },

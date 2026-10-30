@@ -139,6 +139,16 @@ export default function CreatedExamsPage() {
       setIsLoading(false);
     }
     fetchExamsFromDb();
+
+    const onSync = () => {
+      fetchExamsFromDb();
+    };
+    window.addEventListener("tenant-data-mutated", onSync);
+    window.addEventListener("focus", onSync);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", onSync);
+      window.removeEventListener("focus", onSync);
+    };
   }, []);
 
   const fetchExamsFromDb = async () => {
@@ -164,7 +174,7 @@ export default function CreatedExamsPage() {
         return next;
       });
       await fetch(`/api/exams?id=${id}`, { method: "DELETE" });
-      notifyTenantDataMutated();
+      notifyTenantDataMutated("created_exams");
     } catch (err) {
       console.error(err);
     }

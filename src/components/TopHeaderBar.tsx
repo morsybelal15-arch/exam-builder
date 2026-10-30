@@ -178,13 +178,14 @@ export default function TopHeaderBar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const loadDirectoryIfNeeded = async () => {
-    if (hasLoadedDirectory && students.length > 0) return;
+  const loadDirectoryIfNeeded = async (force = false) => {
+    if (!force && hasLoadedDirectory && students.length > 0) return;
     setHasLoadedDirectory(true);
     try {
+      const ts = Date.now();
       const [stdRes, grpRes] = await Promise.all([
-        fetch("/api/students"),
-        fetch("/api/groups"),
+        fetch(`/api/students?t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/groups?t=${ts}`, { cache: "no-store" }),
       ]);
       if (stdRes.ok) {
         const stdData = await stdRes.json();
@@ -200,6 +201,15 @@ export default function TopHeaderBar() {
       // non-fatal
     }
   };
+
+  useEffect(() => {
+    const onMutated = () => {
+      setHasLoadedDirectory(false);
+      loadDirectoryIfNeeded(true);
+    };
+    window.addEventListener("tenant-data-mutated", onMutated);
+    return () => window.removeEventListener("tenant-data-mutated", onMutated);
+  }, []);
 
   const isValidTenantPage =
     pathname === "/" ||

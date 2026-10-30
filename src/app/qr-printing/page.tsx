@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Group, Student, SavedQrPdf } from "@/lib/types/management";
 import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
+import { notifyTenantDataMutated } from "@/lib/client-session-cache";
 import StudentProfileModal from "@/components/students/StudentProfileModal";
 
 function QrPrintingContent() {
@@ -58,11 +59,20 @@ function QrPrintingContent() {
 
   useEffect(() => {
     fetchInitialData();
+    const onSync = () => {
+      fetchInitialData(true);
+    };
+    window.addEventListener("tenant-data-mutated", onSync);
+    window.addEventListener("focus", onSync);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", onSync);
+      window.removeEventListener("focus", onSync);
+    };
   }, []);
 
-  const fetchInitialData = async () => {
+  const fetchInitialData = async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const ts = Date.now();
       const [resGroups, resStudents, resPdfs] = await Promise.all([
         fetch(`/api/groups?t=${ts}`, { cache: "no-store" }),
@@ -180,6 +190,7 @@ function QrPrintingContent() {
       const data = await res.json();
       if (data.success && data.pdf) {
         setSavedPdfs((prev) => [data.pdf, ...prev]);
+        notifyTenantDataMutated();
         setSavedSuccessMsg("تم حفظ المستند في الأرشيف بنجاح ✓");
         setTimeout(() => setSavedSuccessMsg(""), 3000);
       }
@@ -195,6 +206,7 @@ function QrPrintingContent() {
     try {
       await fetch(`/api/qr-sheets?id=${id}`, { method: "DELETE" });
       setSavedPdfs((prev) => prev.filter((p) => p.id !== id));
+      notifyTenantDataMutated();
     } catch (err) {
       console.error(err);
     }

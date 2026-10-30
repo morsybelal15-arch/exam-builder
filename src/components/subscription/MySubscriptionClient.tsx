@@ -3,7 +3,12 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { clearAllLocalPcFiles } from "@/lib/local-pc-files";
-import { clearCachedSession } from "@/lib/client-session-cache";
+import {
+  clearCachedSession,
+  getCachedSession,
+  setCachedSession,
+  notifyTenantDataMutated,
+} from "@/lib/client-session-cache";
 import {
   formatUsedStorageArabic,
   formatStorageLimitMbArabic,
@@ -63,9 +68,7 @@ export default function MySubscriptionClient({
 
   // Listen to live session sync from SubscriptionGuard so storage, limits, and pinned admin messages update in real time
   useEffect(() => {
-    const onSync = (e: Event) => {
-      const custom = e as CustomEvent;
-      const data = custom.detail;
+    const applyData = (data: any) => {
       if (!data || !data.authenticated) return;
       if (data.storageLimitBytes !== undefined) {
         setLimitBytes(Number(data.storageLimitBytes) || initialStorageLimitBytes);
@@ -77,8 +80,38 @@ export default function MySubscriptionClient({
         setPinnedNotice(data.notes || null);
       }
     };
+
+    const cached = getCachedSession();
+    if (cached) {
+      applyData(cached);
+    }
+
+    const fetchLiveSession = () => {
+      fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((sessionData) => {
+          if (sessionData && sessionData.authenticated) {
+            setCachedSession(sessionData);
+            applyData(sessionData);
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchLiveSession();
+
+    const onSync = (e: Event) => {
+      const custom = e as CustomEvent;
+      applyData(custom.detail);
+    };
     window.addEventListener("tenant-session-sync", onSync);
-    return () => window.removeEventListener("tenant-session-sync", onSync);
+    window.addEventListener("tenant-data-mutated", fetchLiveSession);
+    window.addEventListener("focus", fetchLiveSession);
+    return () => {
+      window.removeEventListener("tenant-session-sync", onSync);
+      window.removeEventListener("tenant-data-mutated", fetchLiveSession);
+      window.removeEventListener("focus", fetchLiveSession);
+    };
   }, [initialStorageLimitBytes]);
 
   const { barWidthPercent, displayPercent } = computeStoragePercent(usedBytes, limitBytes);
@@ -106,6 +139,7 @@ export default function MySubscriptionClient({
       }
       try {
         clearCachedSession();
+        notifyTenantDataMutated();
         sessionStorage.removeItem("eb_exam_builder_viewer_freeze_v1");
         localStorage.removeItem("exam_builder_draft");
       } catch {

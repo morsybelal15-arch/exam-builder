@@ -39,6 +39,7 @@ import {
   StudentGradeRecord,
   StudentStatus,
 } from "@/lib/types/management";
+import { notifyTenantDataMutated } from "@/lib/client-session-cache";
 
 interface StudentProfileClientProps {
   initialProfile: {
@@ -76,15 +77,8 @@ export default function StudentProfileClient({
   }, [initialProfile]);
 
   useEffect(() => {
-    if (!allGroups || allGroups.length === 0) {
-      fetch("/api/groups")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.groups) {
-            setGroupsList(data.groups);
-          }
-        })
-        .catch(console.error);
+    if (allGroups && allGroups.length > 0) {
+      setGroupsList(allGroups);
     }
   }, [allGroups]);
 
@@ -95,13 +89,23 @@ export default function StudentProfileClient({
   const refreshProfile = async () => {
     try {
       setIsRefreshing(true);
-      const res = await fetch(`/api/students?id=${student.id}&profile=true`);
-      const data = await res.json();
+      const [res, grpRes] = await Promise.all([
+        fetch(`/api/students?id=${student.id}&profile=true&t=${Date.now()}`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/groups?t=${Date.now()}`, {
+          cache: "no-store",
+        }),
+      ]);
+      const [data, grpData] = await Promise.all([res.json(), grpRes.json()]);
       if (data.success && data.profile) {
         setProfileData({
           ...data.profile,
           group: data.profile.group || null,
         });
+      }
+      if (grpData.success && Array.isArray(grpData.groups)) {
+        setGroupsList(grpData.groups);
       }
     } catch (err) {
       console.error("Error refreshing profile:", err);
@@ -109,6 +113,20 @@ export default function StudentProfileClient({
       setIsRefreshing(false);
     }
   };
+
+  // Always refresh live profile on mount, window focus, and cross-page mutations
+  useEffect(() => {
+    refreshProfile();
+    const onSync = () => {
+      refreshProfile();
+    };
+    window.addEventListener("tenant-data-mutated", onSync);
+    window.addEventListener("focus", onSync);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", onSync);
+      window.removeEventListener("focus", onSync);
+    };
+  }, [student.id]);
 
   // Calculate stats
   const totalSessions = Math.max(attendance.length, sessions.length);
@@ -138,6 +156,7 @@ export default function StudentProfileClient({
         }),
       });
 
+      notifyTenantDataMutated();
       await refreshProfile();
       router.refresh();
     } catch (err) {
@@ -156,6 +175,7 @@ export default function StudentProfileClient({
     try {
       setIsDeleting(true);
       await fetch(`/api/students?id=${student.id}`, { method: "DELETE" });
+      notifyTenantDataMutated();
       router.push("/students");
     } catch (err) {
       console.error(err);
@@ -276,6 +296,7 @@ ${portalUrl}
         throw new Error(errData.error || "فشل في حفظ التعديلات");
       }
 
+      notifyTenantDataMutated();
       await refreshProfile();
       setIsEditStudentModalOpen(false);
       router.refresh();
@@ -384,6 +405,7 @@ ${portalUrl}
         throw new Error(errData.error || "فشل في حفظ السجل المالي");
       }
 
+      notifyTenantDataMutated();
       await refreshProfile();
       setFinancialModal((prev) => ({ ...prev, isOpen: false }));
       router.refresh();
@@ -420,6 +442,7 @@ ${portalUrl}
         throw new Error("فشل في تحديث حالة الحضور");
       }
 
+      notifyTenantDataMutated();
       await refreshProfile();
       router.refresh();
     } catch (err: any) {
@@ -453,6 +476,7 @@ ${portalUrl}
       });
 
       if (!res.ok) throw new Error("فشل في تسجيل الحضور");
+      notifyTenantDataMutated();
       await refreshProfile();
       setShowAddAttendanceModal(false);
       router.refresh();
@@ -511,6 +535,7 @@ ${portalUrl}
       });
 
       if (!res.ok) throw new Error("فشل في حفظ درجة الاختبار");
+      notifyTenantDataMutated();
       await refreshProfile();
       setGradeModal((prev) => ({ ...prev, isOpen: false }));
       router.refresh();

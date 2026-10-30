@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Group } from "@/lib/types/management";
 import { HomeAnalytics, AnalyticsFilterMode } from "@/lib/management-db";
+import { notifyTenantDataMutated } from "@/lib/client-session-cache";
 import FastAttendanceScannerModal from "./FastAttendanceScannerModal";
 import FastPaymentScannerModal from "./FastPaymentScannerModal";
 
@@ -48,8 +49,17 @@ export default function HomeDashboardClient({
   groups,
 }: HomeDashboardClientProps) {
   const [data, setData] = useState<HomeAnalytics>(initialData);
+  const [groupsList, setGroupsList] = useState<Group[]>(groups);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+
+  useEffect(() => {
+    setData(initialData);
+  }, [initialData]);
+
+  useEffect(() => {
+    setGroupsList(groups);
+  }, [groups]);
 
   // Refs for GSAP animations
   const kpiGridRef = useRef<HTMLDivElement>(null);
@@ -172,15 +182,18 @@ export default function HomeDashboardClient({
     String(currentSystemYear - 3),
   ];
 
-  const fetchFilteredAnalytics = async (params: {
-    mode: AnalyticsFilterMode;
-    month?: string;
-    year?: string;
-    startDate?: string;
-    endDate?: string;
-    targetDate?: string;
-  }) => {
-    setIsLoadingRange(true);
+  const fetchFilteredAnalytics = async (
+    params: {
+      mode: AnalyticsFilterMode;
+      month?: string;
+      year?: string;
+      startDate?: string;
+      endDate?: string;
+      targetDate?: string;
+    },
+    silent = false
+  ) => {
+    if (!silent) setIsLoadingRange(true);
     try {
       const qs = new URLSearchParams();
       qs.set("mode", params.mode);
@@ -189,20 +202,54 @@ export default function HomeDashboardClient({
       if (params.startDate) qs.set("startDate", params.startDate);
       if (params.endDate) qs.set("endDate", params.endDate);
       if (params.targetDate) qs.set("targetDate", params.targetDate);
+      qs.set("t", String(Date.now()));
 
-      const res = await fetch(`/api/home-analytics?${qs.toString()}`, {
-        cache: "no-store",
-      });
-      const json = await res.json();
+      const [res, grpRes] = await Promise.all([
+        fetch(`/api/home-analytics?${qs.toString()}`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/groups?t=${Date.now()}`, {
+          cache: "no-store",
+        }),
+      ]);
+      const [json, grpJson] = await Promise.all([res.json(), grpRes.json()]);
       if (res.ok && json.analytics) {
         setData(json.analytics);
+      }
+      if (grpRes.ok && grpJson.success && Array.isArray(grpJson.groups)) {
+        setGroupsList(grpJson.groups);
       }
     } catch (e) {
       console.error("Failed to fetch filtered analytics:", e);
     } finally {
-      setIsLoadingRange(false);
+      if (!silent) setIsLoadingRange(false);
     }
   };
+
+  // Always refresh live analytics on mount, window focus, and cross-page mutations so navigating to "/" never displays stale data
+  useEffect(() => {
+    const refreshCurrent = () => {
+      fetchFilteredAnalytics(
+        {
+          mode: filterMode,
+          month: selectedMonth,
+          year: selectedYear,
+          startDate: customStartDate,
+          endDate: customEndDate,
+          targetDate: selectedCalendarDay,
+        },
+        true
+      );
+    };
+
+    refreshCurrent();
+    window.addEventListener("tenant-data-mutated", refreshCurrent);
+    window.addEventListener("focus", refreshCurrent);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", refreshCurrent);
+      window.removeEventListener("focus", refreshCurrent);
+    };
+  }, [filterMode, selectedMonth, selectedYear, customStartDate, customEndDate, selectedCalendarDay]);
 
   const handleModeChange = (nextMode: AnalyticsFilterMode) => {
     setFilterMode(nextMode);
@@ -302,18 +349,34 @@ export default function HomeDashboardClient({
         recentAttendance: newRecent,
       };
     });
+    notifyTenantDataMutated();
+    fetchFilteredAnalytics(
+      {
+        mode: filterMode,
+        month: selectedMonth,
+        year: selectedYear,
+        startDate: customStartDate,
+        endDate: customEndDate,
+        targetDate: selectedCalendarDay,
+      },
+      true
+    );
   };
 
   // Handler for when a student payment is recorded via Fast Payment QR
   const handlePaymentRecorded = () => {
-    fetchFilteredAnalytics({
-      mode: filterMode,
-      month: selectedMonth,
-      year: selectedYear,
-      startDate: customStartDate,
-      endDate: customEndDate,
-      targetDate: selectedCalendarDay,
-    });
+    notifyTenantDataMutated();
+    fetchFilteredAnalytics(
+      {
+        mode: filterMode,
+        month: selectedMonth,
+        year: selectedYear,
+        startDate: customStartDate,
+        endDate: customEndDate,
+        targetDate: selectedCalendarDay,
+      },
+      true
+    );
   };
 
   const fmtNum = (val?: number | null) => Number(val ?? 0).toLocaleString("ar-EG");
@@ -1748,7 +1811,7 @@ export default function HomeDashboardClient({
       {/* Fast Attendance Modal */}
       {showAttendanceModal && (
         <FastAttendanceScannerModal
-          groups={groups}
+          groups={groupsList}
           todayDate={data.todayDate}
           onClose={() => setShowAttendanceModal(false)}
           onAttendanceRecorded={handleAttendanceRecorded}

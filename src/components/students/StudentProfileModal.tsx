@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Student } from "@/lib/types/management";
 import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
+import { notifyTenantDataMutated } from "@/lib/client-session-cache";
 
 interface StudentProfileModalProps {
   studentId: string;
@@ -52,7 +53,9 @@ export default function StudentProfileModal({
   const fetchProfile = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch(`/api/students?id=${studentId}&profile=true`);
+      const res = await fetch(`/api/students?id=${studentId}&profile=true&t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (data.success && data.profile) {
         setProfileData(data.profile);
@@ -81,6 +84,7 @@ export default function StudentProfileModal({
           updates: { status: newStatus },
         }),
       });
+      notifyTenantDataMutated();
       fetchProfile();
       onUpdate();
     } catch (err) {

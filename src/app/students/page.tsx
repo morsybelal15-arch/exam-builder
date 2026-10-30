@@ -292,9 +292,16 @@ function StudentsPageContent() {
       }
       if (dataExams.success) {
         setExamRecords(nextExams);
-        if (nextExams.length > 0 && !selectedExamRecordId) {
-          setSelectedExamRecordId(nextExams[0].id);
-          loadExamGrades(nextExams[0].id, groupId);
+        const activeExamId =
+          selectedExamRecordId && nextExams.some((e: ExamRecord) => e.id === selectedExamRecordId)
+            ? selectedExamRecordId
+            : nextExams[0]?.id || "";
+        if (activeExamId) {
+          setSelectedExamRecordId(activeExamId);
+          loadExamGrades(activeExamId, groupId);
+        } else {
+          setSelectedExamRecordId(null);
+          setSelectedExamGrades([]);
         }
       }
 
@@ -353,6 +360,22 @@ function StudentsPageContent() {
     }
   }, [attendanceDate]);
 
+  // Listen to cross-page mutations and window focus so data stays 100% live
+  useEffect(() => {
+    const onSync = () => {
+      fetchGroups(true);
+      if (selectedGroupId) {
+        loadGroupData(selectedGroupId, true);
+      }
+    };
+    window.addEventListener("tenant-data-mutated", onSync);
+    window.addEventListener("focus", onSync);
+    return () => {
+      window.removeEventListener("tenant-data-mutated", onSync);
+      window.removeEventListener("focus", onSync);
+    };
+  }, [selectedGroupId, financialMonth, attendanceDate, selectedExamRecordId]);
+
   // ==========================================
   // BULK ACTIONS FOR STUDENTS TAB
   // ==========================================
@@ -382,7 +405,8 @@ function StudentsPageContent() {
           updates: { status: "inactive" },
         }),
       });
-      loadGroupData(selectedGroupId!);
+      notifyTenantDataMutated();
+      await loadGroupData(selectedGroupId!, true);
       setSelectedStudentIds([]);
     } catch (err) {
       console.error(err);
@@ -401,7 +425,8 @@ function StudentsPageContent() {
           studentIds: selectedStudentIds,
         }),
       });
-      loadGroupData(selectedGroupId!);
+      notifyTenantDataMutated();
+      await loadGroupData(selectedGroupId!, true);
       setSelectedStudentIds([]);
     } catch (err) {
       console.error(err);
@@ -582,6 +607,7 @@ function StudentsPageContent() {
       const dataAtt = await resAtt.json();
       if (dataAtt.success) {
         setAttendanceRecords(dataAtt.attendance || []);
+        setClassSessions(dataAtt.sessions || []);
       }
       setSelectedStudentIds([]);
     } catch (err) {
@@ -772,8 +798,10 @@ function StudentsPageContent() {
         setIsTransferModalOpen(false);
         setTransferPoolStudents([]);
         setSelectedStudentIds([]);
+        notifyTenantDataMutated();
+        await fetchGroups(true);
         if (selectedGroupId) {
-          await loadGroupData(selectedGroupId);
+          await loadGroupData(selectedGroupId, true);
         }
       } else {
         alert(data.error || "فشل نقل الطلاب");
@@ -801,7 +829,10 @@ function StudentsPageContent() {
       });
       const data = await res.json();
       if (data.success) {
-        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+        notifyTenantDataMutated();
+        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+          cache: "no-store",
+        })
           .then((r) => r.json())
           .then((d) => {
             if (d.success) {
@@ -1725,7 +1756,10 @@ function StudentsPageContent() {
                           title: "حصة دراسية",
                         }),
                       });
-                      fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                      notifyTenantDataMutated();
+                      fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+                        cache: "no-store",
+                      })
                         .then((r) => r.json())
                         .then((d) => {
                           if (d.success) {
@@ -1987,7 +2021,10 @@ function StudentsPageContent() {
                                             date: attendanceDate,
                                           }),
                                         });
-                                        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+                                        notifyTenantDataMutated();
+                                        fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+                                          cache: "no-store",
+                                        })
                                           .then((r) => r.json())
                                           .then((d) => d.success && setAttendanceRecords(d.attendance || []));
                                       }
@@ -2205,6 +2242,7 @@ function StudentsPageContent() {
                                               studentId: gradeItem.studentId,
                                             }),
                                           });
+                                          notifyTenantDataMutated();
                                           if (selectedExamRecordId) {
                                             loadExamGrades(selectedExamRecordId);
                                           }
@@ -2254,7 +2292,10 @@ function StudentsPageContent() {
           <StudentProfileModal
             studentId={activeProfileStudentId}
             onClose={() => setActiveProfileStudentId(null)}
-            onUpdate={() => loadGroupData(selectedGroupId)}
+            onUpdate={() => {
+              notifyTenantDataMutated();
+              loadGroupData(selectedGroupId, true);
+            }}
             onEditStudent={(st) => handleOpenEditStudent(st)}
             onDeleteStudent={(stId) => handleDeleteSingleStudent(stId)}
           />
@@ -2269,10 +2310,17 @@ function StudentsPageContent() {
             students={students}
             onClose={() => setIsCameraAttendanceOpen(false)}
             onAttendanceRecorded={() => {
-              // Refresh attendance table
-              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+              notifyTenantDataMutated();
+              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+                cache: "no-store",
+              })
                 .then((r) => r.json())
-                .then((d) => d.success && setAttendanceRecords(d.attendance || []));
+                .then((d) => {
+                  if (d.success) {
+                    setAttendanceRecords(d.attendance || []);
+                    setClassSessions(d.sessions || []);
+                  }
+                });
             }}
           />
         )}
@@ -2286,7 +2334,10 @@ function StudentsPageContent() {
             totalScore={examRecords.find((e) => e.id === selectedExamRecordId)?.totalScore || 20}
             students={students}
             onClose={() => setIsCameraAiGradeOpen(false)}
-            onGradeRecorded={() => loadExamGrades(selectedExamRecordId)}
+            onGradeRecorded={() => {
+              notifyTenantDataMutated();
+              loadExamGrades(selectedExamRecordId);
+            }}
           />
         )}
 
@@ -2298,8 +2349,11 @@ function StudentsPageContent() {
             students={students}
             onClose={() => setIsContinuousPaymentOpen(false)}
             onPaymentRecorded={() => {
+              notifyTenantDataMutated();
               if (selectedGroupId) {
-                fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`)
+                fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}&t=${Date.now()}`, {
+                  cache: "no-store",
+                })
                   .then((r) => r.json())
                   .then((d) => d.success && setFinancialRecords(d.financials || []));
               }
@@ -2764,7 +2818,10 @@ function StudentsPageContent() {
             attendanceDate={attendanceDate}
             date={attendanceDate}
             onAttendanceMarked={() => {
-              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+              notifyTenantDataMutated();
+              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+                cache: "no-store",
+              })
                 .then((r) => r.json())
                 .then((d) => {
                   if (d.success) {
@@ -2774,7 +2831,10 @@ function StudentsPageContent() {
                 });
             }}
             onSuccess={() => {
-              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+              notifyTenantDataMutated();
+              fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+                cache: "no-store",
+              })
                 .then((r) => r.json())
                 .then((d) => {
                   if (d.success) {
