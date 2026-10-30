@@ -55,14 +55,13 @@ export default function AutoUpdateButton({ initialCommit }: AutoUpdateButtonProp
           setIsOpen(true);
           setResult(null);
         }}
-        className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold px-3.5 py-2.5 rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
+        className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-extrabold h-10 px-3.5 rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
         title="تحديث التطبيق وسحب أحدث نسخة من المستودع"
       >
-        <RefreshCw className="w-3.5 h-3.5 text-emerald-100" />
-        <span className="hidden sm:inline">تحديث من المستودع</span>
-        <span className="sm:hidden">تحديث</span>
+        <RefreshCw className="w-3.5 h-3.5 text-emerald-100 shrink-0" />
+        <span>تحديث من المستودع</span>
         {latestCommit && (
-          <span className="bg-emerald-900/40 text-emerald-100 px-1.5 py-0.5 rounded text-[10px] font-mono">
+          <span className="bg-emerald-950/35 text-emerald-100 px-2 py-0.5 rounded-md text-[10px] font-mono">
             {latestCommit.hash}
           </span>
         )}

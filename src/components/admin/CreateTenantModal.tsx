@@ -220,10 +220,10 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
     <>
       <button
         onClick={handleOpen}
-        className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+        className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white h-10 px-4 rounded-xl text-xs font-extrabold shadow-sm shadow-blue-500/20 transition-all cursor-pointer whitespace-nowrap shrink-0"
       >
-        <UserPlus className="w-4 h-4" />
-        <span>إضافة وتسطيب تطبيق عميل جديد (App Installer)</span>
+        <UserPlus className="w-4 h-4 shrink-0" />
+        <span>إضافة وتسطيب عميل جديد</span>
       </button>
 
       {isOpen && (

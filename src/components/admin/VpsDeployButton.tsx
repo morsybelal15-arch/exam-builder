@@ -33,10 +33,10 @@ export default function VpsDeployButton() {
           setIsOpen(true);
           setResult(null);
         }}
-        className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+        className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold h-10 px-4 rounded-xl shadow-sm shadow-blue-600/25 transition-all cursor-pointer whitespace-nowrap shrink-0"
         title="تثبيت ونشر منصة بنك الاختبارات على سيرفر Hostinger VPS مباشرة"
       >
-        <Rocket className="w-3.5 h-3.5 text-blue-200" />
+        <Rocket className="w-3.5 h-3.5 text-blue-200 shrink-0" />
         <span>نشر المنصة على VPS</span>
       </button>
 

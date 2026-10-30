@@ -240,41 +240,135 @@ export default function TenantListView({
 
   return (
     <div className="space-y-4">
-      {/* VPS Sync Bar */}
-      <div className="bg-white rounded-2xl p-3 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-          <Server className="w-4 h-4 text-blue-600" />
-          <span>
-            مزامنة لحظية شاملة: أي تعديل في المواعيد أو نوع الاشتراك أو خواص الـ Sidebar يُطبَّق فوراً في تطبيق العميل
-          </span>
+      {/* Unified Section Header & Toolbar Card */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-2xs space-y-4">
+        {/* Top Row: Title + Live Sync Notice + Sync All Button */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <Users className="w-4 h-4" />
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-slate-900">
+                إدارة المستأجرين والاشتراكات
+              </h2>
+              <span className="text-[11px] font-extrabold bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                {tenants.length} مشترك
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
+              <Server className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              <span>
+                مزامنة لحظية شاملة: أي تعديل في المواعيد أو نوع الاشتراك أو خواص الـ Sidebar يُطبَّق فوراً في تطبيق العميل
+              </span>
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              id="sync-all-vps-btn"
+              onClick={handleSyncAll}
+              disabled={isSyncingAll}
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-extrabold transition-all cursor-pointer shadow-xs whitespace-nowrap"
+            >
+              {isSyncingAll ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>{isSyncingAll ? "جاري المزامنة..." : "مزامنة الكل مع VPS"}</span>
+            </button>
+          </div>
         </div>
-        <button
-          id="sync-all-vps-btn"
-          onClick={handleSyncAll}
-          disabled={isSyncingAll}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold transition-all cursor-pointer"
-        >
-          {isSyncingAll ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5" />
-          )}
-          <span>{isSyncingAll ? "جاري المزامنة..." : "مزامنة الكل مع VPS"}</span>
-        </button>
+
+        {/* Bottom Row: Search Bar + Status Filter Pills */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          <div className="relative w-full md:max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="بحث باسم العميل، رقم الهاتف، أو الدومين..."
+              className="w-full pl-3.5 pr-10 h-10 bg-slate-50 border border-slate-200/80 rounded-xl text-xs sm:text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            />
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 shrink-0">
+            <span className="text-xs font-bold text-slate-400 flex items-center gap-1 ml-1 whitespace-nowrap">
+              <Filter className="w-3.5 h-3.5" />
+              <span>الحالة:</span>
+            </span>
+
+            <button
+              onClick={() => setStatusFilter("ALL")}
+              className={`h-9 px-3.5 rounded-xl text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer ${
+                statusFilter === "ALL"
+                  ? "bg-slate-900 text-white shadow-xs"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
+              }`}
+            >
+              الكل ({tenants.length})
+            </button>
+
+            <button
+              onClick={() => setStatusFilter("ACTIVE")}
+              className={`h-9 px-3.5 rounded-xl text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5 ${
+                statusFilter === "ACTIVE"
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100/70 border border-emerald-200/60"
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>
+                النشطة ({tenants.filter((t) => t.subscriptionStatus === "ACTIVE").length})
+              </span>
+            </button>
+
+            <button
+              onClick={() => setStatusFilter("STOPPED")}
+              className={`h-9 px-3.5 rounded-xl text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5 ${
+                statusFilter === "STOPPED"
+                  ? "bg-amber-600 text-white shadow-xs"
+                  : "bg-amber-50 text-amber-700 hover:bg-amber-100/70 border border-amber-200/60"
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              <span>
+                الموقوفة ({tenants.filter((t) => t.subscriptionStatus === "STOPPED").length})
+              </span>
+            </button>
+
+            <button
+              onClick={() => setStatusFilter("EXPIRED")}
+              className={`h-9 px-3.5 rounded-xl text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5 ${
+                statusFilter === "EXPIRED"
+                  ? "bg-red-600 text-white shadow-xs"
+                  : "bg-red-50 text-red-700 hover:bg-red-100/70 border border-red-200/60"
+              }`}
+            >
+              <span>
+                المنتهية ({tenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {syncNotice && (
         <div
-          className={`rounded-xl px-4 py-2.5 text-xs font-bold flex items-center justify-between gap-2 border ${syncNotice.success
+          className={`rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-between gap-2 border ${
+            syncNotice.success
               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
               : "bg-rose-50 text-rose-700 border-rose-200"
-            }`}
+          }`}
         >
-          <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-2">
             {syncNotice.success ? (
-              <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
             ) : (
-              <AlertTriangle className="w-4 h-4" />
+              <AlertTriangle className="w-4 h-4 shrink-0" />
             )}
             {syncNotice.message}
           </span>
@@ -287,78 +381,8 @@ export default function TenantListView({
         </div>
       )}
 
-      {/* Search and Filters Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative w-full md:w-96">
-          <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="بحث باسم العميل، رقم الهاتف، أو الدومين..."
-            className="w-full pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs sm:text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-          />
-        </div>
-
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          <span className="text-xs font-bold text-slate-400 flex items-center gap-1 ml-1.5 shrink-0">
-            <Filter className="w-3.5 h-3.5" />
-            <span>الحالة:</span>
-          </span>
-
-          <button
-            onClick={() => setStatusFilter("ALL")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${statusFilter === "ALL"
-                ? "bg-slate-900 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-              }`}
-          >
-            الكل ({tenants.length})
-          </button>
-
-          <button
-            onClick={() => setStatusFilter("ACTIVE")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${statusFilter === "ACTIVE"
-                ? "bg-emerald-600 text-white shadow-xs"
-                : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100/70 border border-emerald-200/60"
-              }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>
-              النشطة ({tenants.filter((t) => t.subscriptionStatus === "ACTIVE").length})
-            </span>
-          </button>
-
-          <button
-            onClick={() => setStatusFilter("STOPPED")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${statusFilter === "STOPPED"
-                ? "bg-amber-600 text-white shadow-xs"
-                : "bg-amber-50 text-amber-700 hover:bg-amber-100/70 border border-amber-200/60"
-              }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span>
-              الموقوفة ({tenants.filter((t) => t.subscriptionStatus === "STOPPED").length})
-            </span>
-          </button>
-
-          <button
-            onClick={() => setStatusFilter("EXPIRED")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${statusFilter === "EXPIRED"
-                ? "bg-red-600 text-white shadow-xs"
-                : "bg-red-50 text-red-700 hover:bg-red-100/70 border border-red-200/60"
-              }`}
-          >
-            <span>
-              المنتهية ({tenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Tenants Table Card */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
+      {/* Tenants Table Card - Full Width */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-2xs overflow-hidden">
         {filteredTenants.length === 0 ? (
           <div className="p-12 text-center">
             <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-3xl flex items-center justify-center mx-auto mb-4">
@@ -388,14 +412,14 @@ export default function TenantListView({
           <div className="overflow-x-auto">
             <table className="w-full text-right border-collapse">
               <thead>
-                <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-                  <th className="py-4 px-5">العميل ونوع الاشتراك</th>
+                <tr className="bg-slate-50/90 border-b border-slate-200/80 text-xs font-extrabold text-slate-500 whitespace-nowrap">
+                  <th className="py-4 px-6">العميل ونوع الاشتراك</th>
                   <th className="py-4 px-5">رقم الدخول والدومين</th>
                   <th className="py-4 px-5">فترة الاشتراك (Calendar)</th>
                   <th className="py-4 px-5">خواص التطبيق المثبتة (Sidebar)</th>
                   <th className="py-4 px-5">استهلاك الموارد</th>
                   <th className="py-4 px-5 text-center">الحالة</th>
-                  <th className="py-4 px-5 text-center">التحكم بالاشتراك والخواص</th>
+                  <th className="py-4 px-6 text-left">التحكم بالاشتراك والخواص</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
@@ -408,41 +432,37 @@ export default function TenantListView({
                     barWidthPercent,
                     displayPercent,
                   } = computeStoragePercent(usedBytesNum, limitBytesNum);
-                  const examsLimit = tenant.examsLimit || 150;
-                  const examsCount = tenant._count?.exams || 0;
-                  const filesLimit = tenant.filesLimit || 200;
-                  const filesCount = tenant._count?.uploadedFiles || 0;
                   const dueInfo = getDaysRemaining(tenant.subscriptionDueDate);
                   const subType = tenant.subscriptionType === "معلم" ? "معلم" : "سنتر";
                   const installedFeatures = normalizeEnabledFeatures(tenant.enabledFeatures);
                   const availableToAddCount = ALL_FEATURE_IDS.length - installedFeatures.length;
                   const startDateDisplay = tenant.subscriptionStartDate
                     ? new Date(tenant.subscriptionStartDate).toLocaleDateString("ar-EG", {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })
                     : new Date(tenant.createdAt).toLocaleDateString("ar-EG", {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    });
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      });
                   const dueDateDisplay = tenant.subscriptionDueDate
                     ? new Date(tenant.subscriptionDueDate).toLocaleDateString("ar-EG", {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })
                     : "غير محدد";
 
                   return (
                     <tr
                       key={tenant.id}
-                      className="hover:bg-slate-50/60 transition-colors group"
+                      className="hover:bg-slate-50/70 transition-colors group"
                     >
                       {/* 1. Client Name & Subscription Type */}
-                      <td className="py-4 px-5">
-                        <div className="flex items-center gap-3">
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        <div className="flex items-center gap-3.5">
                           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
                             {subType === "معلم" ? (
                               <GraduationCap className="w-5 h-5" />
@@ -451,15 +471,16 @@ export default function TenantListView({
                             )}
                           </div>
                           <div>
-                            <span className="block font-black text-slate-900 group-hover:text-blue-600 transition-colors">
+                            <span className="block font-black text-slate-900 text-sm group-hover:text-blue-600 transition-colors">
                               {tenant.name || "عميل بدون اسم"}
                             </span>
                             <div className="flex items-center gap-1.5 mt-1">
                               <span
-                                className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full ${subType === "سنتر"
+                                className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                                  subType === "سنتر"
                                     ? "bg-blue-50 text-blue-700 border border-blue-200/60"
                                     : "bg-purple-50 text-purple-700 border border-purple-200/60"
-                                  }`}
+                                }`}
                               >
                                 <span>اشتراك {subType}</span>
                               </span>
@@ -477,35 +498,36 @@ export default function TenantListView({
                       </td>
 
                       {/* 2. Phone & Domain */}
-                      <td className="py-4 px-5">
+                      <td className="py-4 px-5 whitespace-nowrap">
                         <div className="space-y-1.5">
                           <div
-                            className="flex items-center gap-1.5 font-mono text-xs font-bold text-slate-800"
+                            className="inline-flex items-center gap-1.5 font-mono text-xs font-bold text-slate-800 bg-slate-100/80 px-2.5 py-0.5 rounded-lg"
                             dir="ltr"
                           >
-                            <Phone className="w-3 h-3 text-slate-400" />
+                            <Phone className="w-3 h-3 text-slate-400 shrink-0" />
                             <span>{tenant.phone}</span>
                           </div>
                           {tenant.domain ? (
-                            <div className="space-y-1">
+                            <div>
                               <a
                                 href={`https://${tenant.domain}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                                className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
                                 dir="ltr"
                                 title="فتح تطبيق العميل على السيرفر"
                               >
                                 <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                <span className="truncate max-w-[150px]">{tenant.domain}</span>
+                                <span>{tenant.domain}</span>
                                 <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" />
                               </a>
                               {deployFeedback[tenant.id] && (
                                 <p
-                                  className={`text-[10px] font-bold ${deployFeedback[tenant.id].success
+                                  className={`text-[10px] font-bold mt-0.5 ${
+                                    deployFeedback[tenant.id].success
                                       ? "text-emerald-600"
                                       : "text-red-500"
-                                    }`}
+                                  }`}
                                 >
                                   {deployFeedback[tenant.id].message}
                                 </p>
@@ -521,26 +543,28 @@ export default function TenantListView({
                       </td>
 
                       {/* 3. Subscription Start & End Dates */}
-                      <td className="py-4 px-5">
+                      <td className="py-4 px-5 whitespace-nowrap">
                         <div className="space-y-1">
-                          <div className="text-[11px] font-bold text-slate-700">
+                          <div className="text-xs font-bold text-slate-600">
                             من: <span className="text-slate-900">{startDateDisplay}</span>
                           </div>
-                          <div className="text-[11px] font-bold text-slate-700">
+                          <div className="text-xs font-bold text-slate-600">
                             إلى: <span className="text-blue-700">{dueDateDisplay}</span>
                           </div>
-                          <div className="flex items-center gap-1 text-[11px]">
+                          <div className="inline-flex items-center gap-1 text-[11px] bg-slate-50 border border-slate-200/70 px-2 py-0.5 rounded-md">
                             <Clock
-                              className={`w-3.5 h-3.5 ${dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
-                                }`}
+                              className={`w-3 h-3 shrink-0 ${
+                                dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
+                              }`}
                             />
                             <span
-                              className={`font-semibold ${dueInfo.isExpired
-                                  ? "text-red-600 font-bold"
+                              className={`font-bold ${
+                                dueInfo.isExpired
+                                  ? "text-red-600"
                                   : dueInfo.isUrgent
-                                    ? "text-amber-600 font-bold"
-                                    : "text-emerald-600 font-bold"
-                                }`}
+                                  ? "text-amber-600"
+                                  : "text-emerald-600"
+                              }`}
                             >
                               {dueInfo.text}
                             </span>
@@ -549,11 +573,11 @@ export default function TenantListView({
                       </td>
 
                       {/* 4. Installed Sidebar Features */}
-                      <td className="py-4 px-5">
-                        <div className="space-y-1.5 max-w-[230px]">
+                      <td className="py-4 px-5 min-w-[260px] max-w-[360px]">
+                        <div className="space-y-1.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-lg">
-                              <Layers className="w-3 h-3" />
+                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200/60 px-2.5 py-0.5 rounded-lg whitespace-nowrap">
+                              <Layers className="w-3 h-3 shrink-0" />
                               <span>
                                 {installedFeatures.length} / {ALL_FEATURE_IDS.length} خاصية مثبتة
                               </span>
@@ -564,7 +588,7 @@ export default function TenantListView({
                                   setEditingTenant(tenant);
                                   setIsModalOpen(true);
                                 }}
-                                className="text-[10px] font-extrabold text-amber-800 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                                className="text-[10px] font-extrabold text-amber-800 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
                                 title="اضغط لإضافة خواص جديدة لهذا العميل"
                               >
                                 +{availableToAddCount} متاح للإضافة
@@ -579,13 +603,13 @@ export default function TenantListView({
                               .map((f) => (
                                 <span
                                   key={f.id}
-                                  className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded"
+                                  className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md whitespace-nowrap"
                                 >
                                   {f.name}
                                 </span>
                               ))}
                             {installedFeatures.length > 4 && (
-                              <span className="text-[10px] font-bold text-slate-500 px-1 py-0.5">
+                              <span className="text-[10px] font-extrabold text-slate-500 bg-slate-50 border border-slate-200/70 px-1.5 py-0.5 rounded-md whitespace-nowrap">
                                 +{installedFeatures.length - 4} أخرى
                               </span>
                             )}
@@ -594,25 +618,26 @@ export default function TenantListView({
                       </td>
 
                       {/* 5. Resource Limits & Quotas */}
-                      <td className="py-4 px-5 min-w-[175px]">
-                        <div>
-                          <div className="flex items-center justify-between text-[10px] text-slate-600 font-bold mb-1 gap-2">
-                            <span className="flex items-center gap-1">
-                              <HardDrive className="w-3 h-3 text-purple-500" />
+                      <td className="py-4 px-5 min-w-[200px] whitespace-nowrap">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-slate-700 font-bold gap-3">
+                            <span className="inline-flex items-center gap-1.5">
+                              <HardDrive className="w-3.5 h-3.5 text-purple-500 shrink-0" />
                               <span>{formatUsedStorageShortArabic(usedBytesNum)}</span>
                             </span>
-                            <span className="text-slate-400">
+                            <span className="text-slate-400 font-mono text-[10px]">
                               / {formatStorageLimitMbArabic(limitBytesNum)} ({displayPercent})
                             </span>
                           </div>
-                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all ${storagePercent > 90
+                              className={`h-full rounded-full transition-all ${
+                                storagePercent > 90
                                   ? "bg-red-500"
                                   : storagePercent > 70
-                                    ? "bg-amber-500"
-                                    : "bg-blue-600"
-                                }`}
+                                  ? "bg-amber-500"
+                                  : "bg-blue-600"
+                              }`}
                               style={{ width: `${barWidthPercent}%` }}
                             />
                           </div>
@@ -620,19 +645,19 @@ export default function TenantListView({
                       </td>
 
                       {/* 6. Subscription Status */}
-                      <td className="py-4 px-5 text-center">
+                      <td className="py-4 px-5 text-center whitespace-nowrap">
                         {tenant.subscriptionStatus === "ACTIVE" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-2xs">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-2xs">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             <span>نشط</span>
                           </span>
                         ) : tenant.subscriptionStatus === "STOPPED" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200/60 shadow-2xs">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200/60 shadow-2xs">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                             <span>موقوف</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-50 text-red-700 border border-red-200/60 shadow-2xs">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-red-50 text-red-700 border border-red-200/60 shadow-2xs">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
                             <span>منتهي</span>
                           </span>
@@ -640,8 +665,8 @@ export default function TenantListView({
                       </td>
 
                       {/* 7. Action Buttons */}
-                      <td className="py-4 px-5 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-2">
                           {/* Pause / Resume button */}
                           <button
                             onClick={() => handleToggleStatus(tenant.id)}
@@ -651,10 +676,11 @@ export default function TenantListView({
                                 ? "إيقاف مؤقت للاشتراك"
                                 : "تشغيل واستئناف الاشتراك"
                             }
-                            className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${tenant.subscriptionStatus === "ACTIVE"
+                            className={`h-9 w-9 inline-flex items-center justify-center rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                              tenant.subscriptionStatus === "ACTIVE"
                                 ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200/60"
                                 : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200/60"
-                              }`}
+                            }`}
                           >
                             {tenant.subscriptionStatus === "ACTIVE" ? (
                               <Pause className="w-3.5 h-3.5" />
@@ -668,9 +694,9 @@ export default function TenantListView({
                             onClick={() => handleQuickExtend(tenant.id)}
                             disabled={isPending}
                             title="تمديد تلقائي +30 يوم"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/60 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                            className="h-9 inline-flex items-center gap-1 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/60 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0"
                           >
-                            <span>+30ي</span>
+                            <span>+30 يوم</span>
                           </button>
 
                           {/* 1-Click Automated VPS Deploy Button */}
@@ -679,24 +705,25 @@ export default function TenantListView({
                               onClick={() => handleAutoDeploy(tenant)}
                               disabled={deployingTenantId === tenant.id || isPending}
                               title="تفعيل الدومين وإعداد Nginx تلقائياً على خادم VPS"
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${deployFeedback[tenant.id]?.success
+                              className={`h-9 inline-flex items-center gap-1.5 px-3.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs whitespace-nowrap shrink-0 ${
+                                deployFeedback[tenant.id]?.success
                                   ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
                                   : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20"
-                                } disabled:opacity-50`}
+                              } disabled:opacity-50`}
                             >
                               {deployingTenantId === tenant.id ? (
                                 <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  <span>تفعيل...</span>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                                  <span>جاري التفعيل...</span>
                                 </>
                               ) : deployFeedback[tenant.id]?.success ? (
                                 <>
-                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                   <span>مفعل VPS</span>
                                 </>
                               ) : (
                                 <>
-                                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                                   <span>تفعيل VPS</span>
                                 </>
                               )}
@@ -708,7 +735,7 @@ export default function TenantListView({
                             <button
                               onClick={() => handleCopyVpsNginx(tenant)}
                               title="نسخ كود إعداد Nginx على VPS Hostinger"
-                              className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                              className="h-9 w-9 inline-flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0"
                             >
                               {copiedVpsId === tenant.id ? (
                                 <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -724,9 +751,9 @@ export default function TenantListView({
                               setEditingTenant(tenant);
                               setIsModalOpen(true);
                             }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs hover:shadow-md transition-all cursor-pointer"
+                            className="h-9 inline-flex items-center gap-1.5 px-3.5 bg-slate-900 hover:bg-blue-600 text-white rounded-xl text-xs font-extrabold shadow-2xs hover:shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
                           >
-                            <Edit3 className="w-3.5 h-3.5" />
+                            <Edit3 className="w-3.5 h-3.5 shrink-0" />
                             <span>إدارة المواعيد والخواص</span>
                           </button>
                         </div>
