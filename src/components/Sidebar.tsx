@@ -167,7 +167,7 @@ export default function Sidebar() {
           className="flex items-center justify-center w-full group"
           title={clientName ? `${clientName} — InCenter` : "InCenter"}
         >
-          <InCenterLogo className="h-10 sm:h-11 group-hover:scale-[1.03] transition-transform duration-200" />
+          <InCenterLogo className="w-[152px] h-[42px] sm:w-[166px] sm:h-[46px] group-hover:scale-[1.03] transition-transform duration-200" />
         </Link>
       </div>
 
