@@ -34,6 +34,12 @@
   --theme-primary-900: #1e3a8a;
   --theme-primary-950: #172554;
 
+  /* InCenter Dynamic Brand Logo Tokens (Default Royal Blue Theme) */
+  --logo-badge-top: #38bdf8;
+  --logo-badge-mid: #1b64f2;
+  --logo-badge-bottom: #0f2942;
+  --logo-wordmark-color: #0f2942;
+
   /* --------------------------------------------------------------------------
      PILLAR 2: SUCCESS / POSITIVE PALETTE (Green)
      -------------------------------------------------------------------------- */
@@ -260,6 +266,10 @@
   --theme-primary-800: #9a3412;
   --theme-primary-900: #7c2d12;
   --theme-primary-950: #431407;
+  --logo-badge-top: #fbbf24;
+  --logo-badge-mid: #ea580c;
+  --logo-badge-bottom: #431407;
+  --logo-wordmark-color: #431407;
 }
 
 /* Theme Preset 2: Burgundy Red Theme (ثيم أحمر برجاندي ملكي) */
@@ -275,6 +285,10 @@
   --theme-primary-800: #4c0519;
   --theme-primary-900: #3b0414;
   --theme-primary-950: #26020d;
+  --logo-badge-top: #fb7185;
+  --logo-badge-mid: #be123c;
+  --logo-badge-bottom: #3b0414;
+  --logo-wordmark-color: #3b0414;
 }
 
 /* Theme Preset 3: Emerald Forest Theme (ثيم زمردي احترافي) */
@@ -290,6 +304,10 @@
   --theme-primary-800: #064e3b;
   --theme-primary-900: #022c22;
   --theme-primary-950: #022c22;
+  --logo-badge-top: #2ce59b;
+  --logo-badge-mid: #149a68;
+  --logo-badge-bottom: #0c3240;
+  --logo-wordmark-color: #0c3240;
 }
 
 /* Theme Preset 4: Royal Violet Theme (ثيم بنفسجي ملكي) */
@@ -305,6 +323,10 @@
   --theme-primary-800: #4c1d95;
   --theme-primary-900: #2e1065;
   --theme-primary-950: #1e0b4b;
+  --logo-badge-top: #c084fc;
+  --logo-badge-mid: #7c3aed;
+  --logo-badge-bottom: #2e1065;
+  --logo-wordmark-color: #2e1065;
 }
 
 /* Theme Preset 5: Dark Mode (دارك مود احترافي شامل لكل أجزاء التطبيق) */
@@ -317,6 +339,10 @@
   --theme-bg: #0b1120;
   --theme-surface: #131c31;
   --theme-text: #f8fafc;
+  --logo-badge-top: #38bdf8;
+  --logo-badge-mid: #2563eb;
+  --logo-badge-bottom: #1e3a8a;
+  --logo-wordmark-color: #f8fafc;
 
   /* Keep vibrant royal blue for primary buttons & badges, deep slate-blue for sidebar gradient */
   --theme-primary-50: rgba(59, 130, 246, 0.14);

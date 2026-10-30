@@ -40,6 +40,7 @@ import {
   setCachedSession,
   clearCachedSession,
 } from "@/lib/client-session-cache";
+import InCenterLogo from "@/components/InCenterLogo";
 
 const ICON_MAP: Record<string, any> = {
   Home,
@@ -159,25 +160,14 @@ export default function Sidebar() {
 
   return (
     <aside className="w-64 sm:w-68 shrink-0 bg-white h-screen flex flex-col select-none z-20 print:hidden">
-      {/* Top White Brand Header showing the Client's Name & Subscription Type */}
-      <div className="h-20 px-6 flex items-center justify-between bg-white shrink-0">
-        <Link href={homeHref} className="flex items-center gap-3 group min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-600/25 group-hover:scale-105 transition-transform shrink-0">
-            <GraduationCap className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h1
-              className="font-extrabold text-base sm:text-lg text-blue-600 tracking-tight leading-tight truncate"
-              title={clientName}
-            >
-              {clientName || "السنتر"}
-            </h1>
-            <p className="text-[11px] font-semibold text-slate-500 mt-0.5 truncate">
-              {subscriptionType === "معلم"
-                ? "منصة المعلم والاختبارات"
-                : "منصة إدارة السنتر والاختبارات"}
-            </p>
-          </div>
+      {/* Top Brand Header showing the Dynamic Theme-Reactive InCenter Logo */}
+      <div className="h-20 px-6 flex items-center justify-center bg-white shrink-0">
+        <Link
+          href={homeHref}
+          className="flex items-center justify-center w-full group"
+          title={clientName ? `${clientName} — InCenter` : "InCenter"}
+        >
+          <InCenterLogo className="h-10 sm:h-11 group-hover:scale-[1.03] transition-transform duration-200" />
         </Link>
       </div>
 
