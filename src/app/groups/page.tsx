@@ -22,6 +22,7 @@ import {
   getCachedPageData,
   setCachedPageData,
   invalidateCachedPageData,
+  notifyTenantDataMutated,
 } from "@/lib/client-session-cache";
 
 export default function GroupsPage() {
@@ -142,11 +143,9 @@ export default function GroupsPage() {
       }
 
       setIsModalOpen(false);
-      fetchData();
-      fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
-        .then((r) => r.json())
-        .then((d) => window.dispatchEvent(new CustomEvent("tenant-session-sync", { detail: d })))
-        .catch(() => {});
+      invalidateCachedPageData("groups");
+      notifyTenantDataMutated();
+      await fetchData(true);
     } catch (err: any) {
       setFormError(err.message || "حدث خطأ أثناء الحفظ");
     } finally {
@@ -160,10 +159,10 @@ export default function GroupsPage() {
       if (res.ok) {
         setGroups((prev) => prev.filter((g) => g.id !== id));
         setDeleteConfirmId(null);
-        fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
-          .then((r) => r.json())
-          .then((d) => window.dispatchEvent(new CustomEvent("tenant-session-sync", { detail: d })))
-          .catch(() => {});
+        invalidateCachedPageData("groups");
+        invalidateCachedPageData("group_bundle:");
+        notifyTenantDataMutated();
+        await fetchData(true);
       }
     } catch (err) {
       console.error("Failed to delete group:", err);

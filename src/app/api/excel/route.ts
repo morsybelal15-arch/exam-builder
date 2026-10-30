@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 import {
   getExportDataset,
   bulkImportStudents,
@@ -8,12 +9,15 @@ import {
   saveGroup,
 } from "@/lib/management-db";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const session = await requireApiSession();
     if (!session) {
       return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     }
+    setCurrentTenantId(session.id);
 
     const { searchParams } = new URL(req.url);
     const academicYear = searchParams.get("academicYear") || "ALL";
@@ -61,8 +65,10 @@ export async function POST(req: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     }
+    setCurrentTenantId(session.id);
 
     const body = await req.json();
+    setCurrentTenantId(session.id);
     const { action } = body;
 
     // Quick inline group creation from Import page if user needs a new group

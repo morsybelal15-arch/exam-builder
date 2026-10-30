@@ -32,7 +32,7 @@ interface PageProps {
   params: Promise<{ token: string }>;
 }
 
-async function resolveTenantFromRequestHost(): Promise<boolean> {
+async function resolveTenantFromRequestHost(): Promise<{ isDedicatedDomain: boolean; tenantId?: string }> {
   initTenantContextBox();
   try {
     const h = await headers();
@@ -47,18 +47,19 @@ async function resolveTenantFromRequestHost(): Promise<boolean> {
       const tenant = await findTenantByDomain(host);
       if (tenant?.id) {
         setCurrentTenantId(tenant.id);
-        return true;
+        return { isDedicatedDomain: true, tenantId: tenant.id };
       }
     }
   } catch {
     // Ignore header resolution errors
   }
-  return false;
+  return { isDedicatedDomain: false };
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const isDedicatedDomain = await resolveTenantFromRequestHost();
+  const { isDedicatedDomain, tenantId } = await resolveTenantFromRequestHost();
   const { token } = await params;
+  if (tenantId) setCurrentTenantId(tenantId);
   const decoded = decodeURIComponent(token).trim();
   const profile = getFullStudentProfile(decoded, {
     publicTokenOnly: true,
@@ -88,8 +89,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function StudentParentPortalPage({ params }: PageProps) {
-  const isDedicatedDomain = await resolveTenantFromRequestHost();
+  const { isDedicatedDomain, tenantId } = await resolveTenantFromRequestHost();
   const { token } = await params;
+  if (tenantId) setCurrentTenantId(tenantId);
   const decodedToken = decodeURIComponent(token).trim();
   const profile = getFullStudentProfile(decodedToken, {
     publicTokenOnly: true,

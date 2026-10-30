@@ -13,18 +13,13 @@ export async function GET(req: NextRequest) {
   const serverPool = resolveApiKeyPool();
   const hasEnvKey = serverPool.length > 0;
   const activeKey = headerKey || serverPool[0] || "";
-  const canSeeServerKeyMask = session.role === "SUPER_ADMIN" || Boolean(headerKey);
+  const isSuperAdmin = session.role === "SUPER_ADMIN";
 
   return NextResponse.json({
     configured: Boolean(activeKey && activeKey.length > 10),
     hasEnvKey,
-    poolSize: serverPool.length,
-    keyMasked:
-      canSeeServerKeyMask && activeKey
-        ? `${activeKey.slice(0, 6)}...${activeKey.slice(-4)}`
-        : hasEnvKey
-          ? "مفعل على السيرفر"
-          : null,
+    ...(isSuperAdmin ? { poolSize: serverPool.length } : {}),
+    keyMasked: hasEnvKey ? "مفعل ومؤمن على السيرفر" : null,
   });
 }
 

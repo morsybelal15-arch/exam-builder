@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { getHomeAnalytics, getGroups } from "@/lib/management-db";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 import HomeDashboardClient from "@/components/home/HomeDashboardClient";
+
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "الرئيسية | منصة إدارة المركز والاختبارات",
@@ -14,6 +17,7 @@ export default async function RootPage() {
   if (!session || !session.id) {
     redirect("/login");
   }
+  setCurrentTenantId(session.id);
 
   const analytics = getHomeAnalytics();
   const groups = getGroups();

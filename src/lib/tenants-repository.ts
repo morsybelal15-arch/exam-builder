@@ -268,6 +268,8 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
         );
         return {
           ...t,
+          password: undefined as any,
+          verificationCode: null,
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
           enabledFeatures: meta.enabledFeatures,
@@ -287,13 +289,15 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
     console.warn("Database unreachable for listing, using local fallback store:", err);
   }
 
-  // Fallback to local persistent store
+  // Fallback to local persistent store (strip password & verificationCode before sending to UI)
   return localList
     .filter((t) => t.role === "TENANT")
     .map((t) => {
       const localUsage = getTenantUsageStats(t.id);
+      const { password: _pw, verificationCode: _vc, ...safeTenant } = t;
       return {
-        ...t,
+        ...safeTenant,
+        verificationCode: null,
         usedStorageBytes: localUsage.usedStorageBytes,
         _count: {
           exams: localUsage.examsCount,

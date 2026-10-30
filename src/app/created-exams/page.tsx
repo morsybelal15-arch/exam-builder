@@ -21,6 +21,7 @@ import {
 import {
   getCachedPageData,
   setCachedPageData,
+  notifyTenantDataMutated,
 } from "@/lib/client-session-cache";
 
 function sanitizeFormattedText(raw?: string): string {
@@ -142,7 +143,7 @@ export default function CreatedExamsPage() {
 
   const fetchExamsFromDb = async () => {
     try {
-      const res = await fetch("/api/exams");
+      const res = await fetch(`/api/exams?t=${Date.now()}`, { cache: "no-store" });
       const data = await res.json();
       if (data.success && Array.isArray(data.exams)) {
         setExams(data.exams);
@@ -163,6 +164,7 @@ export default function CreatedExamsPage() {
         return next;
       });
       await fetch(`/api/exams?id=${id}`, { method: "DELETE" });
+      notifyTenantDataMutated();
     } catch (err) {
       console.error(err);
     }
@@ -354,11 +356,10 @@ export default function CreatedExamsPage() {
                                   return (
                                     <div
                                       key={optIdx}
-                                      className={`flex items-center gap-1 px-1 py-0.5 rounded truncate border ${
-                                        isCorrect
+                                      className={`flex items-center gap-1 px-1 py-0.5 rounded truncate border ${isCorrect
                                           ? "bg-blue-50/80 border-blue-200 text-blue-900 font-semibold"
                                           : "bg-slate-50 border-slate-100"
-                                      }`}
+                                        }`}
                                     >
                                       <span className="text-[5px] text-slate-400 font-mono">({letters[optIdx] || optIdx + 1})</span>
                                       <span className="truncate">{opt}</span>

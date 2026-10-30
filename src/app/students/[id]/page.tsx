@@ -4,12 +4,16 @@ import Link from "next/link";
 import { ArrowRight, AlertCircle } from "lucide-react";
 import { getSessionUser } from "@/lib/auth";
 import { getFullStudentProfile, getGroups } from "@/lib/management-db";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 import { generateQrDataUrl, getStudentQrUrl } from "@/lib/qr-service";
 import StudentProfileClient from "./StudentProfileClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  await getSessionUser();
+  const session = await getSessionUser();
   const { id } = await params;
+  if (session?.id) {
+    setCurrentTenantId(session.id);
+  }
   const profile = getFullStudentProfile(id);
   if (!profile || !profile.student) {
     return { title: "ملف الطالب غير موجود" };
@@ -31,6 +35,7 @@ export default async function StudentProfilePage({
   }
 
   const { id } = await params;
+  setCurrentTenantId(session.id);
   const profile = getFullStudentProfile(id);
 
   if (!profile || !profile.student) {

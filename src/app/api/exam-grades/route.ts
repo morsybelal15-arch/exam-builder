@@ -8,11 +8,15 @@ import {
   deleteStudentGrade,
 } from "@/lib/management-db";
 import { requireApiSession } from "@/lib/auth";
+import { setCurrentTenantId } from "@/lib/tenant-context";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
     const session = await requireApiSession();
     if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
+    setCurrentTenantId(session.id);
     const { searchParams } = new URL(req.url);
     const groupId = searchParams.get("groupId");
     const examRecordId = searchParams.get("examRecordId");
@@ -37,7 +41,9 @@ export async function POST(req: NextRequest) {
   try {
     const session = await requireApiSession();
     if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
+    setCurrentTenantId(session.id);
     const body = await req.json();
+    setCurrentTenantId(session.id);
     const { action } = body;
 
     // Create new exam record

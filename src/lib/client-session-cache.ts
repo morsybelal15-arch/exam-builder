@@ -45,9 +45,11 @@ export function getLastSessionFetchTime(): number {
 export function setCachedSession(data: any): void {
   if (typeof window === "undefined" || !data || !data.authenticated) return;
   const host = getHost();
-  const prevId = memorySessionCache?.data?.id;
-  if (prevId && data.id && prevId !== data.id) {
-    memoryPageCache.clear();
+  const prev = getCachedSession();
+  const prevId = prev?.id;
+  const prevPhone = prev?.phone;
+  if ((prevId && data.id && prevId !== data.id) || (prevPhone && data.phone && prevPhone !== data.phone)) {
+    invalidateCachedPageData();
   }
   const now = Date.now();
   memorySessionCache = { host, data, updatedAt: now };
@@ -62,9 +64,16 @@ export function setCachedSession(data: any): void {
 }
 
 function getTenantScope(): string {
-  const session = getCachedSession();
-  const tid = session?.id || "default";
-  return `${getHost()}:${tid}`;
+  return getHost();
+}
+
+export function notifyTenantDataMutated(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent("tenant-data-mutated"));
+  } catch {
+    // ignore
+  }
 }
 
 export function clearCachedSession(): void {

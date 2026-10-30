@@ -109,16 +109,19 @@ export default function SubscriptionGuard() {
 
     check(false);
     const onFocus = () => check(true);
+    const onMutated = () => check(true);
     const onVisibility = () => {
       if (document.visibilityState === "visible") check(true);
     };
     window.addEventListener("focus", onFocus);
+    window.addEventListener("tenant-data-mutated", onMutated);
     document.addEventListener("visibilitychange", onVisibility);
     const interval = window.setInterval(() => check(true), 25_000);
 
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("tenant-data-mutated", onMutated);
       document.removeEventListener("visibilitychange", onVisibility);
       window.clearInterval(interval);
     };

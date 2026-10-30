@@ -142,6 +142,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     {
       authenticated: true,
+      id: effectiveTenantId,
       role: session.role === "SUPER_ADMIN" && !isDedicatedTenantDomain ? "SUPER_ADMIN" : "TENANT",
       name: tenant?.name || session.name || "العميل المشترك",
       phone: tenant?.phone || session.phone,

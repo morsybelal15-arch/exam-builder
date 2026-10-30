@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStudentForPayment, recordFastPayment, getLocalTodayDate } from "@/lib/management-db";
 import { requireApiSession } from "@/lib/auth";
+import { setCurrentTenantId } from "@/lib/tenant-context";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
     const session = await requireApiSession();
     if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
+    setCurrentTenantId(session.id);
     const { searchParams } = new URL(req.url);
     const code = searchParams.get("code");
     const month = searchParams.get("month") || getLocalTodayDate().substring(0, 7);
@@ -29,7 +33,9 @@ export async function POST(req: NextRequest) {
   try {
     const session = await requireApiSession();
     if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
+    setCurrentTenantId(session.id);
     const body = await req.json();
+    setCurrentTenantId(session.id);
     const { studentIdOrCode, month, status, paidAmount, notes } = body;
 
     if (!studentIdOrCode) {

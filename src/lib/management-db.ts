@@ -460,6 +460,8 @@ function computeStoreActiveBytes(store: ManagementStore): number {
   return totalBytes;
 }
 
+let tmpWriteCounter = 0;
+
 function flushStoreToDiskSync(activeStorePath: string, store: ManagementStore): void {
   try {
     const dir = path.dirname(activeStorePath);
@@ -467,9 +469,16 @@ function flushStoreToDiskSync(activeStorePath: string, store: ManagementStore): 
       fs.mkdirSync(dir, { recursive: true });
     }
     const serialized = JSON.stringify(store);
-    const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmpPath, serialized, "utf-8");
-    fs.renameSync(tmpPath, activeStorePath);
+    const tmpPath = `${activeStorePath}.${process.pid}.${Date.now()}.${++tmpWriteCounter}.tmp`;
+    try {
+      fs.writeFileSync(tmpPath, serialized, "utf-8");
+      fs.renameSync(tmpPath, activeStorePath);
+    } catch {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {}
+      fs.writeFileSync(activeStorePath, serialized, "utf-8");
+    }
     try {
       const st = fs.statSync(activeStorePath);
       getMgmtMetaCache().set(activeStorePath, { mtimeMs: st.mtimeMs, checkedAt: Date.now() });
@@ -582,7 +591,7 @@ export function resetTenantManagementStore(tenantId?: string): void {
 export function saveManagementStore(
   store: ManagementStore,
   tenantId?: string,
-  immediate: boolean = false
+  immediate: boolean = true
 ): void {
   const key = sanitizeTenantKey(tenantId);
   const activeStorePath = resolveStorePath(tenantId);

@@ -53,6 +53,7 @@ import {
   getCachedPageData,
   setCachedPageData,
   invalidateCachedPageData,
+  notifyTenantDataMutated,
 } from "@/lib/client-session-cache";
 
 const months2026_2027 = [
@@ -193,23 +194,32 @@ function StudentsPageContent() {
     const cachedGroups = getCachedPageData<Group[]>("groups_list");
     if (cachedGroups) {
       setGroups(cachedGroups);
+      if (initialGroupId) {
+        setSelectedGroup(cachedGroups.find((g) => g.id === initialGroupId) || null);
+      }
       setIsLoading(false);
     }
     fetchGroups(Boolean(cachedGroups));
+    if (initialGroupId) {
+      loadGroupData(initialGroupId);
+    }
   }, []);
 
   useEffect(() => {
     if (initialGroupId && groups.length > 0 && selectedGroupId !== initialGroupId) {
       handleSelectGroup(initialGroupId);
-    } else if (selectedGroupId && groups.length > 0 && !selectedGroup) {
-      setSelectedGroup(groups.find((g) => g.id === selectedGroupId) || null);
+    } else if (selectedGroupId && groups.length > 0) {
+      const matched = groups.find((g) => g.id === selectedGroupId) || null;
+      if (!selectedGroup || selectedGroup.id !== selectedGroupId || selectedGroup.name !== matched?.name) {
+        setSelectedGroup(matched);
+      }
     }
-  }, [initialGroupId, groups]);
+  }, [initialGroupId, groups, selectedGroupId]);
 
   const fetchGroups = async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
-      const res = await fetch("/api/groups");
+      const res = await fetch(`/api/groups?t=${Date.now()}`, { cache: "no-store" });
       const data = await res.json();
       if (data.success) {
         const list = data.groups || [];
@@ -231,31 +241,34 @@ function StudentsPageContent() {
     await loadGroupData(groupId);
   };
 
-  const loadGroupData = async (groupId: string) => {
+  const loadGroupData = async (groupId: string, skipCache = false) => {
     // Hydrate immediately from cache if available
     const cacheKey = `group_bundle:${groupId}:${financialMonth}:${attendanceDate}`;
-    const cachedBundle = getCachedPageData<{
-      students: Student[];
-      financials: any[];
-      attendance: any[];
-      sessions: GroupClassSession[];
-      exams: ExamRecord[];
-    }>(cacheKey);
-    if (cachedBundle) {
-      setStudents(cachedBundle.students || []);
-      setFinancialRecords(cachedBundle.financials || []);
-      setAttendanceRecords(cachedBundle.attendance || []);
-      setClassSessions(cachedBundle.sessions || []);
-      setExamRecords(cachedBundle.exams || []);
+    if (!skipCache) {
+      const cachedBundle = getCachedPageData<{
+        students: Student[];
+        financials: any[];
+        attendance: any[];
+        sessions: GroupClassSession[];
+        exams: ExamRecord[];
+      }>(cacheKey);
+      if (cachedBundle) {
+        setStudents(cachedBundle.students || []);
+        setFinancialRecords(cachedBundle.financials || []);
+        setAttendanceRecords(cachedBundle.attendance || []);
+        setClassSessions(cachedBundle.sessions || []);
+        setExamRecords(cachedBundle.exams || []);
+      }
     }
 
     try {
-      // Fetch all 4 endpoints in parallel instead of sequentially (4x faster!)
+      const ts = Date.now();
+      // Fetch all 4 endpoints in parallel with cache: "no-store"
       const [resStudents, resFin, resAtt, resExams] = await Promise.all([
-        fetch(`/api/students?groupId=${groupId}`),
-        fetch(`/api/financials?groupId=${groupId}&month=${financialMonth}`),
-        fetch(`/api/attendance?groupId=${groupId}&date=${attendanceDate}`),
-        fetch(`/api/exam-grades?groupId=${groupId}`),
+        fetch(`/api/students?groupId=${groupId}&t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/financials?groupId=${groupId}&month=${financialMonth}&t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/attendance?groupId=${groupId}&date=${attendanceDate}&t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/exam-grades?groupId=${groupId}&t=${ts}`, { cache: "no-store" }),
       ]);
 
       const [dataStudents, dataFin, dataAtt, dataExams] = await Promise.all([
@@ -302,7 +315,9 @@ function StudentsPageContent() {
     const gid = grpId || selectedGroupId;
     if (!gid) return;
     try {
-      const res = await fetch(`/api/exam-grades?groupId=${gid}&examRecordId=${examId}`);
+      const res = await fetch(`/api/exam-grades?groupId=${gid}&examRecordId=${examId}&t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (data.success) {
         setSelectedExamGrades(data.grades || []);
@@ -315,7 +330,9 @@ function StudentsPageContent() {
   // Re-fetch when month or date changes
   useEffect(() => {
     if (selectedGroupId) {
-      fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`)
+      fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}&t=${Date.now()}`, {
+        cache: "no-store",
+      })
         .then((r) => r.json())
         .then((d) => d.success && setFinancialRecords(d.financials || []));
     }
@@ -323,7 +340,9 @@ function StudentsPageContent() {
 
   useEffect(() => {
     if (selectedGroupId) {
-      fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`)
+      fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+        cache: "no-store",
+      })
         .then((r) => r.json())
         .then((d) => {
           if (d.success) {
@@ -447,6 +466,8 @@ function StudentsPageContent() {
             : rec
         )
       );
+      invalidateCachedPageData("group_bundle:");
+      notifyTenantDataMutated();
     } catch (err) {
       console.error(err);
     }
@@ -467,8 +488,12 @@ function StudentsPageContent() {
           partialPaidAmount: partialAmt,
         }),
       });
+      invalidateCachedPageData("group_bundle:");
+      notifyTenantDataMutated();
       // Refresh
-      const resFin = await fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`);
+      const resFin = await fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}&t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const dataFin = await resFin.json();
       if (dataFin.success) setFinancialRecords(dataFin.financials || []);
       setSelectedStudentIds([]);
@@ -493,7 +518,11 @@ function StudentsPageContent() {
       });
       const data = await res.json();
       if (data.success) {
-        const resFin = await fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}`);
+        invalidateCachedPageData("group_bundle:");
+        notifyTenantDataMutated();
+        const resFin = await fetch(`/api/financials?groupId=${selectedGroupId}&month=${financialMonth}&t=${Date.now()}`, {
+          cache: "no-store",
+        });
         const dataFin = await resFin.json();
         if (dataFin.success) setFinancialRecords(dataFin.financials || []);
       }
@@ -523,6 +552,8 @@ function StudentsPageContent() {
       setAttendanceRecords((prev) =>
         prev.map((a) => (a.studentId === studentId ? { ...a, status } : a))
       );
+      invalidateCachedPageData("group_bundle:");
+      notifyTenantDataMutated();
     } catch (err) {
       console.error(err);
     }
@@ -543,7 +574,11 @@ function StudentsPageContent() {
         }),
       });
 
-      const resAtt = await fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}`);
+      invalidateCachedPageData("group_bundle:");
+      notifyTenantDataMutated();
+      const resAtt = await fetch(`/api/attendance?groupId=${selectedGroupId}&date=${attendanceDate}&t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const dataAtt = await resAtt.json();
       if (dataAtt.success) {
         setAttendanceRecords(dataAtt.attendance || []);
@@ -574,6 +609,8 @@ function StudentsPageContent() {
       });
       const data = await res.json();
       if (data.success && data.exam) {
+        invalidateCachedPageData("group_bundle:");
+        notifyTenantDataMutated();
         setExamRecords((prev) => [data.exam, ...prev]);
         setSelectedExamRecordId(data.exam.id);
         loadExamGrades(data.exam.id, selectedGroupId);
@@ -600,6 +637,8 @@ function StudentsPageContent() {
         }),
       });
 
+      invalidateCachedPageData("group_bundle:");
+      notifyTenantDataMutated();
       setSelectedExamGrades((prev) =>
         prev.map((g) => (g.studentId === studentId ? { ...g, score } : g))
       );
@@ -648,7 +687,10 @@ function StudentsPageContent() {
       if (data.success) {
         setIsCreateStudentModalOpen(false);
         setEditingStudent(null);
-        loadGroupData(selectedGroupId);
+        invalidateCachedPageData("group_bundle:");
+        invalidateCachedPageData("groups");
+        notifyTenantDataMutated();
+        await loadGroupData(selectedGroupId, true);
       }
     } catch (err) {
       console.error(err);
@@ -672,7 +714,10 @@ function StudentsPageContent() {
   const handleDeleteSingleStudent = async (studentId: string) => {
     try {
       await fetch(`/api/students?id=${studentId}`, { method: "DELETE" });
-      loadGroupData(selectedGroupId!);
+      invalidateCachedPageData("group_bundle:");
+      invalidateCachedPageData("groups");
+      notifyTenantDataMutated();
+      await loadGroupData(selectedGroupId!, true);
     } catch (err) {
       console.error(err);
     }

@@ -6,6 +6,7 @@ interface TenantContextBox {
 
 const globalForTenant = globalThis as unknown as {
   __examBuilderTenantAls?: AsyncLocalStorage<TenantContextBox>;
+  __examBuilderActiveTenant?: { tenantId: string; ts: number } | null;
 };
 
 const tenantStorage =
@@ -31,12 +32,18 @@ export function initTenantContextBox(): TenantContextBox {
  */
 export function setCurrentTenantId(tenantId: string): void {
   if (!tenantId) return;
+  const cleanId = tenantId.trim();
+  if (!cleanId) return;
   const box = tenantStorage.getStore();
   if (box) {
-    box.tenantId = tenantId;
+    box.tenantId = cleanId;
   } else {
-    tenantStorage.enterWith({ tenantId });
+    tenantStorage.enterWith({ tenantId: cleanId });
   }
+  globalForTenant.__examBuilderActiveTenant = {
+    tenantId: cleanId,
+    ts: Date.now(),
+  };
 }
 
 /**
@@ -44,13 +51,27 @@ export function setCurrentTenantId(tenantId: string): void {
  */
 export function getCurrentTenantId(): string | null {
   const box = tenantStorage.getStore();
-  return box?.tenantId ?? null;
+  if (box?.tenantId) {
+    return box.tenantId;
+  }
+  // Safety net when Node HTTP stream / Next.js async boundaries drop AsyncLocalStorage store mid-request
+  const recent = globalForTenant.__examBuilderActiveTenant;
+  if (recent && recent.tenantId && Date.now() - recent.ts < 10_000) {
+    return recent.tenantId;
+  }
+  return null;
 }
 
 /**
  * Runs a callback within an explicit tenant ID context.
  */
 export function runWithTenantId<T>(tenantId: string, fn: () => T): T {
+  if (tenantId && tenantId.trim()) {
+    globalForTenant.__examBuilderActiveTenant = {
+      tenantId: tenantId.trim(),
+      ts: Date.now(),
+    };
+  }
   return tenantStorage.run({ tenantId }, fn);
 }
 

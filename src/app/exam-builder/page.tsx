@@ -57,6 +57,10 @@ import {
 import GeminiKeyModal from "@/components/GeminiKeyModal";
 import ModelGenerationModal from "@/components/ModelGenerationModal";
 import {
+  invalidateCachedPageData,
+  notifyTenantDataMutated,
+} from "@/lib/client-session-cache";
+import {
   ExamModelsData,
   generateExamModels,
   reshuffleExamModels,
@@ -2106,6 +2110,8 @@ export default function ExamBuilderPage() {
       });
       const data = await res.json();
       if (data.success) {
+        invalidateCachedPageData("created_exams");
+        notifyTenantDataMutated();
         if (!editingExamId) {
           setEditingExamId(examId);
           try {

@@ -28,6 +28,10 @@ import {
 } from "lucide-react";
 import { Group } from "@/lib/types/management";
 import {
+  invalidateCachedPageData,
+  notifyTenantDataMutated,
+} from "@/lib/client-session-cache";
+import {
   CANONICAL_ACADEMIC_YEARS,
   ExcelColumnSpec,
   ImportFieldKey,
@@ -583,6 +587,8 @@ export default function ExcelSheetsPage() {
         setQuickGroupTeacher("");
         setQuickGroupSubject("");
         setIsQuickGroupOpen(false);
+        invalidateCachedPageData();
+        notifyTenantDataMutated();
       }
     } catch (err) {
       console.error("Failed to create group:", err);
@@ -646,6 +652,8 @@ export default function ExcelSheetsPage() {
         groupName: targetGroupObj?.name || "المجموعة المختارة",
       });
 
+      invalidateCachedPageData();
+      notifyTenantDataMutated();
       // Refresh dataset so export & duplicate checks are immediately up-to-date
       await fetchExcelDataset();
     } catch (err: any) {

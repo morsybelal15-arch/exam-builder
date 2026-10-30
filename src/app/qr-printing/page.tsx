@@ -63,10 +63,11 @@ function QrPrintingContent() {
   const fetchInitialData = async () => {
     try {
       setIsLoading(true);
+      const ts = Date.now();
       const [resGroups, resStudents, resPdfs] = await Promise.all([
-        fetch("/api/groups"),
-        fetch("/api/students"),
-        fetch("/api/qr-sheets"),
+        fetch(`/api/groups?t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/students?t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/qr-sheets?t=${ts}`, { cache: "no-store" }),
       ]);
 
       const dataGroups = await resGroups.json();

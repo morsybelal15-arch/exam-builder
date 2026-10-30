@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { resolveApiKeyPool, CANDIDATE_MODELS } from "@/lib/gemini";
 import { getStudents, saveStudentGrade } from "@/lib/management-db";
 import { requireApiSession } from "@/lib/auth";
+import { setCurrentTenantId } from "@/lib/tenant-context";
 
 function stripDataUrl(b64: string): { data: string; mimeType: string } {
   const match = b64.match(/^data:(image\/[\w+.-]+);base64,([\s\S]*)$/);
@@ -16,7 +17,9 @@ export async function POST(req: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "غير مصرح لك بالوصول" }, { status: 401 });
     }
+    setCurrentTenantId(session.id);
     const body = await req.json();
+    setCurrentTenantId(session.id);
     const { imageBase64, groupId, examRecordId, apiKey: requestApiKey, autoSave } = body;
 
     if (!imageBase64) {
