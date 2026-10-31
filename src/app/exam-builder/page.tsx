@@ -130,6 +130,8 @@ export interface ExamQuestionItem {
 function sanitizeFormattedText(raw?: string): string {
   if (!raw) return "";
   let s = raw
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
@@ -144,6 +146,51 @@ function sanitizeFormattedText(raw?: string): string {
   return s;
 }
 const sanitizePassageHtml = sanitizeFormattedText;
+
+/**
+ * Accurately determines whether a block of text is genuinely an English (LTR) text
+ * rather than an Arabic (RTL) text that happens to contain chemical formulas (Fe3O4, MnO2),
+ * Roman numerals ((III)), units (500°C), or math symbols.
+ */
+function isMostlyEnglishText(raw?: string): boolean {
+  if (!raw) return false;
+  const plain = raw.replace(/<[^>]+>/g, "");
+  const arabicChars = (plain.match(/[\u0600-\u06FF]/g) || []).length;
+  const latinChars = (plain.match(/[a-zA-Z]/g) || []).length;
+  if (arabicChars >= 2 && arabicChars >= latinChars * 0.12) {
+    return false;
+  }
+  return latinChars >= 4 && arabicChars === 0;
+}
+
+function cleanExtractedStemText(raw?: string): string {
+  if (!raw) return "";
+  return raw
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(
+      /^(\s*(?:(?:س|ج|سؤال|السؤال|Q|Question)\s*[\d٠-٩]+|[\(\[\{]?[\d٠-٩]+[\)\]\}]?)\s*[:.\-\)\]]+\s*)+/i,
+      ""
+    )
+    .trim();
+}
+
+function normalizeQuestionListForAlignment(list: ExamQuestionItem[]): ExamQuestionItem[] {
+  if (!Array.isArray(list)) return [];
+  return list.map((q) => ({
+    ...q,
+    text: cleanExtractedStemText(q.text),
+    options: Array.isArray(q.options)
+      ? q.options.map((opt) =>
+          String(opt || "")
+            .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+            .replace(/[ \t]{2,}/g, " ")
+            .trim()
+        )
+      : [],
+  }));
+}
 
 interface PageSlot {
   pageNumber: number;
@@ -981,14 +1028,14 @@ export default function ExamBuilderPage() {
               setExamModels(ex.models);
               const activeKey = ex.models.activeModelKey || "A";
               if (activeKey === "B" && ex.models.models?.B?.questions) {
-                setExamQuestions(ex.models.models.B.questions);
+                setExamQuestions(normalizeQuestionListForAlignment(ex.models.models.B.questions));
               } else if (activeKey === "C" && ex.models.models?.C?.questions) {
-                setExamQuestions(ex.models.models.C.questions);
+                setExamQuestions(normalizeQuestionListForAlignment(ex.models.models.C.questions));
               } else if (ex.models.models?.A?.questions) {
-                setExamQuestions(ex.models.models.A.questions);
+                setExamQuestions(normalizeQuestionListForAlignment(ex.models.models.A.questions));
               }
             } else if (Array.isArray(ex.questions)) {
-              setExamQuestions(ex.questions);
+              setExamQuestions(normalizeQuestionListForAlignment(ex.questions));
               setExamModels(null);
             }
             if (ex.total_points) setMaxScore(ex.total_points);
@@ -1023,7 +1070,7 @@ export default function ExamBuilderPage() {
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed.examQuestions)) {
-            setExamQuestions(parsed.examQuestions);
+            setExamQuestions(normalizeQuestionListForAlignment(parsed.examQuestions));
           }
           if (parsed.examModels !== undefined) {
             setExamModels(parsed.examModels);
@@ -1453,7 +1500,7 @@ export default function ExamBuilderPage() {
       setSaveStatus(`تم إرفاق القطعة بالسؤال ${passageTargetIndex + 1} بنجاح`);
     } else {
       const newIndex = examQuestions.length;
-      const isEnglish = /[a-zA-Z]{3,}/.test(manualPassageText);
+      const isEnglish = isMostlyEnglishText(manualPassageText);
       const newPassageItem: ExamQuestionItem = {
         id: `passage-${Date.now()}`,
         type: "passage",
@@ -2000,17 +2047,36 @@ export default function ExamBuilderPage() {
   const isGeminiActive = Boolean(geminiApiKey || hasServerKey);
 
   // Helper to retrieve the style of a specific question (preferring question.id over array index so shuffling/reordering preserves styles)
-  const getQuestionStyle = (index: number): QuestionStyle => {
-    const qId = examQuestions[index]?.id;
+  const getQuestionStyle = (index: number, itemOverride?: ExamQuestionItem): QuestionStyle => {
+    const q = itemOverride || examQuestions[index];
+    const qId = q?.id;
     const byId = qId ? (questionStyles as Record<string, QuestionStyle>)[qId] : undefined;
-    return (
-      byId ||
-      questionStyles[index] || {
+    const saved = byId || questionStyles[index];
+    const hasArabic = /[\u0600-\u06FF]/.test(q?.text || "");
+    const defaultAlign: "right" | "left" =
+      examDirection === "rtl" || hasArabic ? "right" : "left";
+
+    if (!saved) {
+      return {
         fontSize: globalFontSize,
         isBold: false,
-        textAlign: examDirection === "ltr" ? "left" : "right",
-      }
-    );
+        textAlign: defaultAlign,
+      };
+    }
+
+    // Future-proof & auto-heal: if examDirection is RTL or the question contains Arabic text,
+    // never allow accidental "left" alignment caused by embedded English chemical formulas or symbols.
+    const resolvedAlign: "right" | "center" | "left" =
+      saved.textAlign === "center"
+        ? "center"
+        : examDirection === "rtl" || hasArabic
+        ? "right"
+        : saved.textAlign || defaultAlign;
+
+    return {
+      ...saved,
+      textAlign: resolvedAlign,
+    };
   };
 
   const updateFocusedQuestionStyle = (updater: (prev: QuestionStyle) => QuestionStyle) => {
@@ -2318,10 +2384,9 @@ export default function ExamBuilderPage() {
     return "نموذج (أ)";
   };
 
-  // Helper to remove any duplicate numbering prefix in question preview
+  // Helper to remove any duplicate numbering prefix and stray directional marks in question preview
   const cleanStem = (t: string) => {
-    if (!t) return "";
-    return t.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim();
+    return cleanExtractedStemText(t);
   };
 
   // Pointer event handlers for Lasso, Hand Pan, and Rect marquee tool
@@ -2703,8 +2768,15 @@ export default function ExamBuilderPage() {
       const newItems: ExamQuestionItem[] = extractedList.map((pQ, i) => ({
         id: `q-extracted-${Date.now()}-${i}`,
         type: (pQ.type as any) || (Array.isArray(pQ.options) && pQ.options.length > 0 ? "choice" : "essay"),
-        text: pQ.text || "",
-        options: Array.isArray(pQ.options) ? pQ.options : [],
+        text: cleanExtractedStemText(pQ.text || ""),
+        options: Array.isArray(pQ.options)
+          ? pQ.options.map((opt: any) =>
+              String(opt || "")
+                .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+                .replace(/[ \t]{2,}/g, " ")
+                .trim()
+            )
+          : [],
         correctOptionIndex: typeof pQ.correctOptionIndex === "number" ? pQ.correctOptionIndex : undefined,
         points: pQ.points || (pQ.type === "choice" ? 2 : pQ.type === "trueFalse" ? 1 : 5),
         isExtractedByOcr: true,
@@ -2716,9 +2788,11 @@ export default function ExamBuilderPage() {
         subType: pQ.subType,
       }));
 
-      const isEnglishExam =
-        newItems.some((item) => /[a-zA-Z]{3,}/.test(item.text) || (item.options && item.options.some(o => /[a-zA-Z]{3,}/.test(o)))) ||
-        (newItems.length === 0 && /[a-zA-Z]{3,}/.test(returnedPassage));
+      const combinedNewText = [
+        ...newItems.map((item) => item.text),
+        returnedPassage,
+      ].join(" ");
+      const isEnglishExam = isMostlyEnglishText(combinedNewText);
       if (examQuestions.length === 0 && isEnglishExam) {
         setExamDirection("ltr");
         setChoiceFormat("english_lower");
@@ -2730,7 +2804,7 @@ export default function ExamBuilderPage() {
         const extractedTitle = (data.passageTitle || extractedList.find((q) => q.passageTitle)?.passageTitle || "").trim();
 
         if (extractedPassage) {
-          const isEnglish = /[a-zA-Z]{3,}/.test(extractedPassage);
+          const isEnglish = isMostlyEnglishText(extractedPassage);
           const standalonePassageItem: ExamQuestionItem = {
             id: `passage-${Date.now()}`,
             type: "passage",
@@ -2764,20 +2838,26 @@ export default function ExamBuilderPage() {
           }
           return true;
         });
-        const updated = [...examQuestions, ...(filteredNewItems.length > 0 ? filteredNewItems : newItems)];
+        const itemsToAppend = filteredNewItems.length > 0 ? filteredNewItems : newItems;
+        const updated = [...examQuestions, ...itemsToAppend];
         setExamQuestions(updated);
         pushHistorySnapshot(updated);
 
         setQuestionStyles((prev) => {
-          const next = { ...prev };
-          newItems.forEach((_, idx) => {
-            next[startIndex + idx] = {
+          const next: Record<string | number, QuestionStyle> = { ...prev };
+          itemsToAppend.forEach((item, idx) => {
+            const hasArabic = /[\u0600-\u06FF]/.test(item.text || "");
+            const align: "right" | "left" =
+              hasArabic || (!isEnglishExam && examDirection === "rtl") ? "right" : "left";
+            const styleObj: QuestionStyle = {
               fontSize: globalFontSize,
               isBold: false,
-              textAlign: (isEnglishExam || examDirection === "ltr") ? "left" : "right",
+              textAlign: align,
             };
+            next[startIndex + idx] = styleObj;
+            if (item.id) next[item.id] = styleObj;
           });
-          return next;
+          return next as Record<number, QuestionStyle>;
         });
 
         setFocusedQuestionIndex(startIndex);
@@ -5757,12 +5837,23 @@ export default function ExamBuilderPage() {
                         : (examQuestions[index] || currentSheetQuestions[index]);
                       if (!q) return null;
 
-                      const style = getQuestionStyle(index);
+                      const style = getQuestionStyle(index, q);
                       const isFocused = focusedQuestionIndex === index;
                       const isBeingDragged = draggedIndex === index;
                       const isDragTarget = dragOverIndex === index;
                       const isItemRefining = refiningIndex === index;
                       const qNum = getQuestionDisplayNumber(index, isAllSequentialView ? currentSheetQuestions : examQuestions);
+                      const hasArabicStem = /[\u0600-\u06FF]/.test(q.text || "");
+                      const questionDir: "rtl" | "ltr" =
+                        examDirection === "rtl" || hasArabicStem ? "rtl" : "ltr";
+                      const effectiveStemAlign: "right" | "center" | "left" =
+                        style.textAlign === "center"
+                          ? "center"
+                          : questionDir === "rtl"
+                          ? "right"
+                          : "left";
+                      const stemFontSize = Math.round(globalFontSize * 1.12);
+                      const optionFontSize = Math.max(10, Math.round((globalFontSize - 0.5) * 10) / 10);
 
                       // Dedicated Standalone Passage Card
                       if (q.type === "passage") {
@@ -5974,19 +6065,34 @@ export default function ExamBuilderPage() {
                             </div>
                           )}
 
-                          {/* Question Top Row: Label + Stem + Sleek Controls */}
-                          <div className="flex items-start justify-between gap-2 w-full max-w-full min-w-0 overflow-hidden" dir={examDirection}>
-                            <div className="flex items-start gap-1.5 flex-1 min-w-0 max-w-full overflow-hidden">
-                              <span className="font-extrabold text-blue-950 text-xs sm:text-sm select-none shrink-0 pt-0.5">
-                                {examDirection === "ltr" ? `Q${qNum}:` : `س${qNum}:`}
+                          {/* Question Top Row: Label + Stem + Sleek Controls (Distinct Header Block Separating Question from Choices) */}
+                          <div
+                            className={`question-stem-block flex items-start justify-between gap-2 w-full max-w-full min-w-0 overflow-hidden pb-1.5 mb-2 border-b ${
+                              isPreviewMode
+                                ? "border-slate-200/90 print:border-slate-300"
+                                : "border-slate-200/80 bg-slate-50/75 rounded-t-md px-1.5 py-1"
+                            }`}
+                            dir={questionDir}
+                          >
+                            <div
+                              className="flex items-start gap-2 flex-1 min-w-0 max-w-full overflow-hidden"
+                              dir={questionDir}
+                            >
+                              <span
+                                className="inline-flex items-center justify-center font-black text-slate-950 bg-slate-200/85 print:bg-slate-100 border border-slate-300/90 print:border-slate-400 rounded px-1.5 py-0.5 select-none shrink-0 leading-none mt-0.5"
+                                style={{ fontSize: `${Math.max(11, Math.round(globalFontSize * 0.95))}px` }}
+                              >
+                                {questionDir === "ltr" ? `Q${qNum}:` : `س${qNum}:`}
                               </span>
                               {isPreviewMode ? (
                                 <p
-                                  className="text-slate-900 leading-snug font-bold flex-1 min-w-0 max-w-full break-words [overflow-wrap:anywhere]"
+                                  dir={questionDir}
+                                  className="text-slate-950 leading-relaxed font-extrabold flex-1 min-w-0 max-w-full break-words [overflow-wrap:anywhere]"
                                   style={{
-                                    fontSize: `${globalFontSize}px`,
-                                    textAlign: style.textAlign,
-                                    fontWeight: style.isBold ? 700 : 600,
+                                    fontSize: `${stemFontSize}px`,
+                                    textAlign: effectiveStemAlign,
+                                    fontWeight: style.isBold ? 900 : 800,
+                                    unicodeBidi: "normal",
                                     wordBreak: "break-word",
                                     overflowWrap: "anywhere",
                                   }}
@@ -5995,15 +6101,17 @@ export default function ExamBuilderPage() {
                                   }}
                                 />
                               ) : (
-                                <div className="flex-1 min-w-0 max-w-full">
+                                <div className="flex-1 min-w-0 max-w-full" dir={questionDir}>
                                   {focusedQuestionIndex !== index && /<\/?u>/i.test(q.text) ? (
                                     <p
+                                      dir={questionDir}
                                       onClick={() => setFocusedQuestionIndex(index)}
-                                      className="w-full text-slate-800 leading-snug font-bold break-words [overflow-wrap:anywhere] cursor-text"
+                                      className="w-full text-slate-950 leading-relaxed font-extrabold break-words [overflow-wrap:anywhere] cursor-text"
                                       style={{
-                                        fontSize: `${globalFontSize}px`,
-                                        fontWeight: style.isBold ? 700 : 600,
-                                        textAlign: style.textAlign,
+                                        fontSize: `${stemFontSize}px`,
+                                        fontWeight: style.isBold ? 900 : 800,
+                                        textAlign: effectiveStemAlign,
+                                        unicodeBidi: "normal",
                                         wordBreak: "break-word",
                                         overflowWrap: "anywhere",
                                       }}
@@ -6013,6 +6121,7 @@ export default function ExamBuilderPage() {
                                     />
                                   ) : (
                                     <textarea
+                                      dir={questionDir}
                                       value={q.text}
                                       onChange={(e) => {
                                         handleUpdateQuestionText(index, e.target.value);
@@ -6034,11 +6143,12 @@ export default function ExamBuilderPage() {
                                       onFocus={() => setFocusedQuestionIndex(index)}
                                       rows={1}
                                       placeholder="اكتب أو عدل نص السؤال هنا..."
-                                      className="w-full min-w-0 max-w-full resize-none bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 text-slate-800 leading-snug cursor-text font-bold break-words [overflow-wrap:anywhere]"
+                                      className="w-full min-w-0 max-w-full resize-none bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 text-slate-950 leading-relaxed cursor-text font-extrabold break-words [overflow-wrap:anywhere]"
                                       style={{
-                                        fontSize: `${globalFontSize}px`,
-                                        fontWeight: style.isBold ? 700 : 600,
-                                        textAlign: style.textAlign,
+                                        fontSize: `${stemFontSize}px`,
+                                        fontWeight: style.isBold ? 900 : 800,
+                                        textAlign: effectiveStemAlign,
+                                        unicodeBidi: "normal",
                                         wordBreak: "break-word",
                                         overflowWrap: "anywhere",
                                       }}
@@ -6293,12 +6403,17 @@ export default function ExamBuilderPage() {
                               ));
 
                             return (
-                              <div className="mt-2 space-y-1 w-full max-w-full min-w-0">
+                              <div
+                                className={`mt-1.5 space-y-1 w-full max-w-full min-w-0 ${
+                                  questionDir === "rtl" ? "pr-2.5 sm:pr-3.5" : "pl-2.5 sm:pl-3.5"
+                                }`}
+                                dir={questionDir}
+                              >
                                 <div
                                   className={`w-full max-w-full min-w-0 ${
                                     isVertical
-                                      ? "grid grid-cols-1 gap-y-2"
-                                      : "grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-2"
+                                      ? "grid grid-cols-1 gap-y-1.5"
+                                      : "grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-1.5"
                                   }`}
                                 >
                                   {q.options.map((opt, optIdx) => {
@@ -6308,7 +6423,8 @@ export default function ExamBuilderPage() {
                                     return (
                                       <div
                                         key={optIdx}
-                                        className={`flex items-start gap-2 rounded px-2 py-1 min-w-0 max-w-full transition-colors ${
+                                        dir={questionDir}
+                                        className={`flex items-start gap-2 rounded px-2 py-0.5 min-w-0 max-w-full transition-colors ${
                                           isPreviewMode
                                             ? "bg-transparent border-none p-0"
                                             : isCorrect
@@ -6318,7 +6434,7 @@ export default function ExamBuilderPage() {
                                       >
                                         {/* Correct Answer Indicator / Option Bubble */}
                                         {isPreviewMode ? (
-                                          <span className="w-5 h-5 rounded-full border border-slate-700 text-slate-900 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                                          <span className="w-5 h-5 rounded-full border border-slate-500 bg-slate-50/80 text-slate-800 flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5">
                                             {label}
                                           </span>
                                         ) : (
@@ -6336,21 +6452,35 @@ export default function ExamBuilderPage() {
                                           </button>
                                         )}
 
-                                        {/* Option Text */}
+                                        {/* Option Text (Lighter weight & slightly smaller font than question stem for clear visual separation) */}
                                         {isPreviewMode ? (
                                           <span
-                                            className="flex-1 text-slate-900 font-semibold text-xs sm:text-sm min-w-0 break-words [overflow-wrap:anywhere] leading-snug"
+                                            dir={questionDir}
+                                            className="flex-1 text-slate-700 print:text-slate-800 font-medium min-w-0 break-words [overflow-wrap:anywhere] leading-snug"
+                                            style={{
+                                              fontSize: `${optionFontSize}px`,
+                                              fontWeight: 500,
+                                              textAlign: questionDir === "rtl" ? "right" : "left",
+                                              unicodeBidi: "normal",
+                                            }}
                                             dangerouslySetInnerHTML={{
                                               __html: sanitizeFormattedText(opt),
                                             }}
                                           />
                                         ) : (
                                           <textarea
+                                            dir={questionDir}
                                             value={opt}
                                             rows={isVertical && opt.length > 55 ? 2 : 1}
                                             onChange={(e) => handleUpdateOptionText(index, optIdx, e.target.value)}
                                             onBlur={() => pushHistorySnapshot(examQuestions)}
-                                            className="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 p-0 text-slate-800 font-medium text-xs sm:text-sm break-words [overflow-wrap:anywhere] resize-none leading-snug"
+                                            className="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 p-0 text-slate-700 font-medium break-words [overflow-wrap:anywhere] resize-none leading-snug"
+                                            style={{
+                                              fontSize: `${optionFontSize}px`,
+                                              fontWeight: 500,
+                                              textAlign: questionDir === "rtl" ? "right" : "left",
+                                              unicodeBidi: "normal",
+                                            }}
                                           />
                                         )}
 

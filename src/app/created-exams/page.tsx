@@ -27,6 +27,8 @@ import {
 function sanitizeFormattedText(raw?: string): string {
   if (!raw) return "";
   let s = raw
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
@@ -633,26 +635,41 @@ export default function CreatedExamsPage() {
                 {/* Questions */}
                 <div className="questions-container">
                   {sheet.questions.map((q: any, qIdx: number) => (
-                    <div key={q.id || qIdx} className="question-card">
-                      <div className="flex items-start gap-1.5 font-bold text-slate-900 text-xs">
-                        <span className="font-extrabold text-blue-950 shrink-0">س{qIdx + 1}:</span>
+                    <div key={q.id || qIdx} className="question-card" dir="rtl">
+                      <div
+                        className="question-stem-block flex items-start gap-2 font-extrabold text-slate-950 text-[14.5px] pb-1.5 mb-2 border-b border-slate-300"
+                        dir="rtl"
+                      >
+                        <span className="inline-flex items-center justify-center font-black text-slate-950 bg-slate-100 border border-slate-400 rounded px-1.5 py-0.5 text-xs leading-none shrink-0 mt-0.5">
+                          س{qIdx + 1}:
+                        </span>
                         <p
-                          className="flex-1 leading-relaxed"
+                          dir="rtl"
+                          className="flex-1 leading-relaxed text-right font-extrabold text-slate-950"
+                          style={{ textAlign: "right", unicodeBidi: "normal" }}
                           dangerouslySetInnerHTML={{
-                            __html: sanitizeFormattedText(q.text?.replace(/^(\s*(س\s*\d+|Q\s*\d+|\d+)[\s:.\-\)]+)/i, "").trim() || q.text),
+                            __html: sanitizeFormattedText(
+                              q.text
+                                ?.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+                                .replace(/^(\s*(?:(?:س|ج|سؤال|السؤال|Q|Question)\s*[\d٠-٩]+|[\(\[\{]?[\d٠-٩]+[\)\]\}]?)\s*[:.\-\)\]]+\s*)+/i, "")
+                                .trim() || q.text
+                            ),
                           }}
                         />
                       </div>
                       {Array.isArray(q.options) && q.options.length > 0 && (
-                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-1.5 text-xs text-slate-800">
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-1.5 pr-3 text-[12.5px] font-medium text-slate-800" dir="rtl">
                           {q.options.map((opt: string, optIdx: number) => {
                             const letters = ["أ", "ب", "ج", "د"];
                             return (
-                              <div key={optIdx} className="flex items-center gap-1.5">
-                                <span className="w-4 h-4 rounded-full border border-slate-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+                              <div key={optIdx} className="flex items-start gap-2" dir="rtl">
+                                <span className="w-5 h-5 rounded-full border border-slate-600 bg-slate-50 flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5">
                                   {letters[optIdx] || optIdx + 1}
                                 </span>
                                 <span
+                                  dir="rtl"
+                                  className="flex-1 text-right font-medium leading-snug"
+                                  style={{ textAlign: "right", unicodeBidi: "normal" }}
                                   dangerouslySetInnerHTML={{
                                     __html: sanitizeFormattedText(opt),
                                   }}

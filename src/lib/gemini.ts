@@ -127,15 +127,32 @@ function parseJson<T>(text: string | null | undefined): T {
 }
 
 function cleanOptionText(raw: string): string {
-  let s = String(raw || "").trim();
+  let s = String(raw || "")
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
   // Strip letter markers like (أ), أ), أ-, أ., (a), a), a-
   s = s.replace(/^[\(\[\{]([أ-دa-dA-D])[\)\]\}]\s*[-–.:]?\s*/, "");
   s = s.replace(/^([أ-دa-dA-D])[\)\]\}]\s*[-–.:]?\s*/, "");
   s = s.replace(/^([أ-دa-dA-D])\s*[-–.:]\s*/, "");
   // Strip numbering ONLY when enclosed in paren (1) or with dash 1-
   // NEVER strip '0.' or '.' to prevent breaking decimals like 0.315
-  s = s.replace(/^[\(\[\{](\d{1,2})[\)\]\}]\s*[-–.:]?\s*/, "");
-  s = s.replace(/^([1-9]\d?)[-–:]\s+/, "");
+  s = s.replace(/^[\(\[\{](\d{1,2}|[٠-٩]{1,2})[\)\]\}]\s*[-–.:]?\s*/, "");
+  s = s.replace(/^([1-9]\d?|[١-٩][٠-٩]?)[-–:]\s+/, "");
+  return s.trim();
+}
+
+function cleanQuestionStemText(raw: string): string {
+  let s = String(raw || "")
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  // Strip leading question numbering prefixes (e.g. س13:, 13-, ١٣., (13), Q1:)
+  s = s.replace(
+    /^(\s*(?:(?:س|ج|سؤال|السؤال|Q|Question)\s*[\d٠-٩]+|[\(\[\{]?[\d٠-٩]+[\)\]\}]?)\s*[:.\-\)\]]+\s*)+/i,
+    ""
+  );
   return s.trim();
 }
 
@@ -202,7 +219,7 @@ function detectQuestionType(text: string, options: string[], rawType?: string): 
 }
 
 function normalizeQuestion(q: Partial<ExtractedQuestion>): ExtractedQuestion {
-  const rawText = String(q.text || "").trim();
+  const rawText = cleanQuestionStemText(String(q.text || ""));
   let options = Array.isArray(q.options)
     ? q.options.map(cleanOptionText).filter(Boolean)
     : [];
