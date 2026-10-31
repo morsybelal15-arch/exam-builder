@@ -22,6 +22,11 @@ export interface StoredTenant {
   subscriptionStatus: "ACTIVE" | "STOPPED" | "EXPIRED";
   planType: string;
   subscriptionType?: SubscriptionCategory;
+  isTrial?: boolean;
+  maxGroups?: number;
+  maxStudents?: number;
+  maxExtractedQuestions?: number;
+  extractedQuestionsUsed?: number;
   domain: string | null;
   subscriptionStartDate?: string | null;
   subscriptionDueDate: string | null;
@@ -37,6 +42,8 @@ export interface StoredTenant {
   _count?: {
     exams: number;
     uploadedFiles: number;
+    groups?: number;
+    students?: number;
   };
 }
 
@@ -45,10 +52,18 @@ interface TenantMetaEnvelope {
   subscriptionType: SubscriptionCategory;
   subscriptionStartDate: string | null;
   enabledFeatures: string[];
+  isTrial?: boolean;
+  maxGroups?: number;
+  maxStudents?: number;
+  maxExtractedQuestions?: number;
+  extractedQuestionsUsed?: number;
 }
 
 function inferSubscriptionType(planType?: string | null): SubscriptionCategory {
   if (!planType) return "سنتر";
+  if (planType.includes("مجانية") || planType.includes("تجربة") || planType.toLowerCase().includes("trial")) {
+    return "تجربة مجانية";
+  }
   if (planType.includes("معلم") && !planType.includes("سنتر")) return "معلم";
   return "سنتر";
 }
@@ -57,12 +72,25 @@ function encodeTenantMeta(meta: {
   subscriptionType?: SubscriptionCategory;
   subscriptionStartDate?: string | null;
   enabledFeatures?: string[];
+  isTrial?: boolean;
+  maxGroups?: number;
+  maxStudents?: number;
+  maxExtractedQuestions?: number;
+  extractedQuestionsUsed?: number;
 }): string {
+  const subType = meta.subscriptionType || "سنتر";
+  const isTrial = meta.isTrial !== undefined ? meta.isTrial : subType === "تجربة مجانية";
   const payload: TenantMetaEnvelope = {
     __meta: 1,
-    subscriptionType: meta.subscriptionType || "سنتر",
+    subscriptionType: subType,
     subscriptionStartDate: meta.subscriptionStartDate || null,
     enabledFeatures: normalizeEnabledFeatures(meta.enabledFeatures),
+    isTrial,
+    maxGroups: meta.maxGroups !== undefined ? meta.maxGroups : isTrial ? 2 : 0,
+    maxStudents: meta.maxStudents !== undefined ? meta.maxStudents : isTrial ? 10 : 0,
+    maxExtractedQuestions:
+      meta.maxExtractedQuestions !== undefined ? meta.maxExtractedQuestions : isTrial ? 30 : 0,
+    extractedQuestionsUsed: Math.max(0, Number(meta.extractedQuestionsUsed || 0)),
   };
   return JSON.stringify(payload);
 }
@@ -76,16 +104,26 @@ function decodeTenantMeta(
   subscriptionType: SubscriptionCategory;
   subscriptionStartDate: string | null;
   enabledFeatures: string[];
+  isTrial: boolean;
+  maxGroups: number;
+  maxStudents: number;
+  maxExtractedQuestions: number;
+  extractedQuestionsUsed: number;
 } {
   if (rawVerificationField && rawVerificationField.trim().startsWith("{")) {
     try {
       const parsed = JSON.parse(rawVerificationField) as Partial<TenantMetaEnvelope>;
       if (parsed && parsed.__meta === 1) {
+        const subType: SubscriptionCategory =
+          parsed.subscriptionType === "معلم" ||
+          parsed.subscriptionType === "سنتر" ||
+          parsed.subscriptionType === "تجربة مجانية"
+            ? parsed.subscriptionType
+            : inferSubscriptionType(planType);
+        const isTrial =
+          parsed.isTrial !== undefined ? Boolean(parsed.isTrial) : subType === "تجربة مجانية";
         return {
-          subscriptionType:
-            parsed.subscriptionType === "معلم" || parsed.subscriptionType === "سنتر"
-              ? parsed.subscriptionType
-              : inferSubscriptionType(planType),
+          subscriptionType: subType,
           subscriptionStartDate:
             parsed.subscriptionStartDate ||
             localFallback?.subscriptionStartDate ||
@@ -94,6 +132,35 @@ function decodeTenantMeta(
           enabledFeatures: normalizeEnabledFeatures(
             parsed.enabledFeatures || localFallback?.enabledFeatures
           ),
+          isTrial,
+          maxGroups:
+            parsed.maxGroups !== undefined
+              ? Number(parsed.maxGroups)
+              : localFallback?.maxGroups !== undefined
+              ? Number(localFallback.maxGroups)
+              : isTrial
+              ? 2
+              : 0,
+          maxStudents:
+            parsed.maxStudents !== undefined
+              ? Number(parsed.maxStudents)
+              : localFallback?.maxStudents !== undefined
+              ? Number(localFallback.maxStudents)
+              : isTrial
+              ? 10
+              : 0,
+          maxExtractedQuestions:
+            parsed.maxExtractedQuestions !== undefined
+              ? Number(parsed.maxExtractedQuestions)
+              : localFallback?.maxExtractedQuestions !== undefined
+              ? Number(localFallback.maxExtractedQuestions)
+              : isTrial
+              ? 30
+              : 0,
+          extractedQuestionsUsed: Math.max(
+            Number(parsed.extractedQuestionsUsed || 0),
+            Number(localFallback?.extractedQuestionsUsed || 0)
+          ),
         };
       }
     } catch {
@@ -101,14 +168,38 @@ function decodeTenantMeta(
     }
   }
 
+  const subType: SubscriptionCategory =
+    localFallback?.subscriptionType === "معلم" ||
+    localFallback?.subscriptionType === "سنتر" ||
+    localFallback?.subscriptionType === "تجربة مجانية"
+      ? localFallback.subscriptionType
+      : inferSubscriptionType(planType);
+  const isTrial =
+    localFallback?.isTrial !== undefined
+      ? Boolean(localFallback.isTrial)
+      : subType === "تجربة مجانية";
+
   return {
-    subscriptionType:
-      localFallback?.subscriptionType === "معلم" || localFallback?.subscriptionType === "سنتر"
-        ? localFallback.subscriptionType
-        : inferSubscriptionType(planType),
+    subscriptionType: subType,
     subscriptionStartDate:
       localFallback?.subscriptionStartDate || createdAtIso || new Date().toISOString(),
     enabledFeatures: normalizeEnabledFeatures(localFallback?.enabledFeatures),
+    isTrial,
+    maxGroups:
+      localFallback?.maxGroups !== undefined ? Number(localFallback.maxGroups) : isTrial ? 2 : 0,
+    maxStudents:
+      localFallback?.maxStudents !== undefined
+        ? Number(localFallback.maxStudents)
+        : isTrial
+        ? 10
+        : 0,
+    maxExtractedQuestions:
+      localFallback?.maxExtractedQuestions !== undefined
+        ? Number(localFallback.maxExtractedQuestions)
+        : isTrial
+        ? 30
+        : 0,
+    extractedQuestionsUsed: Number(localFallback?.extractedQuestionsUsed || 0),
   };
 }
 
@@ -188,6 +279,11 @@ function ensureStoreFile(): StoredTenant[] {
         subscriptionType: meta.subscriptionType,
         subscriptionStartDate: meta.subscriptionStartDate,
         enabledFeatures: meta.enabledFeatures,
+        isTrial: meta.isTrial,
+        maxGroups: meta.maxGroups,
+        maxStudents: meta.maxStudents,
+        maxExtractedQuestions: meta.maxExtractedQuestions,
+        extractedQuestionsUsed: meta.extractedQuestionsUsed,
       };
     });
     globalForTenantsRepo.__tenantsStoreCache = { mtimeMs: currentMtime, list };
@@ -258,7 +354,7 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
 
       return dbTenants.map((t) => {
         const localUsage = getTenantUsageStats(t.id);
-        const prismaUsed = Number(t.usedStorageBytes);
+        const managementStore = getManagementStore(t.id);
         const createdIso = t.createdAt.toISOString();
         const meta = decodeTenantMeta(
           t.verificationCode,
@@ -273,6 +369,11 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
           enabledFeatures: meta.enabledFeatures,
+          isTrial: meta.isTrial,
+          maxGroups: meta.maxGroups,
+          maxStudents: meta.maxStudents,
+          maxExtractedQuestions: meta.maxExtractedQuestions,
+          extractedQuestionsUsed: meta.extractedQuestionsUsed,
           storageLimitBytes: Number(t.storageLimitBytes),
           usedStorageBytes: localUsage.usedStorageBytes,
           subscriptionDueDate: t.subscriptionDueDate ? t.subscriptionDueDate.toISOString() : null,
@@ -281,6 +382,8 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
           _count: {
             exams: Math.max(t._count?.exams || 0, localUsage.examsCount),
             uploadedFiles: Math.max(t._count?.uploadedFiles || 0, localUsage.filesCount),
+            groups: managementStore.groups.length,
+            students: managementStore.students.length,
           },
         };
       });
@@ -294,6 +397,7 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
     .filter((t) => t.role === "TENANT")
     .map((t) => {
       const localUsage = getTenantUsageStats(t.id);
+      const managementStore = getManagementStore(t.id);
       const { password: _pw, verificationCode: _vc, ...safeTenant } = t;
       return {
         ...safeTenant,
@@ -302,6 +406,8 @@ export async function getTenantsList(): Promise<StoredTenant[]> {
         _count: {
           exams: localUsage.examsCount,
           uploadedFiles: localUsage.filesCount,
+          groups: managementStore.groups.length,
+          students: managementStore.students.length,
         },
       };
     });
@@ -359,6 +465,11 @@ export async function findTenantByPhone(phone: string): Promise<StoredTenant | n
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
           enabledFeatures: meta.enabledFeatures,
+          isTrial: meta.isTrial,
+          maxGroups: meta.maxGroups,
+          maxStudents: meta.maxStudents,
+          maxExtractedQuestions: meta.maxExtractedQuestions,
+          extractedQuestionsUsed: meta.extractedQuestionsUsed,
           storageLimitBytes: Number(dbTenant.storageLimitBytes),
           usedStorageBytes: Number(dbTenant.usedStorageBytes),
           subscriptionDueDate: dbTenant.subscriptionDueDate
@@ -416,6 +527,11 @@ export async function findTenantById(id: string): Promise<StoredTenant | null> {
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
           enabledFeatures: meta.enabledFeatures,
+          isTrial: meta.isTrial,
+          maxGroups: meta.maxGroups,
+          maxStudents: meta.maxStudents,
+          maxExtractedQuestions: meta.maxExtractedQuestions,
+          extractedQuestionsUsed: meta.extractedQuestionsUsed,
           storageLimitBytes: Number(dbTenant.storageLimitBytes),
           usedStorageBytes: Number(dbTenant.usedStorageBytes),
           subscriptionDueDate: dbTenant.subscriptionDueDate
@@ -451,29 +567,43 @@ export async function findTenantById(id: string): Promise<StoredTenant | null> {
 export function getTenantAccessBlock(
   tenant: Pick<
     StoredTenant,
-    "role" | "subscriptionStatus" | "subscriptionStartDate" | "subscriptionDueDate"
+    | "role"
+    | "subscriptionStatus"
+    | "subscriptionType"
+    | "isTrial"
+    | "subscriptionStartDate"
+    | "subscriptionDueDate"
   > | null
 ): string | null {
   if (!tenant) return "الحساب غير موجود. يرجى التواصل مع الإدارة.";
   if (tenant.role === "SUPER_ADMIN") return null;
+  const isTrial = Boolean(tenant.isTrial || tenant.subscriptionType === "تجربة مجانية");
   if (tenant.subscriptionStatus === "STOPPED") {
     return "حسابك متوقف حالياً. يرجى التواصل مع الإدارة لتفعيل الاشتراك.";
   }
   if (tenant.subscriptionStatus === "EXPIRED") {
-    return "انتهى اشتراكك. يرجى التواصل مع الإدارة للتجديد.";
+    return isTrial
+      ? "انتهت الفترة التجريبية المجانية (24 ساعة). يرجى التواصل مع الإدارة لتفعيل اشتراكك الكامل والاستمرار بنفس بياناتك."
+      : "انتهى اشتراكك. يرجى التواصل مع الإدارة للتجديد.";
   }
   if (tenant.subscriptionStartDate) {
     const start = new Date(tenant.subscriptionStartDate);
-    start.setHours(0, 0, 0, 0);
+    if (!isTrial) {
+      start.setHours(0, 0, 0, 0);
+    }
     if (start.getTime() > Date.now()) {
       return `لم يبدأ موعد سريان اشتراكك بعد (يبدأ في ${start.toLocaleDateString("ar-EG")}).`;
     }
   }
   if (tenant.subscriptionDueDate) {
     const due = new Date(tenant.subscriptionDueDate);
-    due.setHours(23, 59, 59, 999);
-    if (due.getTime() < Date.now()) {
-      return "انتهت مدة اشتراكك. يرجى التواصل مع الإدارة للتجديد.";
+    if (!isTrial) {
+      due.setHours(23, 59, 59, 999);
+    }
+    if (due.getTime() <= Date.now()) {
+      return isTrial
+        ? "انتهت الفترة التجريبية المجانية (24 ساعة). يرجى التواصل مع الإدارة لتفعيل اشتراكك الكامل والاستمرار بنفس بياناتك."
+        : "انتهت مدة اشتراكك. يرجى التواصل مع الإدارة للتجديد.";
     }
   }
   return null;
@@ -512,6 +642,11 @@ export async function findTenantByDomain(domain: string): Promise<StoredTenant |
           subscriptionType: meta.subscriptionType,
           subscriptionStartDate: meta.subscriptionStartDate,
           enabledFeatures: meta.enabledFeatures,
+          isTrial: meta.isTrial,
+          maxGroups: meta.maxGroups,
+          maxStudents: meta.maxStudents,
+          maxExtractedQuestions: meta.maxExtractedQuestions,
+          extractedQuestionsUsed: meta.extractedQuestionsUsed,
           storageLimitBytes: Number(dbTenant.storageLimitBytes),
           usedStorageBytes: Number(dbTenant.usedStorageBytes),
           subscriptionDueDate: dbTenant.subscriptionDueDate
@@ -576,6 +711,11 @@ export async function exportRawTenantStoreAsync(): Promise<StoredTenant[]> {
             subscriptionStatus: t.subscriptionStatus,
             planType: t.planType,
             subscriptionType: meta.subscriptionType,
+            isTrial: meta.isTrial,
+            maxGroups: meta.maxGroups,
+            maxStudents: meta.maxStudents,
+            maxExtractedQuestions: meta.maxExtractedQuestions,
+            extractedQuestionsUsed: meta.extractedQuestionsUsed,
             domain: t.domain,
             subscriptionStartDate: meta.subscriptionStartDate,
             subscriptionDueDate: t.subscriptionDueDate ? t.subscriptionDueDate.toISOString() : null,
@@ -609,6 +749,11 @@ export async function createTenantRecord(data: {
   subscriptionStatus?: "ACTIVE" | "STOPPED" | "EXPIRED";
   planType: string;
   subscriptionType?: SubscriptionCategory;
+  isTrial?: boolean;
+  maxGroups?: number;
+  maxStudents?: number;
+  maxExtractedQuestions?: number;
+  extractedQuestionsUsed?: number;
   subscriptionStartDate?: Date;
   subscriptionDueDate: Date;
   enabledFeatures?: string[];
@@ -619,19 +764,37 @@ export async function createTenantRecord(data: {
 }): Promise<StoredTenant> {
   const id = `tenant_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date();
-  const startDateObj = data.subscriptionStartDate ? new Date(data.subscriptionStartDate) : now;
-  startDateObj.setUTCHours(0, 0, 0, 0);
-  const startDateIso = startDateObj.toISOString();
-  const dueDate = new Date(data.subscriptionDueDate);
-  dueDate.setUTCHours(23, 59, 59, 999);
-
   const subType: SubscriptionCategory =
     data.subscriptionType || inferSubscriptionType(data.planType);
+  const isTrial = data.isTrial !== undefined ? Boolean(data.isTrial) : subType === "تجربة مجانية";
+
+  const startDateObj = data.subscriptionStartDate ? new Date(data.subscriptionStartDate) : now;
+  if (!isTrial) {
+    startDateObj.setUTCHours(0, 0, 0, 0);
+  }
+  const startDateIso = startDateObj.toISOString();
+
+  const dueDate = new Date(data.subscriptionDueDate);
+  if (!isTrial) {
+    dueDate.setUTCHours(23, 59, 59, 999);
+  }
+
+  const maxGroups = data.maxGroups !== undefined ? Number(data.maxGroups) : isTrial ? 2 : 0;
+  const maxStudents = data.maxStudents !== undefined ? Number(data.maxStudents) : isTrial ? 10 : 0;
+  const maxExtractedQuestions =
+    data.maxExtractedQuestions !== undefined ? Number(data.maxExtractedQuestions) : isTrial ? 30 : 0;
+  const extractedQuestionsUsed = Math.max(0, Number(data.extractedQuestionsUsed || 0));
+
   const features = normalizeEnabledFeatures(data.enabledFeatures || ALL_FEATURE_IDS);
   const metaEncoded = encodeTenantMeta({
     subscriptionType: subType,
     subscriptionStartDate: startDateIso,
     enabledFeatures: features,
+    isTrial,
+    maxGroups,
+    maxStudents,
+    maxExtractedQuestions,
+    extractedQuestionsUsed,
   });
 
   // Try PostgreSQL Prisma first
@@ -659,6 +822,11 @@ export async function createTenantRecord(data: {
       const storedRecord: StoredTenant = {
         ...created,
         subscriptionType: subType,
+        isTrial,
+        maxGroups,
+        maxStudents,
+        maxExtractedQuestions,
+        extractedQuestionsUsed,
         subscriptionStartDate: startDateIso,
         enabledFeatures: features,
         storageLimitBytes: Number(created.storageLimitBytes),
@@ -668,7 +836,7 @@ export async function createTenantRecord(data: {
           : null,
         createdAt: created.createdAt.toISOString(),
         updatedAt: created.updatedAt.toISOString(),
-        _count: { exams: 0, uploadedFiles: 0 },
+        _count: { exams: 0, uploadedFiles: 0, groups: 0, students: 0 },
       };
 
       // Mirror to data/tenants.json so VPS sync and local fallback stay synchronized
@@ -699,6 +867,11 @@ export async function createTenantRecord(data: {
     subscriptionStatus: data.subscriptionStatus || "ACTIVE",
     planType: data.planType,
     subscriptionType: subType,
+    isTrial,
+    maxGroups,
+    maxStudents,
+    maxExtractedQuestions,
+    extractedQuestionsUsed,
     subscriptionStartDate: startDateIso,
     subscriptionDueDate: dueDate.toISOString(),
     enabledFeatures: features,
@@ -710,7 +883,7 @@ export async function createTenantRecord(data: {
     notes: data.notes || null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
-    _count: { exams: 0, uploadedFiles: 0 },
+    _count: { exams: 0, uploadedFiles: 0, groups: 0, students: 0 },
   };
 
   localList.unshift(newTenant);
@@ -730,6 +903,12 @@ export async function updateTenantRecord(
     domain: string | null;
     planType: string;
     subscriptionType: SubscriptionCategory;
+    isTrial: boolean;
+    maxGroups: number;
+    maxStudents: number;
+    maxExtractedQuestions: number;
+    extractedQuestionsUsed: number;
+    preserveExactTimestamps: boolean;
     subscriptionStatus: "ACTIVE" | "STOPPED" | "EXPIRED";
     subscriptionStartDate: Date;
     subscriptionDueDate: Date;
@@ -751,11 +930,20 @@ export async function updateTenantRecord(
     existing?.subscriptionType ||
     inferSubscriptionType(data.planType || existing?.planType);
 
+  const mergedIsTrial: boolean =
+    data.isTrial !== undefined
+      ? Boolean(data.isTrial)
+      : mergedSubscriptionType === "تجربة مجانية";
+
+  const keepExactTime = Boolean(data.preserveExactTimestamps || mergedIsTrial);
+
   let mergedStartDateIso: string | null =
     existing?.subscriptionStartDate || existing?.createdAt || new Date().toISOString();
   if (data.subscriptionStartDate !== undefined) {
     const startObj = new Date(data.subscriptionStartDate);
-    startObj.setUTCHours(0, 0, 0, 0);
+    if (!keepExactTime) {
+      startObj.setUTCHours(0, 0, 0, 0);
+    }
     mergedStartDateIso = startObj.toISOString();
   }
 
@@ -766,13 +954,43 @@ export async function updateTenantRecord(
   let normalizedDueDate: Date | undefined = undefined;
   if (data.subscriptionDueDate !== undefined) {
     normalizedDueDate = new Date(data.subscriptionDueDate);
-    normalizedDueDate.setUTCHours(23, 59, 59, 999);
+    if (!keepExactTime) {
+      normalizedDueDate.setUTCHours(23, 59, 59, 999);
+    }
   }
+
+  const mergedMaxGroups =
+    data.maxGroups !== undefined
+      ? Number(data.maxGroups)
+      : mergedIsTrial
+      ? existing?.maxGroups || 2
+      : 0;
+  const mergedMaxStudents =
+    data.maxStudents !== undefined
+      ? Number(data.maxStudents)
+      : mergedIsTrial
+      ? existing?.maxStudents || 10
+      : 0;
+  const mergedMaxExtractedQuestions =
+    data.maxExtractedQuestions !== undefined
+      ? Number(data.maxExtractedQuestions)
+      : mergedIsTrial
+      ? existing?.maxExtractedQuestions || 30
+      : 0;
+  const mergedExtractedQuestionsUsed =
+    data.extractedQuestionsUsed !== undefined
+      ? Math.max(0, Number(data.extractedQuestionsUsed))
+      : Math.max(0, Number(existing?.extractedQuestionsUsed || 0));
 
   const metaEncoded = encodeTenantMeta({
     subscriptionType: mergedSubscriptionType,
     subscriptionStartDate: mergedStartDateIso,
     enabledFeatures: mergedFeatures,
+    isTrial: mergedIsTrial,
+    maxGroups: mergedMaxGroups,
+    maxStudents: mergedMaxStudents,
+    maxExtractedQuestions: mergedMaxExtractedQuestions,
+    extractedQuestionsUsed: mergedExtractedQuestionsUsed,
   });
 
   try {
@@ -805,6 +1023,11 @@ export async function updateTenantRecord(
       const storedUpdated: StoredTenant = {
         ...updated,
         subscriptionType: mergedSubscriptionType,
+        isTrial: mergedIsTrial,
+        maxGroups: mergedMaxGroups,
+        maxStudents: mergedMaxStudents,
+        maxExtractedQuestions: mergedMaxExtractedQuestions,
+        extractedQuestionsUsed: mergedExtractedQuestionsUsed,
         subscriptionStartDate: mergedStartDateIso,
         enabledFeatures: mergedFeatures,
         storageLimitBytes: Number(updated.storageLimitBytes),
@@ -843,6 +1066,11 @@ export async function updateTenantRecord(
     domain: data.domain !== undefined ? data.domain : current.domain,
     planType: data.planType !== undefined ? data.planType : current.planType,
     subscriptionType: mergedSubscriptionType,
+    isTrial: mergedIsTrial,
+    maxGroups: mergedMaxGroups,
+    maxStudents: mergedMaxStudents,
+    maxExtractedQuestions: mergedMaxExtractedQuestions,
+    extractedQuestionsUsed: mergedExtractedQuestionsUsed,
     subscriptionStatus:
       data.subscriptionStatus !== undefined ? data.subscriptionStatus : current.subscriptionStatus,
     subscriptionStartDate: mergedStartDateIso,
@@ -870,6 +1098,20 @@ export async function updateTenantRecord(
   localList[idx] = updated;
   saveStoreFile(localList);
   return updated;
+}
+
+export async function incrementTenantExtractedQuestions(
+  tenantId: string,
+  incrementBy: number = 1
+): Promise<StoredTenant | null> {
+  const existing = await findTenantById(tenantId);
+  if (!existing) return null;
+  const currentUsed = Number(existing.extractedQuestionsUsed || 0);
+  const nextUsed = Math.max(0, currentUsed + Math.max(1, incrementBy));
+  return updateTenantRecord(tenantId, {
+    extractedQuestionsUsed: nextUsed,
+    preserveExactTimestamps: true,
+  });
 }
 
 export async function deleteTenantRecord(id: string): Promise<boolean> {

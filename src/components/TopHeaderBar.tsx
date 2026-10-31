@@ -12,6 +12,7 @@ import {
   ArrowUpLeft,
   Check,
   Palette,
+  Clock,
 } from "lucide-react";
 import { getCachedSession, setCachedSession } from "@/lib/client-session-cache";
 
@@ -81,6 +82,11 @@ export default function TopHeaderBar() {
   const router = useRouter();
   const [userName, setUserName] = useState<string>("العميل المشترك");
   const [subscriptionType, setSubscriptionType] = useState<string>("سنتر");
+  const [isTrial, setIsTrial] = useState<boolean>(false);
+  const [subscriptionDueDate, setSubscriptionDueDate] = useState<string | null>(null);
+  const [maxExtractedQuestions, setMaxExtractedQuestions] = useState<number>(30);
+  const [extractedQuestionsUsed, setExtractedQuestionsUsed] = useState<number>(0);
+  const [trialCountdown, setTrialCountdown] = useState<string>("24:00:00");
   const [query, setQuery] = useState<string>("");
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
@@ -118,6 +124,16 @@ export default function TopHeaderBar() {
     if (cached && cached.authenticated) {
       if (cached.name) setUserName(cached.name);
       if (cached.subscriptionType) setSubscriptionType(cached.subscriptionType);
+      setIsTrial(Boolean(cached.isTrial || cached.subscriptionType === "تجربة مجانية"));
+      if (cached.subscriptionDueDate !== undefined) {
+        setSubscriptionDueDate(cached.subscriptionDueDate || null);
+      }
+      if (cached.maxExtractedQuestions !== undefined) {
+        setMaxExtractedQuestions(Number(cached.maxExtractedQuestions) || 30);
+      }
+      if (cached.extractedQuestionsUsed !== undefined) {
+        setExtractedQuestionsUsed(Number(cached.extractedQuestionsUsed) || 0);
+      }
     }
   }, []);
 
@@ -153,11 +169,40 @@ export default function TopHeaderBar() {
         setCachedSession(data);
         if (data.name) setUserName(data.name);
         if (data.subscriptionType) setSubscriptionType(data.subscriptionType);
+        if (data.isTrial !== undefined || data.subscriptionType !== undefined) {
+          setIsTrial(Boolean(data.isTrial || data.subscriptionType === "تجربة مجانية"));
+        }
+        if (data.subscriptionDueDate !== undefined) {
+          setSubscriptionDueDate(data.subscriptionDueDate || null);
+        }
+        if (data.maxExtractedQuestions !== undefined) {
+          setMaxExtractedQuestions(Number(data.maxExtractedQuestions) || 30);
+        }
+        if (data.extractedQuestionsUsed !== undefined) {
+          setExtractedQuestionsUsed(Number(data.extractedQuestionsUsed) || 0);
+        } else if (data.usage?.extractedQuestionsUsed !== undefined) {
+          setExtractedQuestionsUsed(Number(data.usage.extractedQuestionsUsed) || 0);
+        }
       }
     };
     window.addEventListener("tenant-session-sync", onSync);
     return () => window.removeEventListener("tenant-session-sync", onSync);
   }, []);
+
+  useEffect(() => {
+    if (!isTrial || !subscriptionDueDate) return;
+    const tick = () => {
+      const diffMs = Math.max(0, new Date(subscriptionDueDate).getTime() - Date.now());
+      const totalSec = Math.floor(diffMs / 1000);
+      const hrs = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+      const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+      const secs = String(totalSec % 60).padStart(2, "0");
+      setTrialCountdown(`${hrs}:${mins}:${secs}`);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [isTrial, subscriptionDueDate]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -369,6 +414,27 @@ export default function TopHeaderBar() {
 
       {/* Left User Avatar & Theme Selector Button */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {isTrial && (
+          <Link
+            href="/my-subscription"
+            className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-extrabold transition-colors"
+            title="الوقت المتبقي والأسئلة المتبقية في النسخة التجريبية المجانية"
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+            <span>متبقي:</span>
+            <span className="font-mono font-black text-amber-700" dir="ltr">
+              {trialCountdown}
+            </span>
+            <span className="text-amber-300">|</span>
+            <span>
+              الأسئلة المتبقية:{" "}
+              <strong className="font-mono text-amber-800">
+                {Math.max(0, maxExtractedQuestions - extractedQuestionsUsed)}/{maxExtractedQuestions}
+              </strong>
+            </span>
+          </Link>
+        )}
+
         <Link
           href="/my-subscription"
           className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-full hover:bg-slate-100 transition-colors"
@@ -378,7 +444,11 @@ export default function TopHeaderBar() {
               {userName}
             </span>
             <span className="text-[10px] font-bold text-blue-600">
-              {subscriptionType === "معلم" ? "باقة معلم" : "باقة سنتر"}
+              {isTrial || subscriptionType === "تجربة مجانية"
+                ? "النسخة المجانية (24 ساعة)"
+                : subscriptionType === "معلم"
+                ? "باقة معلم"
+                : "باقة سنتر"}
             </span>
           </div>
           <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-extrabold text-sm shadow-sm shadow-blue-600/25">

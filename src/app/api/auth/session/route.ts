@@ -138,6 +138,11 @@ export async function GET(req: NextRequest) {
   }
 
   const enabledFeatures = normalizeEnabledFeatures(tenant?.enabledFeatures);
+  const isTrial = Boolean(tenant?.isTrial || tenant?.subscriptionType === "تجربة مجانية");
+  const maxGroups = Number(tenant?.maxGroups || (isTrial ? 2 : 0));
+  const maxStudents = Number(tenant?.maxStudents || (isTrial ? 10 : 0));
+  const maxExtractedQuestions = Number(tenant?.maxExtractedQuestions || (isTrial ? 30 : 0));
+  const extractedQuestionsUsed = Number(tenant?.extractedQuestionsUsed || 0);
 
   return NextResponse.json(
     {
@@ -147,8 +152,13 @@ export async function GET(req: NextRequest) {
       name: tenant?.name || session.name || "العميل المشترك",
       phone: tenant?.phone || session.phone,
       domain: tenant?.domain || null,
-      planType: tenant?.planType || "باقة إدارة السنتر المتكاملة",
+      planType: tenant?.planType || (isTrial ? "النسخة المجانية (24 ساعة)" : "باقة إدارة السنتر المتكاملة"),
       subscriptionType: tenant?.subscriptionType || "سنتر",
+      isTrial,
+      maxGroups,
+      maxStudents,
+      maxExtractedQuestions,
+      extractedQuestionsUsed,
       subscriptionStartDate: tenant?.subscriptionStartDate ?? tenant?.createdAt ?? null,
       subscriptionDueDate: tenant?.subscriptionDueDate ?? null,
       enabledFeatures,
@@ -160,6 +170,7 @@ export async function GET(req: NextRequest) {
         activeStudentsCount,
         groupsCount,
         filesBytes,
+        extractedQuestionsUsed,
       },
     },
     { headers: NO_CACHE_HEADERS }

@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       {
         success: false,
         needsApiKey: true,
-        error: "أضف مفتاح Gemini API من زر الإعدادات في الأعلى لاستخدام مساعد الذكاء الاصطناعي.",
+        error: "أضف مفتاح الربط من زر الإعدادات في الأعلى لاستخدام التنسيق التلقائي.",
       },
       { status: 401 }
     );

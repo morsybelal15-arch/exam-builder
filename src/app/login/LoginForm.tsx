@@ -100,11 +100,47 @@ export default function LoginForm({
           </p>
         </div>
 
-        {/* Error Notification */}
+        {/* Error / Trial Expired Notification */}
         {errorMessage && (
-          <div className="mb-6 p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-xs sm:text-sm flex items-center gap-2.5 animate-in fade-in">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-            <span>{errorMessage}</span>
+          <div
+            className={`mb-6 p-4 rounded-2xl border text-xs sm:text-sm space-y-3 animate-in fade-in ${
+              errorMessage.includes("الفترة التجريبية") || errorMessage.includes("24 ساعة")
+                ? "bg-amber-50 border-amber-300 text-amber-950"
+                : "bg-red-50 border-red-200 text-red-700"
+            }`}
+          >
+            <div className="flex items-start gap-2.5 font-bold">
+              <AlertCircle
+                className={`w-5 h-5 shrink-0 mt-0.5 ${
+                  errorMessage.includes("الفترة التجريبية") || errorMessage.includes("24 ساعة")
+                    ? "text-amber-600"
+                    : "text-red-500"
+                }`}
+              />
+              <div className="space-y-1">
+                {(errorMessage.includes("الفترة التجريبية") ||
+                  errorMessage.includes("24 ساعة")) && (
+                  <p className="text-sm font-black text-amber-900">
+                    انتهت الفترة المجانية (24 ساعة)
+                  </p>
+                )}
+                <p>{errorMessage}</p>
+              </div>
+            </div>
+
+            {(errorMessage.includes("الفترة التجريبية") ||
+              errorMessage.includes("24 ساعة") ||
+              errorMessage.includes("انتهت") ||
+              errorMessage.includes("انتهى")) && (
+              <a
+                href="https://wa.me/201091713815?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7%D9%8B%D8%8C%20%D8%A3%D8%B1%D8%BA%D8%A8%20%D9%81%D9%8A%20%D8%AA%D9%81%D8%B9%D9%8A%D9%84%20%D8%A7%D9%84%D8%A7%D8%B4%D8%AA%D8%B1%D8%A7%D9%83%20%D8%A7%D9%84%D9%83%D8%A7%D9%85%D9%84%20%D9%81%D9%8A%20%D9%85%D9%86%D8%B5%D8%A9%20inCenter"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all"
+              >
+                <span>تواصل مع الإدارة عبر واتساب لتفعيل الاشتراك الكامل</span>
+              </a>
+            )}
           </div>
         )}
 

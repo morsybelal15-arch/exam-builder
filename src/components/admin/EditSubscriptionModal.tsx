@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useState, useEffect, useTransition } from "react";
+import { createPortal } from "react-dom";
 import {
   updateTenantSubscriptionAction,
   extendSubscriptionAction,
@@ -33,6 +34,9 @@ import {
   Square,
   Sparkles,
   Megaphone,
+  Clock,
+  RotateCcw,
+  ShieldCheck,
 } from "lucide-react";
 import {
   APP_FEATURES_REGISTRY,
@@ -59,12 +63,19 @@ export interface TenantData {
   usedStorageBytes: bigint | number;
   examsLimit?: number;
   filesLimit?: number;
+  isTrial?: boolean;
+  maxGroups?: number;
+  maxStudents?: number;
+  maxExtractedQuestions?: number;
+  extractedQuestionsUsed?: number;
   verificationCode?: string | null;
   notes?: string | null;
   createdAt: Date | string;
   _count?: {
     exams: number;
     uploadedFiles: number;
+    groups?: number;
+    students?: number;
   };
 }
 
@@ -93,8 +104,19 @@ export default function EditSubscriptionModal({
   const [domain, setDomain] = useState(tenant.domain || "");
   const [status, setStatus] = useState<"ACTIVE" | "STOPPED" | "EXPIRED">(tenant.subscriptionStatus);
   const [subscriptionType, setSubscriptionType] = useState<SubscriptionCategory>(
-    tenant.subscriptionType === "معلم" ? "معلم" : "سنتر"
+    tenant.subscriptionType === "معلم"
+      ? "معلم"
+      : tenant.subscriptionType === "تجربة مجانية" || tenant.isTrial
+      ? "تجربة مجانية"
+      : "سنتر"
   );
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [extractedUsed, setExtractedUsed] = useState<number>(tenant.extractedQuestionsUsed || 0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [enabledFeatures, setEnabledFeatures] = useState<string[]>(() =>
     normalizeEnabledFeatures(tenant.enabledFeatures)
   );
@@ -213,6 +235,65 @@ export default function EditSubscriptionModal({
     }
   };
 
+  const handleResetTrial24h = async () => {
+    setMsg(null);
+    setIsPending(true);
+    try {
+      const res: any = await updateTenantSubscriptionAction({
+        tenantId: tenant.id,
+        subscriptionType: "تجربة مجانية",
+        subscriptionStatus: "ACTIVE",
+        resetTrialTimer24h: true,
+      });
+      if (res.error) {
+        setMsg({ text: res.error, isError: true });
+      } else {
+        setStatus("ACTIVE");
+        setSubscriptionType("تجربة مجانية");
+        if (res.tenant?.subscriptionStartDate) {
+          setStartDateStr(new Date(res.tenant.subscriptionStartDate).toISOString().split("T")[0]);
+        }
+        if (res.tenant?.subscriptionDueDate) {
+          setDueDateStr(new Date(res.tenant.subscriptionDueDate).toISOString().split("T")[0]);
+        }
+        setMsg({
+          text: "تم إعادة ضبط مؤقت الـ 24 ساعة من الآن وتنشيط النسخة المجانية ✓",
+          isError: false,
+        });
+        if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
+      }
+    } catch (err: any) {
+      setMsg({ text: err?.message || "فشل إعادة ضبط المؤقت", isError: true });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  const handleResetTrialQuestions = async () => {
+    setMsg(null);
+    setIsPending(true);
+    try {
+      const res: any = await updateTenantSubscriptionAction({
+        tenantId: tenant.id,
+        resetExtractedQuestions: true,
+      });
+      if (res.error) {
+        setMsg({ text: res.error, isError: true });
+      } else {
+        setExtractedUsed(0);
+        setMsg({
+          text: "تم تصفير عداد الأسئلة المستخرجة وإعادة إتاحة 30 سؤال بالكامل ✓",
+          isError: false,
+        });
+        if (onTenantPatched && res.tenant) onTenantPatched(res.tenant);
+      }
+    } catch (err: any) {
+      setMsg({ text: err?.message || "فشل تصفير عداد الأسئلة", isError: true });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
   const handleToggleStatus = async () => {
     setMsg(null);
     setIsPending(true);
@@ -277,14 +358,14 @@ export default function EditSubscriptionModal({
 
   const unInstalledCount = ALL_FEATURE_IDS.length - enabledFeatures.length;
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
       dir="rtl"
     >
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
         {/* Header */}
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
           <div className="flex items-center gap-3">
@@ -365,6 +446,16 @@ export default function EditSubscriptionModal({
               <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
 
               {/* Quick Extend Buttons */}
+              <button
+                type="button"
+                onClick={() => handleExtend(1)}
+                disabled={isPending}
+                className="inline-flex items-center gap-1 text-xs font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3 py-2 rounded-xl transition-all cursor-pointer"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                <span>+ 24 ساعة (يوم)</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => handleExtend(30)}
@@ -496,12 +587,12 @@ export default function EditSubscriptionModal({
               </div>
             </div>
 
-            {/* Subscription Type Selector (معلم / سنتر) */}
-            <div className="space-y-2">
+            {/* Subscription Type Selector (معلم / سنتر / تجربة مجانية) */}
+            <div className="space-y-2.5">
               <span className="text-xs font-black text-slate-800 block">
-                نوع الاشتراك (معلم / سنتر)
+                نوع الاشتراك (سنتر / معلم / النسخة المجانية 24 ساعة)
               </span>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -525,7 +616,7 @@ export default function EditSubscriptionModal({
                   </div>
                   <div>
                     <div className="text-xs font-black text-slate-900">سنتر تعليمي</div>
-                    <div className="text-[10px] text-slate-500">باقة إدارة السنتر والاختبارات</div>
+                    <div className="text-[10px] text-slate-500">نسخة كاملة للسنتر</div>
                   </div>
                 </button>
 
@@ -552,10 +643,119 @@ export default function EditSubscriptionModal({
                   </div>
                   <div>
                     <div className="text-xs font-black text-slate-900">معلم</div>
-                    <div className="text-[10px] text-slate-500">باقة المعلم والاختبارات</div>
+                    <div className="text-[10px] text-slate-500">نسخة كاملة للمعلم</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubscriptionType("تجربة مجانية");
+                    setEnabledFeatures(getDefaultFeaturesForCategory("تجربة مجانية"));
+                  }}
+                  className={`p-3 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
+                    subscriptionType === "تجربة مجانية"
+                      ? "bg-amber-50/90 border-amber-500 ring-2 ring-amber-500/25"
+                      : "bg-slate-50 border-slate-200 hover:bg-amber-50/40"
+                  }`}
+                >
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                      subscriptionType === "تجربة مجانية"
+                        ? "bg-amber-500 text-white"
+                        : "bg-amber-100 text-amber-700"
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-slate-900">النسخة المجانية (24س)</div>
+                    <div className="text-[10px] text-slate-500">30 سؤال • مجموعتان • 10 طلاب</div>
                   </div>
                 </button>
               </div>
+
+              {/* Free Trial Live Quotas & Controls Panel */}
+              {(subscriptionType === "تجربة مجانية" || tenant.isTrial) && (
+                <div className="p-4 bg-amber-50/90 border border-amber-200 rounded-2xl space-y-3 mt-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-amber-600" />
+                      <span>متابعة وتحكم النسخة المجانية (24 ساعة)</span>
+                    </span>
+                    {(() => {
+                      const dueMs = tenant.subscriptionDueDate
+                        ? new Date(tenant.subscriptionDueDate).getTime()
+                        : 0;
+                      const diff = Math.max(0, dueMs - nowMs);
+                      const h = Math.floor(diff / (1000 * 60 * 60));
+                      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                      const s = Math.floor((diff % (1000 * 60)) / 1000);
+                      const isExp = dueMs > 0 && diff <= 0;
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black font-mono ${
+                            isExp
+                              ? "bg-red-600 text-white"
+                              : "bg-amber-900 text-amber-100"
+                          }`}
+                          dir="ltr"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>
+                            {isExp
+                              ? "00:00:00 (انتهت الـ 24 ساعة)"
+                              : `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`}
+                          </span>
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="bg-white border border-amber-200/80 rounded-xl p-2.5 text-center">
+                      <span className="block text-[10px] text-slate-500 font-bold">الأسئلة المستخرجة</span>
+                      <span className="font-black text-amber-800 font-mono text-sm">
+                        {extractedUsed} / {tenant.maxExtractedQuestions || 30}
+                      </span>
+                    </div>
+                    <div className="bg-white border border-amber-200/80 rounded-xl p-2.5 text-center">
+                      <span className="block text-[10px] text-slate-500 font-bold">المجموعات المنشأة</span>
+                      <span className="font-black text-amber-800 font-mono text-sm">
+                        {tenant._count?.groups || 0} / {tenant.maxGroups || 2}
+                      </span>
+                    </div>
+                    <div className="bg-white border border-amber-200/80 rounded-xl p-2.5 text-center">
+                      <span className="block text-[10px] text-slate-500 font-bold">الطلاب المسجلون</span>
+                      <span className="font-black text-amber-800 font-mono text-sm">
+                        {tenant._count?.students || 0} / {tenant.maxStudents || 10}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={handleResetTrial24h}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-extrabold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>إعادة ضبط مؤقت الـ 24 ساعة من الآن</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={handleResetTrialQuestions}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-extrabold bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                      <span>تصفير عداد الـ 30 سؤال ({extractedUsed}/30)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modular Sidebar Features Manager (Synced with Sidebar Registry) */}
@@ -844,6 +1044,7 @@ export default function EditSubscriptionModal({
           </form>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

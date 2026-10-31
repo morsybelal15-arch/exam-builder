@@ -617,7 +617,7 @@ ${portalUrl}
                           <p className="text-[11px] text-slate-400">
                             {grd.date || "اختبار دوري"}
                             {grd.method === "camera_ai" && (
-                              <span className="text-blue-600 font-semibold mr-2">(رصد عبر AI كاميرا)</span>
+                              <span className="text-blue-600 font-semibold mr-2">(رصد بالكاميرا)</span>
                             )}
                           </p>
                         </div>

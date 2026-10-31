@@ -102,7 +102,8 @@ export default function TenantListView({
   const router = useRouter();
   const [tenants, setTenants] = useState<TenantData[]>(initialTenants);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "STOPPED" | "EXPIRED">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "STOPPED" | "EXPIRED" | "TRIAL">("ALL");
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [editingTenant, setEditingTenant] = useState<TenantData | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [copiedVpsId, setCopiedVpsId] = useState<string | null>(null);
@@ -117,6 +118,11 @@ export default function TenantListView({
   useEffect(() => {
     setTenants(initialTenants);
   }, [initialTenants]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const patchLocalTenant = (updated?: Partial<TenantData> & { id?: string }) => {
     if (!updated || !updated.id) return;
@@ -171,6 +177,9 @@ export default function TenantListView({
     if (statusFilter === "ACTIVE") matchesStatus = tenant.subscriptionStatus === "ACTIVE";
     if (statusFilter === "STOPPED") matchesStatus = tenant.subscriptionStatus === "STOPPED";
     if (statusFilter === "EXPIRED") matchesStatus = tenant.subscriptionStatus === "EXPIRED";
+    if (statusFilter === "TRIAL") {
+      matchesStatus = Boolean(tenant.isTrial || tenant.subscriptionType === "تجربة مجانية");
+    }
 
     return matchesSearch && matchesStatus;
   });
@@ -219,10 +228,10 @@ export default function TenantListView({
     }
   };
 
-  const handleQuickExtend = async (tenantId: string) => {
+  const handleQuickExtend = async (tenantId: string, days = 30) => {
     setIsPending(true);
     try {
-      const res: any = await extendSubscriptionAction(tenantId, 30);
+      const res: any = await extendSubscriptionAction(tenantId, days);
       if (res?.tenant) {
         patchLocalTenant(res.tenant);
       } else if (res?.newDueDate) {
@@ -232,7 +241,12 @@ export default function TenantListView({
           subscriptionStatus: "ACTIVE",
         });
       }
-      reportSync(res, "تم تمديد الاشتراك 30 يوماً ومزامنته مع تطبيق العميل ✓");
+      reportSync(
+        res,
+        days === 1
+          ? "تم تمديد الفترة المجانية 24 ساعة إضافية ومزامنتها مع تطبيق العميل ✓"
+          : `تم تمديد الاشتراك ${days} يوماً ومزامنته مع تطبيق العميل ✓`
+      );
     } finally {
       setIsPending(false);
     }
@@ -352,6 +366,21 @@ export default function TenantListView({
                 المنتهية ({tenants.filter((t) => t.subscriptionStatus === "EXPIRED").length})
               </span>
             </button>
+
+            <button
+              onClick={() => setStatusFilter("TRIAL")}
+              className={`h-9 px-3.5 rounded-xl text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5 ${
+                statusFilter === "TRIAL"
+                  ? "bg-amber-500 text-white shadow-xs"
+                  : "bg-amber-50 text-amber-800 hover:bg-amber-100/70 border border-amber-300/70"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>
+                النسخة المجانية (
+                {tenants.filter((t) => t.isTrial || t.subscriptionType === "تجربة مجانية").length})
+              </span>
+            </button>
           </div>
         </div>
       </div>
@@ -433,7 +462,14 @@ export default function TenantListView({
                     displayPercent,
                   } = computeStoragePercent(usedBytesNum, limitBytesNum);
                   const dueInfo = getDaysRemaining(tenant.subscriptionDueDate);
-                  const subType = tenant.subscriptionType === "معلم" ? "معلم" : "سنتر";
+                  const isTrial = Boolean(
+                    tenant.isTrial || tenant.subscriptionType === "تجربة مجانية"
+                  );
+                  const subType = isTrial
+                    ? "تجربة مجانية"
+                    : tenant.subscriptionType === "معلم"
+                    ? "معلم"
+                    : "سنتر";
                   const installedFeatures = normalizeEnabledFeatures(tenant.enabledFeatures);
                   const availableToAddCount = ALL_FEATURE_IDS.length - installedFeatures.length;
                   const startDateDisplay = tenant.subscriptionStartDate
@@ -455,6 +491,15 @@ export default function TenantListView({
                       })
                     : "غير محدد";
 
+                  const dueMs = tenant.subscriptionDueDate
+                    ? new Date(tenant.subscriptionDueDate).getTime()
+                    : 0;
+                  const trialDiffMs = Math.max(0, dueMs - nowMs);
+                  const trialH = Math.floor(trialDiffMs / (1000 * 60 * 60));
+                  const trialM = Math.floor((trialDiffMs % (1000 * 60 * 60)) / (1000 * 60));
+                  const trialS = Math.floor((trialDiffMs % (1000 * 60)) / 1000);
+                  const isTrialTimeUp = isTrial && dueMs > 0 && trialDiffMs <= 0;
+
                   return (
                     <tr
                       key={tenant.id}
@@ -463,8 +508,16 @@ export default function TenantListView({
                       {/* 1. Client Name & Subscription Type */}
                       <td className="py-4 px-6 whitespace-nowrap">
                         <div className="flex items-center gap-3.5">
-                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
-                            {subType === "معلم" ? (
+                          <div
+                            className={`w-10 h-10 rounded-2xl text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0 ${
+                              isTrial
+                                ? "bg-gradient-to-br from-amber-500 to-orange-600"
+                                : "bg-gradient-to-br from-blue-500 to-indigo-600"
+                            }`}
+                          >
+                            {isTrial ? (
+                              <Clock className="w-5 h-5" />
+                            ) : subType === "معلم" ? (
                               <GraduationCap className="w-5 h-5" />
                             ) : (
                               <Building2 className="w-5 h-5" />
@@ -477,12 +530,16 @@ export default function TenantListView({
                             <div className="flex items-center gap-1.5 mt-1">
                               <span
                                 className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
-                                  subType === "سنتر"
+                                  isTrial
+                                    ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                    : subType === "سنتر"
                                     ? "bg-blue-50 text-blue-700 border border-blue-200/60"
                                     : "bg-purple-50 text-purple-700 border border-purple-200/60"
                                 }`}
                               >
-                                <span>اشتراك {subType}</span>
+                                <span>
+                                  {isTrial ? "النسخة المجانية (24 ساعة)" : `اشتراك ${subType}`}
+                                </span>
                               </span>
                               {tenant.notes && tenant.notes.trim() && (
                                 <span
@@ -551,24 +608,42 @@ export default function TenantListView({
                           <div className="text-xs font-bold text-slate-600">
                             إلى: <span className="text-blue-700">{dueDateDisplay}</span>
                           </div>
-                          <div className="inline-flex items-center gap-1 text-[11px] bg-slate-50 border border-slate-200/70 px-2 py-0.5 rounded-md">
-                            <Clock
-                              className={`w-3 h-3 shrink-0 ${
-                                dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
+                          {isTrial ? (
+                            <div
+                              className={`inline-flex items-center gap-1.5 text-[11px] font-black font-mono px-2.5 py-0.5 rounded-md border ${
+                                isTrialTimeUp
+                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  : "bg-amber-950 text-amber-100 border-amber-700"
                               }`}
-                            />
-                            <span
-                              className={`font-bold ${
-                                dueInfo.isExpired
-                                  ? "text-red-600"
-                                  : dueInfo.isUrgent
-                                  ? "text-amber-600"
-                                  : "text-emerald-600"
-                              }`}
+                              dir="ltr"
                             >
-                              {dueInfo.text}
-                            </span>
-                          </div>
+                              <Clock className="w-3 h-3 shrink-0 text-amber-400" />
+                              <span>
+                                {isTrialTimeUp
+                                  ? "انتهت الـ 24 ساعة"
+                                  : `${String(trialH).padStart(2, "0")}:${String(trialM).padStart(2, "0")}:${String(trialS).padStart(2, "0")}`}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-1 text-[11px] bg-slate-50 border border-slate-200/70 px-2 py-0.5 rounded-md">
+                              <Clock
+                                className={`w-3 h-3 shrink-0 ${
+                                  dueInfo.isUrgent ? "text-red-500" : "text-slate-400"
+                                }`}
+                              />
+                              <span
+                                className={`font-bold ${
+                                  dueInfo.isExpired
+                                    ? "text-red-600"
+                                    : dueInfo.isUrgent
+                                    ? "text-amber-600"
+                                    : "text-emerald-600"
+                                }`}
+                              >
+                                {dueInfo.text}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -620,6 +695,21 @@ export default function TenantListView({
                       {/* 5. Resource Limits & Quotas */}
                       <td className="py-4 px-5 min-w-[200px] whitespace-nowrap">
                         <div className="space-y-1.5">
+                          {isTrial && (
+                            <div className="flex items-center gap-1.5 text-[10px] font-black text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                              <span>
+                                الأسئلة: {tenant.extractedQuestionsUsed || 0}/{tenant.maxExtractedQuestions || 30}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                المجموعات: {tenant._count?.groups || 0}/{tenant.maxGroups || 2}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                الطلاب: {tenant._count?.students || 0}/{tenant.maxStudents || 10}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between text-[11px] text-slate-700 font-bold gap-3">
                             <span className="inline-flex items-center gap-1.5">
                               <HardDrive className="w-3.5 h-3.5 text-purple-500 shrink-0" />
@@ -689,15 +779,27 @@ export default function TenantListView({
                             )}
                           </button>
 
-                          {/* Quick Extend +30 Days */}
-                          <button
-                            onClick={() => handleQuickExtend(tenant.id)}
-                            disabled={isPending}
-                            title="تمديد تلقائي +30 يوم"
-                            className="h-9 inline-flex items-center gap-1 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/60 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0"
-                          >
-                            <span>+30 يوم</span>
-                          </button>
+                          {/* Quick Extend (+24h for trial or +30 Days) */}
+                          {isTrial ? (
+                            <button
+                              onClick={() => handleQuickExtend(tenant.id, 1)}
+                              disabled={isPending}
+                              title="تمديد النسخة المجانية 24 ساعة إضافية"
+                              className="h-9 inline-flex items-center gap-1 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0"
+                            >
+                              <Clock className="w-3.5 h-3.5 text-amber-600" />
+                              <span>+24 ساعة</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleQuickExtend(tenant.id, 30)}
+                              disabled={isPending}
+                              title="تمديد تلقائي +30 يوم"
+                              className="h-9 inline-flex items-center gap-1 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/60 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0"
+                            >
+                              <span>+30 يوم</span>
+                            </button>
+                          )}
 
                           {/* 1-Click Automated VPS Deploy Button */}
                           {tenant.domain && (

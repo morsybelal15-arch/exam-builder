@@ -10,6 +10,7 @@ import {
 } from "@/lib/management-db";
 import { requireApiSession } from "@/lib/auth";
 import { setCurrentTenantId } from "@/lib/tenant-context";
+import { findTenantById, findTenantByPhone } from "@/lib/tenants-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,24 @@ export async function POST(req: NextRequest) {
     const { name, groupId } = body;
     if (!name || !groupId) {
       return NextResponse.json({ error: "اسم الطالب والمجموعة مطلوبان" }, { status: 400 });
+    }
+
+    const currentStudents = getStudents();
+    const isUpdatingExisting = Boolean(body.id && currentStudents.some((s) => s.id === body.id));
+    if (!isUpdatingExisting && session.role !== "SUPER_ADMIN") {
+      const tenant =
+        (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
+      const isTrial = Boolean(tenant?.isTrial || tenant?.subscriptionType === "تجربة مجانية");
+      const maxStudents = Number(tenant?.maxStudents || (isTrial ? 10 : 0));
+      if (maxStudents > 0 && currentStudents.length >= maxStudents) {
+        return NextResponse.json(
+          {
+            error: `لقد وصلت للحد الأقصى لإضافة الطلاب في النسخة المجانية (${maxStudents} طلاب كحد أقصى). يرجى ترقية اشتراكك لإضافة عدد غير محدود من الطلاب.`,
+            limitReached: true,
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const student = saveStudent(body);

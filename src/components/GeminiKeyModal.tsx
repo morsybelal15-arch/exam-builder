@@ -51,7 +51,7 @@ export default function GeminiKeyModal({
     if (!trimmed) {
       setTestResult({
         success: false,
-        message: "يرجى كتابة أو لصق مفتاح Gemini API أولاً.",
+        message: "يرجى كتابة أو لصق مفتاح المحرك أولاً.",
       });
       return;
     }
@@ -120,10 +120,10 @@ export default function GeminiKeyModal({
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-bold text-slate-900">
-              إعدادات مفتاح API
+              إعدادات مفتاح الاستخراج التلقائي
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              أدخل مفتاح Google Gemini API لاستخراج الأسئلة وتنسيقها تلقائياً.
+              أدخل مفتاح الربط لاستخراج الأسئلة وتنسيقها تلقائياً.
             </p>
           </div>
         </div>
@@ -139,7 +139,7 @@ export default function GeminiKeyModal({
         {/* Input Field */}
         <div className="space-y-2">
           <label className="text-xs font-bold text-slate-700 block">
-            مفتاح Gemini API Key
+            مفتاح الربط السحابي
           </label>
           <div className="relative">
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -173,7 +173,7 @@ export default function GeminiKeyModal({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold hover:underline"
           >
-            <span>Google AI Studio</span>
+            <span>بوابة المفاتيح</span>
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>

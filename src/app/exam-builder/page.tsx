@@ -496,6 +496,15 @@ export default function ExamBuilderPage() {
   const [refiningIndex, setRefiningIndex] = useState<number | null>(null);
   const [refiningTask, setRefiningTask] = useState<string | null>(null);
   const [isBatchRefining, setIsBatchRefining] = useState<boolean>(false);
+  const [trialQuestionsQuota, setTrialQuestionsQuota] = useState<{
+    isTrial: boolean;
+    used: number;
+    max: number;
+  }>({
+    isTrial: false,
+    used: 0,
+    max: 30,
+  });
 
   // Uploaded File Viewer Tools & Lasso & Pan & Split states
   type ViewerTool = "lasso" | "hand" | "rect";
@@ -1950,6 +1959,30 @@ export default function ExamBuilderPage() {
         }
       })
       .catch(() => {});
+
+    const applySessionQuota = (s: any) => {
+      if (!s || !s.authenticated) return;
+      const isTrial = Boolean(s.isTrial || s.subscriptionType === "تجربة مجانية");
+      const max = Number(s.maxExtractedQuestions || (isTrial ? 30 : 0));
+      const used = Number(s.extractedQuestionsUsed ?? s.usage?.extractedQuestionsUsed ?? 0);
+      setTrialQuestionsQuota({
+        isTrial: isTrial || max > 0,
+        used,
+        max: max || 30,
+      });
+    };
+
+    fetch(`/api/auth/session?t=${Date.now()}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((s) => applySessionQuota(s))
+      .catch(() => {});
+
+    const onSync = (e: Event) => {
+      const custom = e as CustomEvent;
+      applySessionQuota(custom.detail);
+    };
+    window.addEventListener("tenant-session-sync", onSync);
+    return () => window.removeEventListener("tenant-session-sync", onSync);
   }, []);
 
   const handleSaveApiKey = (newKey: string) => {
@@ -2627,9 +2660,18 @@ export default function ExamBuilderPage() {
       if (extractProgressIntervalRef.current) clearInterval(extractProgressIntervalRef.current);
       setExtractProgress(100);
 
+      if (data.trialQuota) {
+        setTrialQuestionsQuota({
+          isTrial: true,
+          used: Number(data.trialQuota.used || 0),
+          max: Number(data.trialQuota.max || 30),
+        });
+        notifyTenantDataMutated();
+      }
+
       if (data.needsApiKey) {
         setIsGeminiModalOpen(true);
-        setExtractionFeedback("يرجى إدخال مفتاح الـ API لتفعيل الاستخراج.");
+        setExtractionFeedback("يرجى إدخال مفتاح الربط لتفعيل الاستخراج التلقائي.");
         setIsExtracting(false);
         return;
       }
@@ -3997,7 +4039,24 @@ export default function ExamBuilderPage() {
         </div>
 
         {/* Global Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {trialQuestionsQuota.isTrial && (
+            <div
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold border shadow-2xs ${
+                trialQuestionsQuota.used >= trialQuestionsQuota.max
+                  ? "bg-rose-50 text-rose-700 border-rose-200"
+                  : "bg-amber-50 text-amber-800 border-amber-200"
+              }`}
+              title="الحد الأقصى لاستخراج الأسئلة في النسخة المجانية هو 30 سؤال"
+            >
+              <span>الأسئلة المتبقية للاستخراج:</span>
+              <span className="font-mono font-black">
+                {Math.max(0, trialQuestionsQuota.max - trialQuestionsQuota.used)} /{" "}
+                {trialQuestionsQuota.max}
+              </span>
+            </div>
+          )}
+
           {/* New Clean Exam Button */}
           <button
             onClick={() => {

@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   const apiKey = (body.apiKey || "").replace(/[\r\n"'`$\\]/g, "").trim();
   if (!apiKey) {
     return NextResponse.json(
-      { success: false, error: "يرجى إدخال مفتاح Gemini API." },
+      { success: false, error: "يرجى إدخال مفتاح الربط." },
       { status: 400 }
     );
   }
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    message: "تم التحقق من مفتاح Gemini بنجاح وتفعيله!",
+    message: "تم التحقق من المفتاح بنجاح وتفعيله!",
     model: testRes.model,
   });
 }

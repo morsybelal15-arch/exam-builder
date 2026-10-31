@@ -9,6 +9,12 @@ import {
   type ExtractedQuestion,
 } from "@/lib/gemini";
 import { requireApiSession } from "@/lib/auth";
+import {
+  findTenantById,
+  findTenantByPhone,
+  incrementTenantExtractedQuestions,
+} from "@/lib/tenants-repository";
+import { syncTenantsToVps } from "@/lib/vps-sync";
 
 // Passage extraction (long text + several questions) can take 30s+.
 export const maxDuration = 120;
@@ -50,7 +56,7 @@ function runLocalArabicOcr(imageBase64: string): Promise<{ rawText: string; ques
             points: p.points || 1,
             table: null,
             confidence: 0.4,
-            notes: "مستخرج بالمحرك المحلي بدون تدقيق Gemini — راجع النص يدوياً.",
+            notes: "مستخرج بالمحرك المحلي — راجع النص يدوياً.",
           },
         });
       } catch {
@@ -82,9 +88,40 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Enforce server-side question extraction quota for Free Trial / capped tenants
+  const tenant =
+    session.role !== "SUPER_ADMIN"
+      ? (await findTenantById(session.id)) || (await findTenantByPhone(session.phone))
+      : null;
+  const isTrial = Boolean(tenant?.isTrial || tenant?.subscriptionType === "تجربة مجانية");
+  const maxExtractedQuestions = Number(
+    tenant?.maxExtractedQuestions || (isTrial ? 30 : 0)
+  );
+  const currentQuestionsUsed = Number(tenant?.extractedQuestionsUsed || 0);
+  const remainingQuestions =
+    maxExtractedQuestions > 0
+      ? Math.max(0, maxExtractedQuestions - currentQuestionsUsed)
+      : Infinity;
+
+  if (maxExtractedQuestions > 0 && remainingQuestions <= 0) {
+    return NextResponse.json(
+      {
+        success: false,
+        limitReached: true,
+        error: `لقد استهلكت الحد الأقصى لاستخراج الأسئلة في النسخة المجانية (${maxExtractedQuestions} سؤال). يرجى ترقية اشتراكك للاستمرار في استخراج الأسئلة بلا حدود.`,
+        trialQuota: {
+          used: currentQuestionsUsed,
+          max: maxExtractedQuestions,
+          remaining: 0,
+        },
+      },
+      { status: 403 }
+    );
+  }
+
   const apiKey = resolveApiKey(body.apiKey ?? req.headers.get("x-gemini-key"));
 
-  // 1) Primary: Gemini vision (reads + structures in one pass)
+  // 1) Primary: Vision extraction (reads + structures in one pass)
   if (apiKey) {
     try {
       const result = await extractQuestionsFromImage(imageBase64, apiKey);
@@ -99,14 +136,40 @@ export async function POST(req: NextRequest) {
           { status: 422 }
         );
       }
+
+      let finalQuestions = result.questions;
+      let cappedByTrial = false;
+      if (maxExtractedQuestions > 0 && finalQuestions.length > remainingQuestions) {
+        finalQuestions = finalQuestions.slice(0, remainingQuestions);
+        cappedByTrial = true;
+      }
+
+      let trialQuota: { used: number; max: number; remaining: number } | undefined = undefined;
+      if (tenant && maxExtractedQuestions > 0) {
+        const addedCount = Math.max(1, finalQuestions.length);
+        const updatedTenant = await incrementTenantExtractedQuestions(tenant.id, addedCount);
+        const newUsed = Number(
+          updatedTenant?.extractedQuestionsUsed ?? currentQuestionsUsed + addedCount
+        );
+        trialQuota = {
+          used: newUsed,
+          max: maxExtractedQuestions,
+          remaining: Math.max(0, maxExtractedQuestions - newUsed),
+        };
+        syncTenantsToVps({ force: false }).catch(() => {});
+      }
+
       return NextResponse.json({
         success: true,
         ...result,
-        parsedQuestion: result.questions[0] || null,
+        questions: finalQuestions,
+        parsedQuestion: finalQuestions[0] || null,
+        cappedByTrial,
+        ...(trialQuota ? { trialQuota } : {}),
       });
     } catch (err) {
       const { message, status } = friendlyGeminiError(err);
-      console.error("[ocr-extract] Gemini failed:", err);
+      console.error("[ocr-extract] extraction failed:", err);
       return NextResponse.json({ success: false, error: message }, { status });
     }
   }
@@ -114,11 +177,25 @@ export async function POST(req: NextRequest) {
   // 2) Offline fallback: local Arabic_OCR engine
   const local = await runLocalArabicOcr(imageBase64);
   if (local) {
+    let trialQuota: { used: number; max: number; remaining: number } | undefined = undefined;
+    if (tenant && maxExtractedQuestions > 0) {
+      const updatedTenant = await incrementTenantExtractedQuestions(tenant.id, 1);
+      const newUsed = Number(
+        updatedTenant?.extractedQuestionsUsed ?? currentQuestionsUsed + 1
+      );
+      trialQuota = {
+        used: newUsed,
+        max: maxExtractedQuestions,
+        remaining: Math.max(0, maxExtractedQuestions - newUsed),
+      };
+      syncTenantsToVps({ force: false }).catch(() => {});
+    }
     return NextResponse.json({
       success: true,
       engine: "local",
       questions: [local.question],
       rawText: local.rawText,
+      ...(trialQuota ? { trialQuota } : {}),
     });
   }
 
@@ -127,7 +204,7 @@ export async function POST(req: NextRequest) {
       success: false,
       needsApiKey: true,
       error:
-        "لا يوجد محرك قراءة متاح. أضف مفتاح Gemini API من زر الإعدادات (الطريقة الموصى بها)، أو ثبّت المحرك المحلي.",
+        "لا يوجد محرك قراءة متاح حالياً. أضف مفتاح الربط من زر الإعدادات، أو ثبّت المحرك المحلي.",
     },
     { status: 503 }
   );

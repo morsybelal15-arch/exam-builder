@@ -19,6 +19,8 @@ import {
   Plus,
   Cloud,
   ShieldCheck,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import { logoutAction } from "@/app/actions/auth";
 import {
@@ -60,6 +62,13 @@ export default function Sidebar() {
   const [role, setRole] = useState<string>("TENANT");
   const [clientName, setClientName] = useState<string>("السنتر");
   const [subscriptionType, setSubscriptionType] = useState<SubscriptionCategory>("سنتر");
+  const [isTrial, setIsTrial] = useState<boolean>(false);
+  const [subscriptionDueDate, setSubscriptionDueDate] = useState<string | null>(null);
+  const [maxGroups, setMaxGroups] = useState<number>(0);
+  const [maxStudents, setMaxStudents] = useState<number>(0);
+  const [maxExtractedQuestions, setMaxExtractedQuestions] = useState<number>(0);
+  const [extractedQuestionsUsed, setExtractedQuestionsUsed] = useState<number>(0);
+  const [trialCountdownText, setTrialCountdownText] = useState<string>("24:00:00");
   const [enabledFeatures, setEnabledFeatures] = useState<string[]>(ALL_FEATURE_IDS);
   const [storageLimitBytes, setStorageLimitBytes] = useState<number>(DEFAULT_STORAGE_LIMIT_BYTES);
   const [usage, setUsage] = useState<{
@@ -67,19 +76,38 @@ export default function Sidebar() {
     activeStudentsCount: number;
     groupsCount: number;
     filesBytes: number;
+    extractedQuestionsUsed?: number;
   }>({
     studentsCount: 0,
     activeStudentsCount: 0,
     groupsCount: 0,
     filesBytes: 0,
+    extractedQuestionsUsed: 0,
   });
 
   const applySessionPayload = (data: any) => {
     if (!data || !data.authenticated) return;
     if (data.role) setRole(data.role);
     if (data.name) setClientName(data.name);
-    if (data.subscriptionType === "معلم" || data.subscriptionType === "سنتر") {
+    if (
+      data.subscriptionType === "معلم" ||
+      data.subscriptionType === "سنتر" ||
+      data.subscriptionType === "تجربة مجانية"
+    ) {
       setSubscriptionType(data.subscriptionType);
+    }
+    const trialFlag = Boolean(data.isTrial || data.subscriptionType === "تجربة مجانية");
+    setIsTrial(trialFlag);
+    if (data.subscriptionDueDate !== undefined) {
+      setSubscriptionDueDate(data.subscriptionDueDate || null);
+    }
+    if (data.maxGroups !== undefined) setMaxGroups(Number(data.maxGroups) || 0);
+    if (data.maxStudents !== undefined) setMaxStudents(Number(data.maxStudents) || 0);
+    if (data.maxExtractedQuestions !== undefined) {
+      setMaxExtractedQuestions(Number(data.maxExtractedQuestions) || 0);
+    }
+    if (data.extractedQuestionsUsed !== undefined) {
+      setExtractedQuestionsUsed(Number(data.extractedQuestionsUsed) || 0);
     }
     if (Array.isArray(data.enabledFeatures)) {
       setEnabledFeatures(normalizeEnabledFeatures(data.enabledFeatures));
@@ -87,7 +115,15 @@ export default function Sidebar() {
     if (data.storageLimitBytes) {
       setStorageLimitBytes(Number(data.storageLimitBytes) || DEFAULT_STORAGE_LIMIT_BYTES);
     }
-    if (data.usage) setUsage(data.usage);
+    if (data.usage) {
+      setUsage((prev) => ({
+        ...prev,
+        ...data.usage,
+      }));
+      if (data.usage.extractedQuestionsUsed !== undefined) {
+        setExtractedQuestionsUsed(Number(data.usage.extractedQuestionsUsed) || 0);
+      }
+    }
   };
 
   // Hydrate immediately before paint from local session cache so refresh has zero placeholder flicker
@@ -109,6 +145,22 @@ export default function Sidebar() {
     window.addEventListener("tenant-session-sync", onSync);
     return () => window.removeEventListener("tenant-session-sync", onSync);
   }, []);
+
+  // Live 24-hour countdown timer for Free Trial tenants
+  useEffect(() => {
+    if (!isTrial || !subscriptionDueDate) return;
+    const updateTimer = () => {
+      const diffMs = Math.max(0, new Date(subscriptionDueDate).getTime() - Date.now());
+      const totalSec = Math.floor(diffMs / 1000);
+      const hrs = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+      const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+      const secs = String(totalSec % 60).padStart(2, "0");
+      setTrialCountdownText(`${hrs}:${mins}:${secs}`);
+    };
+    updateTimer();
+    const timer = window.setInterval(updateTimer, 1000);
+    return () => window.clearInterval(timer);
+  }, [isTrial, subscriptionDueDate]);
 
   // Strictly render Sidebar only on valid tenant pages (never on login, admin, parent portal, denied, or 404 routes)
   const isValidTenantPage =
@@ -269,6 +321,39 @@ export default function Sidebar() {
 
         {/* Bottom Storage & Center Details (All text strictly White) */}
         <div className="pt-5 mt-5 pl-5 border-t border-white/20 space-y-4 text-white">
+          {isTrial && (
+            <Link
+              href="/my-subscription"
+              className="block mx-1 p-3 rounded-2xl bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 space-y-2 transition-all"
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[11px] font-black text-amber-200 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-amber-300" />
+                  <span>النسخة المجانية (24 ساعة)</span>
+                </span>
+                <span className="font-mono text-xs font-black bg-amber-400 text-slate-950 px-2 py-0.5 rounded-lg">
+                  {trialCountdownText}
+                </span>
+              </div>
+              <div className="space-y-1 text-[10px] font-bold text-white/95">
+                <div className="flex items-center justify-between">
+                  <span>الأسئلة المتبقية للاستخراج:</span>
+                  <span className="font-mono font-black text-amber-200">
+                    {Math.max(0, (maxExtractedQuestions || 30) - extractedQuestionsUsed)} /{" "}
+                    {maxExtractedQuestions || 30}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>المجموعات والطلاب:</span>
+                  <span className="font-mono font-black text-amber-200">
+                    {usage.groupsCount}/{maxGroups || 2} م • {usage.studentsCount}/
+                    {maxStudents || 10} ط
+                  </span>
+                </div>
+              </div>
+            </Link>
+          )}
+
           <div className="px-1 space-y-3">
             <span className="text-[10px] font-extrabold tracking-wider text-white/90 uppercase block">
               إحصائيات السعة والمركز

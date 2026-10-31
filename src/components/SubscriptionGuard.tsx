@@ -107,6 +107,38 @@ export default function SubscriptionGuard() {
       }
     };
 
+    // Anti-inspect & DevTools shortcut protection on tenant pages
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || "").toUpperCase();
+      const isF12 = e.key === "F12" || e.keyCode === 123;
+      const isInspectShortcut =
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        (key === "I" || key === "J" || key === "C");
+      const isViewSource = (e.ctrlKey || e.metaKey) && key === "U";
+      const isSavePage = (e.ctrlKey || e.metaKey) && key === "S";
+      if (isF12 || isInspectShortcut || isViewSource || isSavePage) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("keydown", onKeyDown, true);
+
     check(false);
     const onFocus = () => check(true);
     const onMutated = () => check(true);
@@ -118,12 +150,30 @@ export default function SubscriptionGuard() {
     document.addEventListener("visibilitychange", onVisibility);
     const interval = window.setInterval(() => check(true), 25_000);
 
+    // Second-by-second check if the current session is a 24h trial nearing/past expiration
+    const trialExpiryWatcher = window.setInterval(() => {
+      const currentSession = getCachedSession();
+      if (
+        currentSession &&
+        (currentSession.isTrial || currentSession.subscriptionType === "تجربة مجانية") &&
+        currentSession.subscriptionDueDate
+      ) {
+        const dueMs = new Date(currentSession.subscriptionDueDate).getTime();
+        if (Number.isFinite(dueMs) && Date.now() >= dueMs) {
+          check(true);
+        }
+      }
+    }, 2000);
+
     return () => {
       cancelled = true;
+      window.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("tenant-data-mutated", onMutated);
       document.removeEventListener("visibilitychange", onVisibility);
       window.clearInterval(interval);
+      window.clearInterval(trialExpiryWatcher);
     };
   }, [pathname, router]);
 

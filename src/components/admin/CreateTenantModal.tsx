@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { createTenantAction } from "@/app/actions/admin-tenants";
 import { autoDeployTenantVpsAction } from "@/app/actions/vps-provisioning";
@@ -26,6 +27,8 @@ import {
   CheckSquare,
   Square,
   Database,
+  Clock,
+  ShieldCheck,
 } from "lucide-react";
 import { HOSTINGER_VPS_CONFIG } from "@/lib/vps-service";
 import {
@@ -107,6 +110,13 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
   const handleSelectSubscriptionType = (type: SubscriptionCategory) => {
     setSubscriptionType(type);
     setEnabledFeatures(getDefaultFeaturesForCategory(type));
+    if (type === "تجربة مجانية") {
+      const today = new Date();
+      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      setStartDateStr(toInputDateStr(today));
+      setDueDateStr(toInputDateStr(tomorrow));
+      setStorageLimitMb(50);
+    }
   };
 
   const toggleFeature = (featureId: string) => {
@@ -165,6 +175,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
       }
 
       setCreatedResult(res);
+      router.refresh();
       if (onCreated) onCreated();
     } catch (err: any) {
       setErrorMsg(err?.message || "حدث خطأ أثناء إنشاء الحساب");
@@ -181,19 +192,24 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
       .map((f) => f.name)
       .join(" ، ");
 
+    const isTrial = createdResult.tenant.subscriptionType === "تجربة مجانية";
     const cardText = `🎉 مرحباً بك في منصتك التعليمية الخاصة (${createdResult.tenant.name})!
-تم تسطيب التطبيق وبناء قاعدة البيانات وتفعيل اشتراكك بنجاح.
+${isTrial ? "تم تسطيب النسخة المجانية التجريبية (متاحة لمدة 24 ساعة من الآن) بنجاح." : "تم تسطيب التطبيق وبناء قاعدة البيانات وتفعيل اشتراكك بنجاح."}
 
 👤 اسم العميل (الظاهر بالتطبيق): ${createdResult.tenant.name}
-🏷️ نوع الاشتراك: ${createdResult.tenant.subscriptionType}
+🏷️ نوع الاشتراك: ${isTrial ? "النسخة المجانية (24 ساعة)" : createdResult.tenant.subscriptionType}
 📱 رقم الهاتف (الدخول): ${createdResult.tenant.phone}
 🔑 كلمة المرور: ${password}
 🌐 رابط المنصة: ${createdResult.tenant.domain
         ? `https://${createdResult.tenant.domain}/login`
         : "رابط المنصة الرئيسي"
       }
-📅 بداية الاشتراك: ${new Date(createdResult.tenant.startDate).toLocaleDateString("ar-EG")}
-📅 نهاية الاشتراك: ${new Date(createdResult.tenant.dueDate).toLocaleDateString("ar-EG")}
+📅 بداية الاشتراك: ${isTrial ? new Date(createdResult.tenant.startDate).toLocaleString("ar-EG") : new Date(createdResult.tenant.startDate).toLocaleDateString("ar-EG")}
+📅 نهاية الاشتراك: ${isTrial ? new Date(createdResult.tenant.dueDate).toLocaleString("ar-EG") : new Date(createdResult.tenant.dueDate).toLocaleDateString("ar-EG")}${
+      isTrial
+        ? "\n⏱️ حدود النسخة المجانية: استخراج حتى 30 سؤال تلقائياً • إنشاء مجموعتين كحد أقصى • تسجيل 10 طلاب كحد أقصى"
+        : ""
+    }
 🧩 المميزات المثبتة: ${installedNames}`;
 
     navigator.clipboard.writeText(cardText);
@@ -226,12 +242,14 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
         <span>إضافة وتسطيب عميل جديد</span>
       </button>
 
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
-          dir="rtl"
-        >
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      {isOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+            dir="rtl"
+          >
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
               <div className="flex items-center gap-3">
@@ -587,6 +605,18 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           type="button"
+                          onClick={() => handleSelectSubscriptionType("تجربة مجانية")}
+                          className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                            subscriptionType === "تجربة مجانية"
+                              ? "bg-amber-500 text-white shadow-xs"
+                              : "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300"
+                          }`}
+                        >
+                          <Clock className="w-3 h-3" />
+                          <span>24 ساعة (النسخة المجانية)</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => applyQuickDurationDays(30)}
                           className="text-[11px] font-bold bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
                         >
@@ -646,21 +676,25 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                     </div>
 
                     <div className="text-[11px] font-bold text-blue-700 flex items-center justify-between pt-1">
-                      <span>إجمالي مدة الصلاحية المحددة: {totalDays} يوم</span>
-                      <span>يتوقف التطبيق تلقائياً عند انتهاء التاريخ المحدد</span>
+                      <span>
+                        {subscriptionType === "تجربة مجانية"
+                          ? "⏱️ مدة الصلاحية: 24 ساعة بالضبط من لحظة التسطيب (عداد تنازلي حي بالثانية)"
+                          : `إجمالي مدة الصلاحية المحددة: ${totalDays} يوم`}
+                      </span>
+                      <span>يتوقف التطبيق تلقائياً عند انتهاء الموعد المحدد</span>
                     </div>
                   </div>
 
-                  {/* Step 4: Subscription Type (معلم / سنتر) */}
+                  {/* Step 4: Subscription Type (معلم / سنتر / النسخة المجانية) */}
                   <div className="space-y-2.5">
                     <h4 className="text-xs font-black text-slate-800 flex items-center gap-2">
                       <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center">
                         4
                       </span>
-                      <span>نوع الاشتراك (معلم / سنتر)</span>
+                      <span>نوع النسخة والاشتراك (سنتر / معلم / النسخة المجانية 24 ساعة)</span>
                     </h4>
 
-                    <div className="grid grid-cols-2 gap-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <button
                         type="button"
                         onClick={() => handleSelectSubscriptionType("سنتر")}
@@ -680,7 +714,7 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         <div>
                           <div className="text-xs font-black text-slate-900">اشتراك سنتر تعليمي</div>
                           <div className="text-[10px] text-slate-500 mt-0.5">
-                            إدارة السنتر والمجموعات والطلاب والاختبارات
+                            نسخة كاملة مفتوحة الصلاحيات للسنتر
                           </div>
                         </div>
                       </button>
@@ -704,11 +738,72 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
                         <div>
                           <div className="text-xs font-black text-slate-900">اشتراك معلم</div>
                           <div className="text-[10px] text-slate-500 mt-0.5">
-                            مخصص للمعلم الفردي وإنشاء الاختبارات والطلاب
+                            نسخة كاملة مفتوحة الصلاحيات للمعلم
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSubscriptionType("تجربة مجانية")}
+                        className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${subscriptionType === "تجربة مجانية"
+                          ? "bg-amber-50/90 border-amber-500 ring-2 ring-amber-500/25 shadow-xs"
+                          : "bg-slate-50 border-slate-200 hover:bg-amber-50/40"
+                          }`}
+                      >
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${subscriptionType === "تجربة مجانية"
+                            ? "bg-amber-500 text-white"
+                            : "bg-amber-100 text-amber-700"
+                            }`}
+                        >
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                            <span>النسخة المجانية</span>
+                            <span className="text-[9px] font-extrabold bg-amber-500 text-white px-1.5 py-0.5 rounded-full">
+                              24 ساعة
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            30 سؤال • مجموعتان • 10 طلاب • عداد 24س
                           </div>
                         </div>
                       </button>
                     </div>
+
+                    {subscriptionType === "تجربة مجانية" && (
+                      <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-2xl space-y-2 animate-in fade-in">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-amber-600" />
+                            <span>ضوابط وحماية النسخة المجانية (مربوطة بالسيرفر وقاعدة البيانات):</span>
+                          </span>
+                          <span className="text-[10px] font-extrabold bg-amber-200/80 text-amber-950 px-2.5 py-0.5 rounded-full">
+                            محمية ضد Inspect أو التلاعب
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-bold text-amber-900">
+                          <div className="bg-white/90 border border-amber-200/80 rounded-xl p-2 text-center">
+                            <span className="block text-slate-400 text-[10px]">مدة الصلاحية</span>
+                            <span className="font-black text-amber-700">24 ساعة فقط</span>
+                          </div>
+                          <div className="bg-white/90 border border-amber-200/80 rounded-xl p-2 text-center">
+                            <span className="block text-slate-400 text-[10px]">استخراج الأسئلة</span>
+                            <span className="font-black text-amber-700">30 سؤال كحد أقصى</span>
+                          </div>
+                          <div className="bg-white/90 border border-amber-200/80 rounded-xl p-2 text-center">
+                            <span className="block text-slate-400 text-[10px]">إنشاء المجموعات</span>
+                            <span className="font-black text-amber-700">مجموعتان كحد أقصى</span>
+                          </div>
+                          <div className="bg-white/90 border border-amber-200/80 rounded-xl p-2 text-center">
+                            <span className="block text-slate-400 text-[10px]">إضافة الطلاب</span>
+                            <span className="font-black text-amber-700">10 طلاب كحد أقصى</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Step 5: Modular App Features Installer (Referenced from Sidebar) */}
@@ -912,7 +1007,8 @@ export default function CreateTenantModal({ onCreated }: CreateTenantModalProps)
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

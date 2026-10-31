@@ -1055,7 +1055,7 @@ ${portalUrl}
                           </span>
                         </td>
                         <td className="p-3 text-slate-500">
-                          {grd.method === "camera_ai" ? "كاميرا AI" : "يدوي"}
+                          {grd.method === "camera_ai" ? "كاميرا تلقائية" : "يدوي"}
                         </td>
                         <td className="p-3 text-center">
                           <button

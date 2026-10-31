@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getGroups, getGroupById, saveGroup, deleteGroup } from "@/lib/management-db";
 import { requireApiSession } from "@/lib/auth";
 import { setCurrentTenantId } from "@/lib/tenant-context";
+import { findTenantById, findTenantByPhone } from "@/lib/tenants-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,25 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const currentGroups = getGroups();
+    const isUpdatingExisting = Boolean(id && currentGroups.some((g) => g.id === id));
+    if (!isUpdatingExisting && session.role !== "SUPER_ADMIN") {
+      const tenant =
+        (await findTenantById(session.id)) || (await findTenantByPhone(session.phone));
+      const isTrial = Boolean(tenant?.isTrial || tenant?.subscriptionType === "تجربة مجانية");
+      const maxGroups = Number(tenant?.maxGroups || (isTrial ? 2 : 0));
+      if (maxGroups > 0 && currentGroups.length >= maxGroups) {
+        return NextResponse.json(
+          {
+            error: `لقد وصلت للحد الأقصى لإنشاء المجموعات في النسخة المجانية (${maxGroups} مجموعات كحد أقصى). يرجى ترقية اشتراكك لإضافة عدد غير محدود من المجموعات.`,
+            limitReached: true,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     const group = saveGroup({ id, name, teacher, academicYear, subject });
     return NextResponse.json({ success: true, group });
   } catch (error: any) {

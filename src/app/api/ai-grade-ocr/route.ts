@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     const keyPool = resolveApiKeyPool(requestApiKey);
     if (keyPool.length === 0) {
       return NextResponse.json(
-        { error: "مفتاح Gemini API غير متوفر. يرجى ضبطه في الإعدادات أو ملف البيئة." },
+        { error: "مفتاح القراءة التلقائية غير متوفر. يرجى ضبطه في الإعدادات." },
         { status: 400 }
       );
     }
@@ -109,7 +109,7 @@ ${studentsContext || "لا توجد قائمة مسبقة، استخرج الا�
     }
 
     if (!parsedResult) {
-      throw lastError || new Error("تعذر قراءة الورقة بواسطة الذكاء الاصطناعي");
+      throw lastError || new Error("تعذر قراءة الورقة تلقائياً");
     }
 
     // Safe fallback match on student name/code if model didn't provide matchedStudentId
@@ -140,7 +140,7 @@ ${studentsContext || "لا توجد قائمة مسبقة، استخرج الا�
         examRecordId,
         parsedResult.matchedStudentId,
         parsedResult.score,
-        parsedResult.notes || "تم الرصد تلقائياً عبر كاميرا الذكاء الاصطناعي (Gemini OCR)",
+        parsedResult.notes || "تم الرصد تلقائياً عبر الكاميرا",
         "camera_ai"
       );
     }

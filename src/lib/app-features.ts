@@ -16,7 +16,7 @@
 
 export type SidebarSectionTitle = "السنتر" | "الاختبارات" | "الإعدادات";
 
-export type SubscriptionCategory = "سنتر" | "معلم";
+export type SubscriptionCategory = "سنتر" | "معلم" | "تجربة مجانية";
 
 export interface AppFeatureDefinition {
   /** Unique feature identifier stored in tenant's `enabledFeatures` array */
@@ -60,7 +60,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "لوحة إحصائيات السنتر، التحصيل الشهري، ومتابعة الغياب اليومي",
     iconName: "Home",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "groups",
@@ -69,7 +69,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "إدارة المجموعات، المواعيد، المعلمين، والصفوف الدراسية",
     iconName: "Users",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "students",
@@ -78,7 +78,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "سجلات الطلاب، المصروفات الشهرية، الغياب، ودرجات الاختبارات",
     iconName: "UserCheck",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "qr-printing",
@@ -87,7 +87,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "توليد وطباعة كروت الباركود للطلاب لتسجيل الحضور والدفع بالكاميرا",
     iconName: "QrCode",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "excel-sheets",
@@ -96,7 +96,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "السنتر",
     description: "استيراد وتصدير كشوف الطلاب والماليات وأرقام الهواتف بصيغة Excel",
     iconName: "FileSpreadsheet",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
 
   // ─────────────────────── 2. قسم الاختبارات ───────────────────────
@@ -105,9 +105,9 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     name: "منشئ الاختبارات",
     href: "/exam-builder",
     section: "الاختبارات",
-    description: "قص الأسئلة بالذكاء الاصطناعي وتنسيق أوراق الامتحانات الجاهزة للطباعة",
+    description: "قص واستخراج الأسئلة تلقائياً وتنسيق أوراق الامتحانات الجاهزة للطباعة",
     iconName: "PenTool",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "created-exams",
@@ -116,7 +116,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "الاختبارات",
     description: "أرشيف الامتحانات المحفوظة والنماذج المتعددة (أ - ب - ج)",
     iconName: "FileText",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "uploaded-files",
@@ -125,7 +125,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "الاختبارات",
     description: "مكتبة المذكرات والكتب وملفات الـ PDF المرفوعة على السحابة",
     iconName: "FolderUp",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
   {
     id: "images-to-pdf",
@@ -134,7 +134,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "الاختبارات",
     description: "تجميع ودمج صور المذكرات والامتحانات في ملف PDF واحد عالي الدقة",
     iconName: "Image",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
 
   // ─────────────────────── 3. قسم الإعدادات ───────────────────────
@@ -145,7 +145,7 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     section: "الإعدادات",
     description: "عرض تفاصيل الباقة، فترة الصلاحية، المميزات المثبتة، وسعة التخزين",
     iconName: "CreditCard",
-    defaultFor: ["سنتر", "معلم"],
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
 ];
 

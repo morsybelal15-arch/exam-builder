@@ -382,7 +382,7 @@ async function callGeminiGenerate(
       for (const useThinkingConfig of [true, false]) {
         const remaining = deadline - Date.now();
         if (remaining < 5_000) {
-          throw lastError || new Error("انتهت مهلة الاتصال بـ Gemini.");
+          throw lastError || new Error("انتهت مهلة الاتصال بمحرك الاستخراج.");
         }
 
         try {
@@ -606,30 +606,30 @@ export function friendlyGeminiError(err: unknown): { message: string; status: nu
   const raw = err instanceof Error ? err.message : String(err);
   if (/api[_ ]?key|API_KEY_INVALID|401|403|permission/i.test(raw)) {
     return {
-      message: "مفتاح Gemini API غير صالح أو غير مفعل. يرجى التأكد من نسخه بدقة من Google AI Studio (يبدأ عادة بـ AIzaSy).",
+      message: "مفتاح الاستخراج غير صالح أو غير مفعل. يرجى التأكد من نسخه بدقة في الإعدادات.",
       status: 401,
     };
   }
   if (/429|quota|rate limit|RESOURCE_EXHAUSTED/i.test(raw)) {
     return {
-      message: "تم تجاوز حد الاستخدام المؤقت لمفتاح Gemini المجاني. يرجى الانتظار 30 ثانية أو استخدام مفتاح آخر.",
+      message: "تم تجاوز حد الاستخدام المؤقت للمحرك. يرجى الانتظار 30 ثانية والمحاولة مرة أخرى.",
       status: 429,
     };
   }
   if (isAbortError(err)) {
     return {
-      message: "استغرق Gemini وقتاً أطول من المعتاد في قراءة المنطقة المحددة. حاول مرة أخرى، أو قسّم القطعة الطويلة إلى جزأين.",
+      message: "استغرق النظام وقتاً أطول من المعتاد في قراءة المنطقة المحددة. حاول مرة أخرى، أو قسّم القطعة الطويلة إلى جزأين.",
       status: 504,
     };
   }
   if (/fetch failed|ENOTFOUND|ECONNRESET|network/i.test(raw)) {
     return {
-      message: "تعذر الاتصال بخوادم Google Gemini. يرجى التحقق من اتصالك بالإنترنت.",
+      message: "تعذر الاتصال بخوادم الاستخراج. يرجى التحقق من اتصالك بالإنترنت.",
       status: 503,
     };
   }
   return {
-    message: `خطأ من Gemini: ${raw.replace(/https?:\/\/[^\s]+/g, "").slice(0, 200)}`,
+    message: `خطأ أثناء المعالجة: ${raw.replace(/https?:\/\/[^\s]+/g, "").slice(0, 200)}`,
     status: 500,
   };
 }

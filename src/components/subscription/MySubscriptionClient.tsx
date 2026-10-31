@@ -26,6 +26,10 @@ import {
   X,
   PhoneCall,
   Sparkles,
+  Clock,
+  Users,
+  UserCheck,
+  FileText,
 } from "lucide-react";
 
 interface MySubscriptionClientProps {
@@ -33,6 +37,15 @@ interface MySubscriptionClientProps {
   initialUsedStorageBytes: number;
   initialStorageLimitBytes: number;
   initialPinnedNotice: string | null;
+  initialIsTrial?: boolean;
+  initialSubscriptionStartDate?: string | null;
+  initialSubscriptionDueDate?: string | null;
+  initialMaxGroups?: number;
+  initialMaxStudents?: number;
+  initialMaxExtractedQuestions?: number;
+  initialExtractedQuestionsUsed?: number;
+  initialGroupsCount?: number;
+  initialStudentsCount?: number;
 }
 
 export default function MySubscriptionClient({
@@ -40,11 +53,47 @@ export default function MySubscriptionClient({
   initialUsedStorageBytes,
   initialStorageLimitBytes,
   initialPinnedNotice,
+  initialIsTrial = false,
+  initialSubscriptionStartDate = null,
+  initialSubscriptionDueDate = null,
+  initialMaxGroups = 0,
+  initialMaxStudents = 0,
+  initialMaxExtractedQuestions = 0,
+  initialExtractedQuestionsUsed = 0,
+  initialGroupsCount = 0,
+  initialStudentsCount = 0,
 }: MySubscriptionClientProps) {
   const router = useRouter();
   const [usedBytes, setUsedBytes] = useState<number>(initialUsedStorageBytes);
   const [limitBytes, setLimitBytes] = useState<number>(initialStorageLimitBytes);
   const [pinnedNotice, setPinnedNotice] = useState<string | null>(initialPinnedNotice);
+
+  // Free Trial Live State
+  const [isTrial, setIsTrial] = useState<boolean>(initialIsTrial);
+  const [dueDateIso, setDueDateIso] = useState<string | null>(initialSubscriptionDueDate);
+  const [maxGroups, setMaxGroups] = useState<number>(initialMaxGroups);
+  const [maxStudents, setMaxStudents] = useState<number>(initialMaxStudents);
+  const [maxExtractedQuestions, setMaxExtractedQuestions] = useState<number>(
+    initialMaxExtractedQuestions
+  );
+  const [extractedQuestionsUsed, setExtractedQuestionsUsed] = useState<number>(
+    initialExtractedQuestionsUsed
+  );
+  const [groupsCount, setGroupsCount] = useState<number>(initialGroupsCount);
+  const [studentsCount, setStudentsCount] = useState<number>(initialStudentsCount);
+  const [trialCountdown, setTrialCountdown] = useState<{
+    hours: string;
+    minutes: string;
+    seconds: string;
+    expired: boolean;
+    percentLeft: number;
+  }>({
+    hours: "24",
+    minutes: "00",
+    seconds: "00",
+    expired: false,
+    percentLeft: 100,
+  });
 
   // Factory Reset Modal States
   const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
@@ -78,6 +127,31 @@ export default function MySubscriptionClient({
       }
       if (data.notes !== undefined) {
         setPinnedNotice(data.notes || null);
+      }
+      if (data.isTrial !== undefined || data.subscriptionType !== undefined) {
+        setIsTrial(Boolean(data.isTrial || data.subscriptionType === "تجربة مجانية"));
+      }
+      if (data.subscriptionDueDate !== undefined) {
+        setDueDateIso(data.subscriptionDueDate || null);
+      }
+      if (data.maxGroups !== undefined) setMaxGroups(Number(data.maxGroups) || 0);
+      if (data.maxStudents !== undefined) setMaxStudents(Number(data.maxStudents) || 0);
+      if (data.maxExtractedQuestions !== undefined) {
+        setMaxExtractedQuestions(Number(data.maxExtractedQuestions) || 0);
+      }
+      if (data.extractedQuestionsUsed !== undefined) {
+        setExtractedQuestionsUsed(Number(data.extractedQuestionsUsed) || 0);
+      }
+      if (data.usage) {
+        if (data.usage.groupsCount !== undefined) {
+          setGroupsCount(Number(data.usage.groupsCount) || 0);
+        }
+        if (data.usage.studentsCount !== undefined) {
+          setStudentsCount(Number(data.usage.studentsCount) || 0);
+        }
+        if (data.usage.extractedQuestionsUsed !== undefined) {
+          setExtractedQuestionsUsed(Number(data.usage.extractedQuestionsUsed) || 0);
+        }
       }
     };
 
@@ -116,6 +190,30 @@ export default function MySubscriptionClient({
 
   const { barWidthPercent, displayPercent } = computeStoragePercent(usedBytes, limitBytes);
   const remainingBytes = Math.max(0, limitBytes - usedBytes);
+
+  // Live 1-second countdown for 24-hour Free Trial
+  useEffect(() => {
+    if (!isTrial || !dueDateIso) return;
+    const totalWindowMs = 24 * 60 * 60 * 1000;
+    const tick = () => {
+      const diffMs = Math.max(0, new Date(dueDateIso).getTime() - Date.now());
+      const totalSec = Math.floor(diffMs / 1000);
+      const hours = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+      const minutes = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+      const seconds = String(totalSec % 60).padStart(2, "0");
+      const percentLeft = Math.min(100, Math.max(0, Math.round((diffMs / totalWindowMs) * 100)));
+      setTrialCountdown({
+        hours,
+        minutes,
+        seconds,
+        expired: diffMs <= 0,
+        percentLeft,
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [isTrial, dueDateIso]);
 
   const whatsappUrl = `https://wa.me/201091713815?text=${encodeURIComponent(
     `مرحباً الدعم الفني، أحتاج مساعدة بخصوص اشتراك المنصة (${clientName})`
@@ -192,6 +290,146 @@ export default function MySubscriptionClient({
 
   return (
     <div className="space-y-8">
+      {/* Free Trial 24h Live Countdown & Quotas Section */}
+      {isTrial && (
+        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-700 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-700/80 pb-5">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-extrabold">
+                <Clock className="w-3.5 h-3.5 animate-pulse" />
+                <span>النسخة التجريبية المجانية (صالحة لمدة 24 ساعة)</span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-black text-white">
+                عداد الوقت المتبقي والحدود المتاحة في التجربة
+              </h3>
+              <p className="text-xs text-slate-300">
+                تنتهي النسخة التجريبية تلقائياً بعد مرور 24 ساعة من وقت التفعيل، ويمكنك الترقية في أي وقت مع الاحتفاظ بكافة بياناتك.
+              </p>
+            </div>
+
+            {/* Digital Live Countdown Clock */}
+            <div className="bg-slate-950/80 border border-amber-400/30 rounded-2xl px-5 py-3.5 text-center shrink-0">
+              <span className="text-[11px] font-bold text-amber-300 block mb-1">
+                الوقت المتبقي لانتهاء التجربة
+              </span>
+              {trialCountdown.expired ? (
+                <span className="text-base font-black text-rose-400">
+                  انتهت الفترة المجانية (24 ساعة)
+                </span>
+              ) : (
+                <div className="flex items-center justify-center gap-2 font-mono text-2xl font-black text-white" dir="ltr">
+                  <span className="bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700">
+                    {trialCountdown.hours}
+                  </span>
+                  <span className="text-amber-400">:</span>
+                  <span className="bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700">
+                    {trialCountdown.minutes}
+                  </span>
+                  <span className="text-amber-400">:</span>
+                  <span className="bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700 text-amber-300">
+                    {trialCountdown.seconds}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 3 Trial Quotas Progress Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Quota 1: 30 Extracted Questions */}
+            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-slate-200 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-amber-400" />
+                  <span>استخراج الأسئلة</span>
+                </span>
+                <span className="text-xs font-mono font-black bg-amber-400/20 text-amber-300 px-2.5 py-0.5 rounded-lg">
+                  المتبقي{" "}
+                  {Math.max(0, (maxExtractedQuestions || 30) - extractedQuestionsUsed)} من{" "}
+                  {maxExtractedQuestions || 30}
+                </span>
+              </div>
+              <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-amber-400 h-2 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(
+                        (extractedQuestionsUsed / Math.max(1, maxExtractedQuestions || 30)) * 100
+                      )
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-slate-400">
+                تم استخراج{" "}
+                <strong className="text-white font-mono">{extractedQuestionsUsed}</strong> سؤال من
+                إجمالي <strong className="text-white font-mono">{maxExtractedQuestions || 30}</strong>{" "}
+                سؤال متاح في التجربة
+              </p>
+            </div>
+
+            {/* Quota 2: 2 Groups */}
+            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-slate-200 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-blue-400" />
+                  <span>المجموعات الدراسية</span>
+                </span>
+                <span className="text-xs font-mono font-black bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-lg">
+                  المتبقي {Math.max(0, (maxGroups || 2) - groupsCount)} من {maxGroups || 2}
+                </span>
+              </div>
+              <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-blue-400 h-2 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round((groupsCount / Math.max(1, maxGroups || 2)) * 100)
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-slate-400">
+                تم إنشاء <strong className="text-white font-mono">{groupsCount}</strong> مجموعة من
+                حد أقصى <strong className="text-white font-mono">{maxGroups || 2}</strong> مجموعات
+              </p>
+            </div>
+
+            {/* Quota 3: 10 Students */}
+            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-slate-200 flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  <span>الطلاب المسجلون</span>
+                </span>
+                <span className="text-xs font-mono font-black bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-lg">
+                  المتبقي {Math.max(0, (maxStudents || 10) - studentsCount)} من{" "}
+                  {maxStudents || 10}
+                </span>
+              </div>
+              <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-emerald-400 h-2 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round((studentsCount / Math.max(1, maxStudents || 10)) * 100)
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-slate-400">
+                تم تسجيل <strong className="text-white font-mono">{studentsCount}</strong> طالب من
+                حد أقصى <strong className="text-white font-mono">{maxStudents || 10}</strong> طلاب
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Pinned Admin Messages / News & Updates Banner */}
       <div className="bg-gradient-to-r from-amber-50 via-orange-50/70 to-amber-50 border border-amber-200/90 rounded-3xl p-6 shadow-xs relative overflow-hidden">
         <div className="flex items-start gap-4">

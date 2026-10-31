@@ -2335,6 +2335,7 @@ export function bulkImportStudents(params: {
   defaultAcademicYear: string;
   defaultMonthlyFee?: number;
   duplicateMode?: "skip" | "update" | "allow";
+  maxTotalStudents?: number;
 }): {
   importedCount: number;
   updatedCount: number;
@@ -2444,6 +2445,16 @@ export function bulkImportStudents(params: {
         importedStudents.push(store.students[existingIdx]);
         return;
       }
+    }
+
+    // Enforce trial / plan max students limit if specified
+    if (
+      params.maxTotalStudents &&
+      params.maxTotalStudents > 0 &&
+      store.students.length >= params.maxTotalStudents
+    ) {
+      skippedCount++;
+      return;
     }
 
     // Assign guaranteed unique code

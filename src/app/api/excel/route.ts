@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
 import { setCurrentTenantId } from "@/lib/tenant-context";
+import { findTenantById, findTenantByPhone } from "@/lib/tenants-repository";
 import {
   getExportDataset,
   bulkImportStudents,
@@ -71,6 +72,14 @@ export async function POST(req: NextRequest) {
     setCurrentTenantId(session.id);
     const { action } = body;
 
+    const tenant =
+      session.role !== "SUPER_ADMIN"
+        ? (await findTenantById(session.id)) || (await findTenantByPhone(session.phone))
+        : null;
+    const isTrial = Boolean(tenant?.isTrial || tenant?.subscriptionType === "تجربة مجانية");
+    const maxGroups = Number(tenant?.maxGroups || (isTrial ? 2 : 0));
+    const maxStudents = Number(tenant?.maxStudents || (isTrial ? 10 : 0));
+
     // Quick inline group creation from Import page if user needs a new group
     if (action === "quickCreateGroup") {
       const { name, teacher, academicYear, subject } = body;
@@ -78,6 +87,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: "يرجى إدخال اسم المجموعة والسنة الدراسية" },
           { status: 400 }
+        );
+      }
+      if (maxGroups > 0 && getGroups().length >= maxGroups) {
+        return NextResponse.json(
+          {
+            error: `لقد وصلت للحد الأقصى لإنشاء المجموعات في النسخة المجانية (${maxGroups} مجموعات كحد أقصى). يرجى ترقية اشتراكك لإضافة المزيد.`,
+            limitReached: true,
+          },
+          { status: 403 }
         );
       }
       const group = saveGroup({
@@ -117,6 +135,16 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      if (maxStudents > 0 && getStudents().length >= maxStudents && duplicateMode !== "update") {
+        return NextResponse.json(
+          {
+            error: `لقد وصلت للحد الأقصى لإضافة الطلاب في النسخة المجانية (${maxStudents} طلاب كحد أقصى). يرجى ترقية اشتراكك لاستيراد عدد غير محدود من الطلاب.`,
+            limitReached: true,
+          },
+          { status: 403 }
+        );
+      }
+
       // Guard against oversized payloads (> 5000 rows at once)
       if (rows.length > 5000) {
         return NextResponse.json(
@@ -131,6 +159,7 @@ export async function POST(req: NextRequest) {
         defaultAcademicYear: defaultAcademicYear || "الصف الأول الثانوي",
         defaultMonthlyFee: Number(defaultMonthlyFee) || 250,
         duplicateMode: duplicateMode || "skip",
+        maxTotalStudents: maxStudents > 0 ? maxStudents : undefined,
       });
 
       return NextResponse.json({

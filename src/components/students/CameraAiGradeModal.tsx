@@ -142,7 +142,7 @@ export default function CameraAiGradeModal({
 
       const json = await res.json();
       if (!res.ok || !json.success) {
-        throw new Error(json.error || "تعذر قراءة ورقة الامتحان بالذكاء الاصطناعي");
+        throw new Error(json.error || "تعذر قراءة ورقة الامتحان تلقائياً");
       }
 
       const data = json.data;
@@ -190,7 +190,7 @@ export default function CameraAiGradeModal({
           examRecordId,
           studentIdOrCode: selectedStudentId,
           score: Number(editableScore),
-          notes: ocrResult?.notes || "رصد تلقائي عبر كاميرا الذكاء الاصطناعي",
+          notes: ocrResult?.notes || "رصد تلقائي عبر الكاميرا",
           method: "camera_ai",
         }),
       });
@@ -238,10 +238,10 @@ export default function CameraAiGradeModal({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-bold">
-                  تصحيح ورصد الدرجات بالذكاء الاصطناعي
+                  تصحيح ورصد الدرجات بالكاميرا تلقائياً
                 </h3>
                 <span className="text-[10px] bg-blue-600/30 text-blue-400 font-bold px-2 py-0.5 rounded-full border border-blue-500/30">
-                  Gemini Vision OCR
+                  القراءة التلقائية السريعة
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -322,7 +322,7 @@ export default function CameraAiGradeModal({
                 <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center gap-3">
                   <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   <span className="text-xs font-bold text-white">
-                    جاري التعرف على اسم الطالب والدرجة بالذكاء الاصطناعي...
+                    جاري التعرف على اسم الطالب والدرجة تلقائياً...
                   </span>
                 </div>
               )}

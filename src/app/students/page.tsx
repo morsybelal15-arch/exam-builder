@@ -710,6 +710,10 @@ function StudentsPageContent() {
       });
 
       const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || "فشل حفظ بيانات الطالب");
+        return;
+      }
       if (data.success) {
         setIsCreateStudentModalOpen(false);
         setEditingStudent(null);
@@ -2061,7 +2065,7 @@ function StudentsPageContent() {
                     رصد درجات الاختبارات والامتحانات
                   </h3>
                   <p className="text-xs text-slate-400">
-                    إنشاء سجلات الاختبارات ورصد الدرجات تلقائياً عبر كاميرا الذكاء الاصطناعي أو يدوياً
+                    إنشاء سجلات الاختبارات ورصد الدرجات تلقائياً عبر الكاميرا أو يدوياً
                   </p>
                 </div>
               </div>
@@ -2116,7 +2120,7 @@ function StudentsPageContent() {
                         >
                           <Camera className="w-4 h-4 text-white" />
                           <Sparkles className="w-3.5 h-3.5 text-white" />
-                          <span>تسجيل درجات الاختبار بالكاميرا (AI OCR)</span>
+                          <span>تسجيل درجات الاختبار بالكاميرا تلقائياً</span>
                         </button>
 
                         <span className="text-xs text-slate-500">
@@ -2207,7 +2211,7 @@ function StudentsPageContent() {
                                     {gradeItem.method === "camera_ai" ? (
                                       <span className="text-blue-600 font-bold flex items-center gap-1">
                                         <Sparkles className="w-3 h-3" />
-                                        <span>AI كاميرا</span>
+                                        <span>كاميرا تلقائية</span>
                                       </span>
                                     ) : hasScore ? (
                                       "رصد يدوي"
