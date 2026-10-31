@@ -37,7 +37,9 @@ import {
   Clock,
   RotateCcw,
   ShieldCheck,
+  Activity,
 } from "lucide-react";
+import TenantAnalyticsPanel from "./TenantAnalyticsPanel";
 import {
   APP_FEATURES_REGISTRY,
   SIDEBAR_SECTIONS_ORDER,
@@ -83,6 +85,7 @@ interface EditSubscriptionModalProps {
   tenant: TenantData;
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: "settings" | "tracking";
   onUpdated?: (updatedTenant?: any) => void;
   onTenantPatched?: (updatedTenant?: any) => void;
   onDeleted?: (tenantId: string) => void;
@@ -92,11 +95,17 @@ export default function EditSubscriptionModal({
   tenant,
   isOpen,
   onClose,
+  initialTab = "settings",
   onUpdated,
   onTenantPatched,
   onDeleted,
 }: EditSubscriptionModalProps) {
   const [isPending, setIsPending] = useState(false);
+  const [activeTab, setActiveTab] = useState<"settings" | "tracking">(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab, tenant.id, isOpen]);
 
   // Form Fields
   const [name, setName] = useState(tenant.name || "");
@@ -367,41 +376,78 @@ export default function EditSubscriptionModal({
     >
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
         {/* Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center">
-              <Edit3 className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-black text-slate-900">
-                  تعديل اشتراك ومميزات تطبيق: {tenant.name || tenant.phone}
-                </h3>
-                <span
-                  className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
-                    isActive
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : "bg-rose-50 text-rose-700 border-rose-200"
-                  }`}
-                >
-                  {isActive ? "نشط ومتزامن" : "متوقف مؤقتاً"}
-                </span>
+        <div className="p-6 pb-4 border-b border-slate-100 bg-slate-50/70 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center">
+                <Edit3 className="w-5 h-5" />
               </div>
-              <p className="text-xs text-slate-500">
-                تعديل المواعيد بالـ Calendar، نوع الاشتراك (معلم/سنتر)، وإضافة أو إزالة خواص الـ Sidebar بمزامنة لحظية
-              </p>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-black text-slate-900">
+                    إدارة وتتبع تطبيق: {tenant.name || tenant.phone}
+                  </h3>
+                  <span
+                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                      isActive
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : "bg-rose-50 text-rose-700 border-rose-200"
+                    }`}
+                  >
+                    {isActive ? "نشط ومتزامن" : "متوقف مؤقتاً"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  تعديل المواعيد والخواص أو استعراض إحصائيات استخدام العميل ونقراته وأوقات فتحه للتطبيق
+                </p>
+              </div>
             </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-slate-200/60 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-200/60 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+          {/* Modal Mode Switcher Tabs: Settings vs Live Tracking */}
+          <div className="grid grid-cols-2 gap-2 p-1 bg-slate-200/70 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setActiveTab("settings")}
+              className={`py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === "settings"
+                  ? "bg-white text-blue-600 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>إدارة المواعيد والخواص والاشتراك</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("tracking")}
+              className={`py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === "tracking"
+                  ? "bg-indigo-600 text-white shadow-xs"
+                  : "text-slate-700 hover:text-indigo-700"
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>تتبع استخدام وسلوك العميل (Tracking)</span>
+            </button>
+          </div>
         </div>
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          {activeTab === "tracking" ? (
+            <TenantAnalyticsPanel
+              tenantId={tenant.id}
+              tenantName={tenant.name || tenant.phone}
+            />
+          ) : (
+            <>
           {msg && (
             <div
               className={`p-4 rounded-2xl text-xs font-semibold flex items-center gap-2 ${
@@ -1042,6 +1088,8 @@ export default function EditSubscriptionModal({
               </div>
             </div>
           </form>
+          </>
+          )}
         </div>
       </div>
     </div>,

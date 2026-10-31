@@ -25,6 +25,7 @@ import {
   Check,
   Globe,
   ExternalLink,
+  BarChart3,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +101,16 @@ export default async function AdminDashboardPage() {
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Create Tenant Modal Trigger */}
             <CreateTenantModal />
+
+            {/* Global Clients Usage Analytics Link */}
+            <Link
+              href="/admin/analytics"
+              className="inline-flex items-center gap-2 text-xs font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 h-10 px-4 rounded-xl transition-all shadow-sm shadow-indigo-600/20 whitespace-nowrap shrink-0"
+              title="مركز تحليلات وتتبع سلوك جميع العملاء"
+            >
+              <BarChart3 className="w-4 h-4 shrink-0" />
+              <span>تحليلات وتتبع العملاء</span>
+            </Link>
 
             {/* Auto Update from Repo Button */}
             <AutoUpdateButton initialCommit={latestCommit} />

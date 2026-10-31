@@ -268,7 +268,8 @@ export default function TopHeaderBar() {
     pathname === "/uploaded-files" ||
     pathname === "/images-to-pdf" ||
     pathname === "/my-subscription" ||
-    pathname === "/subscription";
+    pathname === "/subscription" ||
+    pathname === "/how-to-use";
 
   if (!isValidTenantPage) {
     return null;

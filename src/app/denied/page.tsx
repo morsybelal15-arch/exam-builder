@@ -1,35 +1,29 @@
 import React from "react";
 import Link from "next/link";
-import { ShieldAlert, ArrowRight, Home } from "lucide-react";
+import { Compass, Home } from "lucide-react";
 
 export default function AccessDeniedPage() {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4" dir="rtl">
-      <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200/80 shadow-xl p-8 text-center animate-in fade-in zoom-in-95 duration-200">
-        <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm border border-red-100">
-          <ShieldAlert className="w-8 h-8" />
+    <div className="min-h-screen bg-[#0b1120] text-slate-100 flex items-center justify-center p-4" dir="rtl">
+      <div className="w-full max-w-md bg-[#131c31] rounded-3xl border border-slate-800 shadow-2xl p-8 text-center animate-in fade-in zoom-in-95 duration-200">
+        <div className="w-16 h-16 bg-blue-500/15 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm border border-blue-500/25">
+          <Compass className="w-8 h-8" />
         </div>
 
-        <h1 className="text-2xl font-black text-slate-900 mb-2">غير مصرح بالدخول</h1>
-        <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-          هذه الصفحة مخصصة لمدير النظام (Super Admin) فقط. ليس لديك الصلاحية الكافية للوصول إلى لوحة التحكم هذه.
+        <h1 className="text-xl sm:text-2xl font-black text-white mb-2.5 leading-snug">
+          اللينك غلط.. عايز تطلع برا التطبيق ليه؟
+        </h1>
+        <p className="text-xs sm:text-sm text-slate-400 mb-6 leading-relaxed">
+          الرابط اللي كتبته غلط أو مش موجود، اضغط على الزر بالأسفل للرجوع إلى تطبيقك مباشرة.
         </p>
 
         <div className="flex flex-col gap-3">
           <Link
-            href="/exam-builder"
-            className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-5 rounded-2xl text-sm transition-all shadow-md shadow-blue-500/20 active:scale-[0.99]"
+            href="/"
+            className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-extrabold py-3.5 px-5 rounded-2xl text-sm transition-all shadow-md shadow-blue-600/25 active:scale-[0.99]"
           >
             <Home className="w-4 h-4" />
-            <span>العودة إلى منشئ الاختبارات</span>
-          </Link>
-
-          <Link
-            href="/login"
-            className="w-full inline-flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 px-5 rounded-2xl text-sm transition-all active:scale-[0.99]"
-          >
-            <ArrowRight className="w-4 h-4" />
-            <span>تسجيل الدخول بحساب آخر</span>
+            <span>الرجوع إلى تطبيقي</span>
           </Link>
         </div>
       </div>

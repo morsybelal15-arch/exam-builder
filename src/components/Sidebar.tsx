@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Clock,
   Sparkles,
+  PlayCircle,
 } from "lucide-react";
 import { logoutAction } from "@/app/actions/auth";
 import {
@@ -55,6 +56,7 @@ const ICON_MAP: Record<string, any> = {
   FolderUp,
   Image: ImageIcon,
   CreditCard,
+  PlayCircle,
 };
 
 export default function Sidebar() {
@@ -175,7 +177,8 @@ export default function Sidebar() {
     pathname === "/uploaded-files" ||
     pathname === "/images-to-pdf" ||
     pathname === "/my-subscription" ||
-    pathname === "/subscription";
+    pathname === "/subscription" ||
+    pathname === "/how-to-use";
 
   if (!isValidTenantPage) {
     return null;

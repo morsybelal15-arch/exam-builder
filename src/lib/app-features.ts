@@ -40,7 +40,8 @@ export interface AppFeatureDefinition {
     | "FileText"
     | "FolderUp"
     | "Image"
-    | "CreditCard";
+    | "CreditCard"
+    | "PlayCircle";
   /** Default inclusion in subscription presets */
   defaultFor: SubscriptionCategory[];
 }
@@ -147,6 +148,15 @@ export const APP_FEATURES_REGISTRY: AppFeatureDefinition[] = [
     iconName: "CreditCard",
     defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
   },
+  {
+    id: "how-to-use",
+    name: "كيفية الاستخدام",
+    href: "/how-to-use",
+    section: "الإعدادات",
+    description: "فيديوهات شرح تفصيلية لاستخدام كل قسم وأداة في التطبيق خطوة بخطوة",
+    iconName: "PlayCircle",
+    defaultFor: ["سنتر", "معلم", "تجربة مجانية"],
+  },
 ];
 
 export const ALL_FEATURE_IDS: string[] = APP_FEATURES_REGISTRY.map((f) => f.id);
@@ -169,7 +179,13 @@ export function normalizeEnabledFeatures(features?: string[] | null): string[] {
   }
   const validSet = new Set(ALL_FEATURE_IDS);
   const filtered = features.filter((id) => validSet.has(id));
-  return filtered.length > 0 ? filtered : [...ALL_FEATURE_IDS];
+  if (filtered.length === 0) {
+    return [...ALL_FEATURE_IDS];
+  }
+  if (!filtered.includes("how-to-use")) {
+    filtered.push("how-to-use");
+  }
+  return filtered;
 }
 
 /**

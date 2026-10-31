@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import EditSubscriptionModal, { TenantData } from "./EditSubscriptionModal";
 import {
@@ -38,6 +39,7 @@ import {
   Layers,
   Building2,
   GraduationCap,
+  BarChart3,
 } from "lucide-react";
 import { HOSTINGER_VPS_CONFIG, generateNginxConfig } from "@/lib/vps-service";
 import {
@@ -278,7 +280,14 @@ export default function TenantListView({
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <Link
+              href="/admin/analytics"
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 text-xs font-extrabold transition-all whitespace-nowrap"
+            >
+              <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+              <span>التتبع المجمع لكل العملاء</span>
+            </Link>
             <button
               id="sync-all-vps-btn"
               onClick={handleSyncAll}
